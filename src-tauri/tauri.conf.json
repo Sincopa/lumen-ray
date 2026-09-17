@@ -1,8 +1,8 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
-  "productName": "misc-vpn",
+  "productName": "Lumen",
   "version": "0.1.0",
-  "identifier": "app.miscvpn.desktop",
+  "identifier": "app.lumen.desktop",
   "build": {
     "frontendDist": "../dist",
     "devUrl": "http://localhost:5173",
@@ -12,7 +12,7 @@
   "app": {
     "windows": [
       {
-        "title": "misc-vpn",
+        "title": "Lumen",
         "width": 390,
         "height": 845,
         "minWidth": 390,

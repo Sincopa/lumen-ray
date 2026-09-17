@@ -1,8 +1,8 @@
 {
-  "name": "misc-vpn",
+  "name": "lumen",
   "private": true,
   "version": "0.1.0",
-  "description": "Desktop VPN client interface built with Svelte 5 and Tauri 2",
+  "description": "Lumen — Modern, ultra-lightweight desktop VPN & proxy client built with Svelte 5 and Tauri 2",
   "license": "Apache-2.0",
   "type": "module",
   "scripts": {

@@ -23,7 +23,9 @@ function getInitialLanguage(): SupportedLanguage {
   if (typeof window !== 'undefined') {
     let saved: string | null = null;
     try {
-      saved = localStorage.getItem('misc_language');
+      saved =
+        localStorage.getItem('lumen_language') ??
+        localStorage.getItem('misc_language');
     } catch {
       /* Defaults remain available. */
     }
@@ -49,7 +51,7 @@ class I18nManager {
     this.currentLanguage = lang;
     if (typeof window !== 'undefined') {
       try {
-        localStorage.setItem('misc_language', lang);
+        localStorage.setItem('lumen_language', lang);
       } catch {
         /* Language remains usable for this session. */
       }

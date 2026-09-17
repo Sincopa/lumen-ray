@@ -124,6 +124,75 @@ form label {
   flex-direction: column;
   gap: 6px;
 }
+.panel-form {
+  gap: 18px;
+}
+.panel-form label,
+.panel-form .field-label {
+  font-size: 13px;
+  font-weight: 600;
+  color: #ffffffd9;
+}
+.panel-form
+  :is(
+    input:not([type='radio']):not([type='checkbox']):not([type='color']):not(
+        [type='range']
+      ),
+    select,
+    textarea
+  ) {
+  width: 100%;
+  min-height: 48px;
+  border: 1px solid #ffffff29;
+  border-radius: 16px;
+  background: #ffffff0b;
+  color: #fff;
+  font-size: 14px;
+}
+.panel-form :is(input, textarea)::placeholder {
+  color: #ffffff70;
+}
+.panel-form textarea {
+  resize: vertical;
+  min-height: 92px;
+}
+.panel-form select {
+  padding: 0 14px;
+}
+.panel-form .field-hint {
+  margin: 0;
+  color: #ffffff9c;
+  font-size: 12px;
+  line-height: 1.45;
+  font-weight: 400;
+}
+.panel-form .form-intro {
+  margin: -2px 0 0;
+  color: #ffffffad;
+  font-size: 13px;
+  line-height: 1.45;
+}
+.panel-form .form-error {
+  margin: 0;
+  padding: 10px 12px;
+  border: 1px solid #f3393960;
+  border-radius: 12px;
+  background: #f3393917;
+  font-size: 12px;
+}
+.panel-form .form-submit {
+  width: 100%;
+  min-height: 48px;
+  border: 0;
+  border-radius: 16px;
+  background: #f3ff00;
+  color: #101010;
+  font-size: 14px;
+  font-weight: 700;
+}
+.panel-form .form-submit:hover {
+  background: #f7ff5c;
+}
 [role='alert'],
 .danger {
   color: #ffbcbc;

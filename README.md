@@ -1,6 +1,6 @@
-# MISC VPN
+# Lumen
 
-Desktop VPN interface built with Svelte 5, TypeScript, Vite and Tauri 2.
+Modern, ultra-lightweight desktop VPN & proxy interface built with Svelte 5, TypeScript, Vite and Tauri 2.
 
 **This version is a demo. It does not protect or route traffic.** Browser and native
 Tauri modes simulate connections. Xray, system proxy, TUN, Kill Switch and

@@ -1,6 +1,6 @@
 {
   "common": {
-    "appName": "misc",
+    "appName": "Lumen",
     "minimize": "Minimize",
     "maximize": "Maximize",
     "close": "Close",
@@ -46,6 +46,9 @@
   "subscriptions": {
     "title": "My Subscriptions",
     "addSubscription": "Add Subscription",
+    "addHint": "Give this subscription a clear name, then paste its link or key.",
+    "namePlaceholder": "For example, Personal subscription",
+    "sourcePlaceholder": "https://example.com/subscription or vless://…",
     "daysLabel": "Days",
     "trafficLabel": "Traffic",
     "updatedRecently": "Updated recently",
@@ -93,7 +96,7 @@
     "shaderPreset": "Color Preset",
     "shaderPresetDesc": "Preconfigured shader color schemes",
     "shaderPresetCustom": "Custom",
-    "presetMisc": "MISC (Violet light)",
+    "presetLumen": "Lumen (Violet light)",
     "presetCyberpunk": "Cyberpunk (Neon & Cyan)",
     "presetAurora": "Northern Lights (Emerald)",
     "presetSunset": "Sunset (Flame)",
@@ -129,6 +132,11 @@
   },
   "rules": {
     "title": "Rules",
+    "searchPlaceholder": "Search rules...",
+    "addRule": "Add rule",
+    "addHint": "Choose what the rule applies to, then enter an address or app name and select a server.",
+    "domainHint": "Domain only, without https:// or a path. For example, example.com",
+    "applicationHint": "Application file name ending in .exe. For example, Discord.exe",
     "selectAll": "Select all",
     "selectMode": "Selection mode",
     "select": "Select {name}",

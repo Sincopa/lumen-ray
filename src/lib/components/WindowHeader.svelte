@@ -23,7 +23,7 @@
   }
 
   let {
-    title = 'misc',
+    title = 'Lumen',
     showControls = true,
     darkSurface = false,
     onOpenSettings,

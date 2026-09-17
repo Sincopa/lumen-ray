@@ -1,11 +1,11 @@
 @echo off
 setlocal EnableExtensions
 chcp 65001 >nul
-title MISC VPN - Release Build
+title Lumen - Release Build
 cd /d "%~dp0"
 
 echo ============================================================
-echo    MISC VPN - Release Build (Standalone EXE)
+echo    Lumen - Release Build (Standalone EXE)
 echo ============================================================
 echo.
 
@@ -30,6 +30,7 @@ if not exist "node_modules\" (
 )
 
 taskkill /F /IM app.exe >nul 2>&1
+taskkill /F /IM lumen.exe >nul 2>&1
 taskkill /F /IM misc-vpn.exe >nul 2>&1
 
 echo [1/2] Building release application...
@@ -39,9 +40,9 @@ if errorlevel 1 goto :error
 echo.
 echo [2/2] Copying executable to release folder...
 if not exist "release\" mkdir "release"
-copy /Y "src-tauri\target\release\app.exe" "release\misc-vpn.exe" >nul
+copy /Y "src-tauri\target\release\app.exe" "release\lumen.exe" >nul
 if errorlevel 1 (
-    echo [ERROR] Failed to copy binary to release\misc-vpn.exe
+    echo [ERROR] Failed to copy binary to release\lumen.exe
     goto :error
 )
 
@@ -51,7 +52,7 @@ echo    [SUCCESS] Release version built successfully!
 echo ============================================================
 echo.
 echo Output file:
-echo    %~dp0release\misc-vpn.exe
+echo    %~dp0release\lumen.exe
 echo.
 
 start "" explorer.exe "%~dp0release"

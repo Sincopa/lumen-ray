@@ -70,7 +70,9 @@ test('subscription import, rename, refresh and delete work', async ({
   await dialog
     .getByLabel('HTTPS-ссылка, ключ или Base64')
     .fill('https://example.com/secret-test-token');
-  await dialog.getByRole('button', { name: 'Добавить', exact: true }).click();
+  await dialog
+    .getByRole('button', { name: 'Добавить подписку', exact: true })
+    .click();
   await expect(dialog).toHaveCount(0);
   await page.getByRole('button', { name: 'Подписки', exact: true }).click();
   await page.locator('.title-group').filter({ hasText: 'Тест' }).click();
@@ -97,6 +99,64 @@ test('subscription import, rename, refresh and delete work', async ({
   );
 });
 
+test('add panels and searches stay usable in the compact window', async ({
+  page,
+}) => {
+  await page.goto('/');
+  await page.getByRole('button', { name: 'Добавить', exact: true }).click();
+  await expect(page.getByRole('dialog')).toBeVisible();
+  await page.screenshot({
+    path: 'artifacts/verification/subscription-add-panel.png',
+  });
+  await page
+    .getByRole('dialog')
+    .getByRole('button', { name: 'Закрыть' })
+    .click();
+
+  await page.getByRole('button', { name: 'Сервера', exact: true }).click();
+  await page
+    .getByRole('region', { name: 'Сервера' })
+    .getByRole('button', { name: 'Поиск' })
+    .click();
+  await page.getByRole('searchbox', { name: 'Поиск' }).fill('Нидерланды');
+  await expect(page.locator('.server-row')).toHaveCount(1);
+  await page.screenshot({ path: 'artifacts/verification/server-search.png' });
+  await page
+    .locator('.search-field')
+    .getByRole('button', { name: 'Закрыть' })
+    .click();
+
+  await page.getByRole('button', { name: 'Главная', exact: true }).click();
+  await page
+    .getByRole('button', { name: 'Режим по правилам (маршрутизация)' })
+    .click();
+  await page
+    .getByRole('region', { name: 'Правила' })
+    .getByRole('button', { name: 'Добавить' })
+    .click();
+  const dialog = page.getByRole('dialog');
+  await expect(dialog.getByRole('button', { name: 'Домен' })).toHaveAttribute(
+    'aria-pressed',
+    'true',
+  );
+  await dialog.getByRole('button', { name: 'Приложение (.exe)' }).click();
+  await expect(dialog.getByLabel('Название', { exact: true })).toHaveAttribute(
+    'placeholder',
+    'Discord.exe',
+  );
+  await page.screenshot({ path: 'artifacts/verification/rule-add-panel.png' });
+  const serverDropdown = dialog.getByRole('combobox', { name: 'Сервера' });
+  await serverDropdown.click();
+  await expect(page.getByRole('listbox', { name: 'Сервера' })).toBeVisible();
+  await page.screenshot({ path: 'artifacts/verification/server-dropdown.png' });
+  await page.getByRole('option', { name: /Германия/ }).click();
+  await expect(serverDropdown).toContainText('Германия');
+  await serverDropdown.press('ArrowUp');
+  await expect(page.getByRole('option', { name: /Нидерланды/ })).toBeFocused();
+  await page.keyboard.press('Escape');
+  await expect(page.getByRole('listbox', { name: 'Сервера' })).toBeHidden();
+});
+
 test('rules persist, validate input and do not trap navigation', async ({
   page,
 }) => {
@@ -113,10 +173,14 @@ test('rules persist, validate input and do not trap navigation', async ({
     .click();
   const dialog = page.getByRole('dialog');
   await dialog.getByLabel('Название', { exact: true }).fill('bad/path');
-  await dialog.getByRole('button', { name: 'Сохранить', exact: true }).click();
+  await dialog
+    .getByRole('button', { name: 'Добавить правило', exact: true })
+    .click();
   await expect(dialog.getByRole('alert')).toBeVisible();
   await dialog.getByLabel('Название', { exact: true }).fill('example.com');
-  await dialog.getByRole('button', { name: 'Сохранить', exact: true }).click();
+  await dialog
+    .getByRole('button', { name: 'Добавить правило', exact: true })
+    .click();
   await page
     .getByRole('switch', { name: 'Включить правило example.com' })
     .click();
@@ -152,6 +216,16 @@ test('settings are honest and language and animation persist', async ({
   await page.goto('/');
   await page.getByRole('button', { name: 'Настройки', exact: true }).click();
   await expect(
+    page.getByRole('combobox', { name: 'Режим маршрутизации' }),
+  ).toBeDisabled();
+  const presetDropdown = page.getByRole('combobox', {
+    name: 'Цветовой пресет',
+  });
+  await presetDropdown.click();
+  await page.screenshot({ path: 'artifacts/verification/preset-dropdown.png' });
+  await page.getByRole('option', { name: /Cyberpunk/ }).click();
+  await expect(presetDropdown).toContainText('Cyberpunk');
+  await expect(
     page.getByRole('checkbox', { name: 'Kill Switch', exact: true }),
   ).toBeDisabled();
   await expect(
@@ -163,7 +237,8 @@ test('settings are honest and language and animation persist', async ({
   await expect(page.locator('canvas')).toHaveClass(/disabled/);
   await page
     .getByRole('combobox', { name: 'Язык интерфейса', exact: true })
-    .selectOption('en');
+    .click();
+  await page.getByRole('option', { name: 'English' }).click();
   await page.reload();
   await expect(
     page.getByText('Demo mode · traffic is not protected'),
@@ -212,7 +287,9 @@ test('updated shader links and restored cards keep their controls', async ({
     .click();
   const dialog = page.getByRole('dialog');
   await dialog.getByLabel('Название', { exact: true }).fill('example.com');
-  await dialog.getByRole('button', { name: 'Сохранить', exact: true }).click();
+  await dialog
+    .getByRole('button', { name: 'Добавить правило', exact: true })
+    .click();
   await page
     .getByRole('button', { name: 'example.com: Сервера', exact: true })
     .click();
@@ -309,7 +386,7 @@ test('verifies all 7 bug fixes and visual refinements', async ({ page }) => {
     .click();
   await page.waitForTimeout(300);
 
-  // Bug 1 & 2: Context menu transparency 20%, blur, and Google Material Symbols icons
+  // Context menu keeps its labels readable over the cards and uses local icons.
   await page.getByRole('button', { name: 'Подписки', exact: true }).click();
   await page.locator('.title-group').first().click();
   await page.getByRole('button', { name: 'Меню', exact: true }).first().click();
@@ -318,9 +395,9 @@ test('verifies all 7 bug fixes and visual refinements', async ({ page }) => {
   const menuBg = await page
     .locator('.popup-menu')
     .evaluate((el) => window.getComputedStyle(el).backgroundColor);
-  expect(menuBg).toContain('0.2');
+  expect(menuBg).toBe('rgb(24, 24, 26)');
   const iconCount = await page
-    .locator('.popup-menu .menu-item-icon-circle span.material-symbols-rounded')
+    .locator('.popup-menu .menu-item-icon-circle img')
     .count();
   expect(iconCount).toBe(4);
   await page.screenshot({

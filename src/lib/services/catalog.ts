@@ -38,7 +38,7 @@ export interface StoragePort {
   setItem(key: string, value: string): void;
 }
 
-const key = 'misc_catalog_v1';
+const key = 'lumen_catalog_v1';
 export function initialCatalog(): Catalog {
   return {
     version: 1,
@@ -163,7 +163,8 @@ export class CatalogService {
   constructor(private storage?: StoragePort) {
     this.current = initialCatalog();
     try {
-      const saved = storage?.getItem(key);
+      const saved =
+        this.storage?.getItem(key) ?? this.storage?.getItem('misc_catalog_v1');
       if (saved) {
         const parsed: unknown = JSON.parse(saved);
         if (validCatalog(parsed)) this.current = parsed;

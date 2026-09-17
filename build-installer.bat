@@ -1,11 +1,11 @@
 @echo off
 setlocal EnableExtensions
 chcp 65001 >nul
-title MISC VPN - Installer Build
+title Lumen - Installer Build
 cd /d "%~dp0"
 
 echo ============================================================
-echo    MISC VPN - Installer Build (.exe setup + .msi)
+echo    Lumen - Installer Build (.exe setup + .msi)
 echo ============================================================
 echo.
 
@@ -30,6 +30,7 @@ if not exist "node_modules\" (
 )
 
 taskkill /F /IM app.exe >nul 2>&1
+taskkill /F /IM lumen.exe >nul 2>&1
 taskkill /F /IM misc-vpn.exe >nul 2>&1
 
 echo [1/2] Building installer packages (NSIS setup + MSI)...

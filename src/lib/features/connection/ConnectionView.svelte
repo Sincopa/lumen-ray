@@ -59,7 +59,7 @@
 
 <div class="connection-view">
   <div class="center-container">
-    <!-- Central MISC Logo Button -->
+    <!-- Central Lumen Logo Button -->
     <button
       class="central-logo-btn"
       class:connected={isConnected}
@@ -74,7 +74,7 @@
         ? t('home.clickToDisconnect')
         : t('home.clickToConnect')}
     >
-      <img src={logoIcon} alt="MISC" class="giant-logo-img" />
+      <img src={logoIcon} alt="Lumen" class="giant-logo-img" />
     </button>
 
     <p

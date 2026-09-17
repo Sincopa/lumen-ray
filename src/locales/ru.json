@@ -1,6 +1,6 @@
 {
   "common": {
-    "appName": "misc",
+    "appName": "Lumen",
     "minimize": "Свернуть",
     "maximize": "Развернуть",
     "close": "Закрыть",
@@ -46,6 +46,9 @@
   "subscriptions": {
     "title": "Мои подписки",
     "addSubscription": "Добавить подписку",
+    "addHint": "Дайте подписке понятное имя и вставьте ссылку или ключ.",
+    "namePlaceholder": "Например, Личная подписка",
+    "sourcePlaceholder": "https://example.com/subscription или vless://…",
     "daysLabel": "Дней",
     "trafficLabel": "Трафик",
     "updatedRecently": "Обновлено недавно",
@@ -93,7 +96,7 @@
     "shaderPreset": "Цветовой пресет",
     "shaderPresetDesc": "Готовые темы оформления шейдера",
     "shaderPresetCustom": "Пользовательский",
-    "presetMisc": "MISC (Фиолетовый свет)",
+    "presetLumen": "Lumen (Фиолетовый свет)",
     "presetCyberpunk": "Cyberpunk (Неон & Бирюза)",
     "presetAurora": "Северное сияние (Изумруд)",
     "presetSunset": "Закат (Пламя)",
@@ -129,6 +132,11 @@
   },
   "rules": {
     "title": "Правила",
+    "searchPlaceholder": "Поиск по правилам...",
+    "addRule": "Добавить правило",
+    "addHint": "Выберите, для чего действует правило, затем укажите адрес или имя приложения и сервер.",
+    "domainHint": "Только домен, без https:// и пути. Например, example.com",
+    "applicationHint": "Имя файла приложения с .exe. Например, Discord.exe",
     "selectAll": "Выбрать все",
     "selectMode": "Режим выбора",
     "select": "Выбрать {name}",

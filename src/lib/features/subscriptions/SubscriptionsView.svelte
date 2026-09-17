@@ -2,7 +2,6 @@
   import { catalog, connection } from '../../services';
   import { errorCode } from '../../services/errors';
   import Dialog from '../../components/Dialog.svelte';
-  import MaterialIcon from '../../components/MaterialIcon.svelte';
 
   import { t } from '../../i18n';
   import type { Subscription } from '../../services/catalog';
@@ -53,6 +52,9 @@
   import { slide } from 'svelte/transition';
   import reloadIcon from '../../../assets/reload.svg';
   import menuIcon from '../../../assets/menu.svg';
+  import pencilIcon from '../../../assets/pencil.svg';
+  import trashIcon from '../../../assets/trash.svg';
+  import shareIcon from '../../../assets/share.svg';
   import chevronIcon from '../../../assets/chevron.svg';
   function exportSub(sub: Subscription) {
     exported = JSON.stringify(
@@ -154,7 +156,7 @@
               }}
             >
               <span class="menu-item-icon-circle">
-                <MaterialIcon name="edit" size={15} />
+                <img src={pencilIcon} alt="" />
               </span>
               <span>{t('common.edit')}</span>
             </button>
@@ -167,13 +169,13 @@
               }}
             >
               <span class="menu-item-icon-circle">
-                <MaterialIcon name="refresh" size={16} />
+                <img src={reloadIcon} alt="" />
               </span>
               <span>{t('common.reload')}</span>
             </button>
             <button class="menu-item" onclick={() => exportSub(sub)}>
               <span class="menu-item-icon-circle">
-                <MaterialIcon name="ios_share" size={15} />
+                <img src={shareIcon} alt="" />
               </span>
               <span>{t('common.export')}</span>
             </button>
@@ -187,7 +189,7 @@
               }}
             >
               <span class="menu-item-icon-circle">
-                <MaterialIcon name="delete" size={15} />
+                <img src={trashIcon} alt="" />
               </span>
               <span>{t('common.delete')}</span>
             </button>
@@ -381,7 +383,7 @@
     top: 52px;
     right: 12px;
     width: 197px;
-    background: rgba(18, 18, 24, 0.2);
+    background: #18181a;
     border: 1px solid rgba(255, 255, 255, 0.12);
     border-radius: 24px;
     padding: 10px;
@@ -428,6 +430,11 @@
     justify-content: center;
     flex-shrink: 0;
     color: #ffffff;
+  }
+  .menu-item-icon-circle img {
+    width: 15px;
+    height: 15px;
+    filter: brightness(0) invert(1);
   }
   @keyframes surface-in {
     from {

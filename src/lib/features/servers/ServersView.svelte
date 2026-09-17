@@ -1,6 +1,6 @@
 <script lang="ts">
   import CountryFlag from '../../components/CountryFlag.svelte';
-  import MaterialIcon from '../../components/MaterialIcon.svelte';
+  import SearchField from '../../components/SearchField.svelte';
   import NumberFlow from '@number-flow/svelte';
   import { catalog } from '../../services';
   import { errorCode } from '../../services/errors';
@@ -9,6 +9,9 @@
   import reloadIcon from '../../../assets/reload.svg';
   import searchIcon from '../../../assets/search.svg';
   import menuIcon from '../../../assets/menu.svg';
+  import pencilIcon from '../../../assets/pencil.svg';
+  import trashIcon from '../../../assets/trash.svg';
+  import shareIcon from '../../../assets/share.svg';
 
   const catalogStore = catalog.state;
   let {
@@ -128,7 +131,7 @@
           }}
         >
           <span class="menu-item-icon-circle">
-            <MaterialIcon name="edit" size={15} />
+            <img src={pencilIcon} alt="" />
           </span>
           <span>{t('common.edit')}</span>
         </button>
@@ -139,19 +142,19 @@
           }}
         >
           <span class="menu-item-icon-circle">
-            <MaterialIcon name="refresh" size={16} />
+            <img src={reloadIcon} alt="" />
           </span>
           <span>{t('common.reload')}</span>
         </button>
         <button disabled>
           <span class="menu-item-icon-circle">
-            <MaterialIcon name="share" size={15} />
+            <img src={shareIcon} alt="" />
           </span>
           <span>{t('common.share')}</span>
         </button>
         <button class="danger" disabled>
           <span class="menu-item-icon-circle">
-            <MaterialIcon name="delete" size={15} />
+            <img src={trashIcon} alt="" />
           </span>
           <span>{t('common.delete')}</span>
         </button>
@@ -159,13 +162,11 @@
     {/if}
   </div>
 
-  {#if searching}<label class="search-box"
-      ><span class="sr-only">{t('common.search')}</span><input
-        type="search"
-        bind:value={query}
-        placeholder={t('servers.searchPlaceholder')}
-      /></label
-    >{/if}
+  {#if searching}<SearchField
+      bind:value={query}
+      placeholder={t('servers.searchPlaceholder')}
+      onClose={() => (searching = false)}
+    />{/if}
   {#if disabled}<p class="hint">{t('servers.disconnectFirst')}</p>{/if}
   {#if busy}<p role="status">{t('common.loading')}</p>{:else if checked}<p
       role="status"
@@ -280,7 +281,7 @@
     padding: 10px;
     border: 1px solid rgba(255, 255, 255, 0.12);
     border-radius: 24px;
-    background: rgba(18, 18, 24, 0.2);
+    background: #18181a;
     box-shadow: 0 16px 48px rgba(0, 0, 0, 0.5);
     backdrop-filter: blur(28px);
     -webkit-backdrop-filter: blur(28px);
@@ -310,7 +311,7 @@
     background: rgba(243, 57, 57, 0.2);
     color: #ff8080;
   }
-  .popup-menu button span {
+  .popup-menu button .menu-item-icon-circle {
     width: 24px;
     height: 24px;
     border-radius: 50%;
@@ -321,8 +322,10 @@
     flex-shrink: 0;
     color: #ffffff;
   }
-  .search-box {
-    flex-shrink: 0;
+  .menu-item-icon-circle img {
+    width: 15px;
+    height: 15px;
+    filter: brightness(0) invert(1);
   }
   .servers-list {
     overflow: auto;

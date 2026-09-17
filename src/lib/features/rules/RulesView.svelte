@@ -5,6 +5,8 @@
   import Dialog from '../../components/Dialog.svelte';
   import CountryFlag from '../../components/CountryFlag.svelte';
   import MaterialIcon from '../../components/MaterialIcon.svelte';
+  import SearchField from '../../components/SearchField.svelte';
+  import Dropdown from '../../components/Dropdown.svelte';
   import type { Rule } from '../../services/catalog';
   import discordIcon from '../../../assets/discord.png';
   import yandexIcon from '../../../assets/yandex.png';
@@ -36,6 +38,7 @@
   import addIcon from '../../../assets/add.svg';
   import pencilIcon from '../../../assets/pencil.svg';
   import trashIcon from '../../../assets/trash.svg';
+  import shareIcon from '../../../assets/share.svg';
   import checkIcon from '../../../assets/check.svg';
   import chevronIcon from '../../../assets/chevron.svg';
   async function refresh() {
@@ -73,12 +76,19 @@
       r.name.toLowerCase().includes(query.toLowerCase()),
     ),
   );
+  let serverOptions = $derived(
+    $catalogStore.servers.map((server) => ({
+      value: server.id,
+      label: `${t('servers.countries.' + server.countryCode)} · ${$catalogStore.subscriptions.find((subscription) => subscription.id === server.subscriptionId)?.name ?? ''}`,
+    })),
+  );
   $effect(() => {
     onChromeChange?.(
       selectingRule ? 'picker' : selectMode ? 'selection' : 'default',
     );
   });
   function add() {
+    error = '';
     editing = {
       id: crypto.randomUUID(),
       name: '',
@@ -86,6 +96,12 @@
       serverId: $catalogStore.selectedServerId ?? '',
       enabled: true,
     };
+  }
+  function setRuleType(isDomain: boolean) {
+    if (editing && editing.isDomain !== isDomain) {
+      editing = { ...editing, isDomain, name: '' };
+      error = '';
+    }
   }
   function save(e: SubmitEvent) {
     e.preventDefault();
@@ -224,7 +240,7 @@
               }}
             >
               <span class="menu-item-icon-circle">
-                <MaterialIcon name="edit" size={15} />
+                <img src={pencilIcon} alt="" />
               </span>
               <span>{t('common.edit')}</span>
             </button>
@@ -236,7 +252,7 @@
               }}
             >
               <span class="menu-item-icon-circle">
-                <MaterialIcon name="refresh" size={16} />
+                <img src={reloadIcon} alt="" />
               </span>
               <span>{t('common.reload')}</span>
             </button>
@@ -253,7 +269,7 @@
               }}
             >
               <span class="menu-item-icon-circle">
-                <MaterialIcon name="ios_share" size={15} />
+                <img src={shareIcon} alt="" />
               </span>
               <span>{t('common.export')}</span>
             </button>
@@ -265,7 +281,7 @@
               }}
             >
               <span class="menu-item-icon-circle">
-                <MaterialIcon name="delete" size={15} />
+                <img src={trashIcon} alt="" />
               </span>
               <span>{t('common.delete')}</span>
             </button>
@@ -273,13 +289,11 @@
         {/if}
       </div>
     {/if}
-    {#if searching}<label
-        ><span class="sr-only">{t('common.search')}</span><input
-          type="search"
-          bind:value={query}
-          placeholder={t('common.search')}
-        /></label
-      >{/if}
+    {#if searching}<SearchField
+        bind:value={query}
+        placeholder={t('rules.searchPlaceholder')}
+        onClose={() => (searching = false)}
+      />{/if}
     {#if error}<p role="alert">{error}</p>{/if}
     <div class="rules-list">
       {#each filtered as rule (rule.id)}
@@ -308,7 +322,10 @@
             </div>
             <button
               class="rule-text"
-              onclick={() => (editing = { ...rule })}
+              onclick={() => {
+                error = '';
+                editing = { ...rule };
+              }}
               aria-label={t('rules.edit', { name: rule.name })}
               ><span class="rule-name">{rule.name}</span><span
                 class="rule-details">{country}</span
@@ -385,34 +402,54 @@
 </section>
 {#if editing}
   <Dialog title={t('rules.editTitle')} onClose={() => (editing = null)}>
-    <form onsubmit={save}>
-      <label
-        >{t('rules.kind')}<select bind:value={editing.isDomain}
-          ><option value={true}>{t('rules.domain')}</option><option
-            value={false}>{t('rules.application')}</option
-          ></select
-        ></label
-      >
+    <form class="panel-form rule-form" onsubmit={save}>
+      <p class="form-intro">{t('rules.addHint')}</p>
+      <div class="type-field">
+        <span class="field-label">{t('rules.kind')}</span>
+        <div class="type-options" role="group" aria-label={t('rules.kind')}>
+          <button
+            type="button"
+            class:chosen={editing.isDomain}
+            aria-pressed={editing.isDomain}
+            onclick={() => setRuleType(true)}>{t('rules.domain')}</button
+          >
+          <button
+            type="button"
+            class:chosen={!editing.isDomain}
+            aria-pressed={!editing.isDomain}
+            onclick={() => setRuleType(false)}>{t('rules.application')}</button
+          >
+        </div>
+      </div>
       <label
         >{t('common.name')}<input
           bind:value={editing.name}
+          aria-label={t('common.name')}
           placeholder={editing.isDomain ? 'example.com' : 'Discord.exe'}
           maxlength="253"
+          autocomplete="off"
+          spellcheck="false"
           required
-        /></label
-      >
-      <label
-        >{t('servers.title')}<select bind:value={editing.serverId} required
-          >{#each $catalogStore.servers as server (server.id)}<option
-              value={server.id}
-              >{t('servers.countries.' + server.countryCode)} · {$catalogStore.subscriptions.find(
-                (s) => s.id === server.subscriptionId,
-              )?.name}</option
-            >{/each}</select
+        /><span class="field-hint"
+          >{editing.isDomain
+            ? t('rules.domainHint')
+            : t('rules.applicationHint')}</span
         ></label
       >
-      {#if error}<p role="alert">{error}</p>{/if}
-      <button type="submit">{t('common.save')}</button>
+      <div class="server-field">
+        <span class="field-label">{t('servers.title')}</span>
+        <Dropdown
+          label={t('servers.title')}
+          options={serverOptions}
+          bind:value={editing.serverId}
+        />
+      </div>
+      {#if error}<p class="form-error" role="alert">{error}</p>{/if}
+      <button class="form-submit" type="submit"
+        >{$catalogStore.rules.some((rule) => rule.id === editing?.id)
+          ? t('common.save')
+          : t('rules.addRule')}</button
+      >
     </form>
   </Dialog>
 {/if}
@@ -435,6 +472,39 @@
   >{/if}
 
 <style>
+  .server-field {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+  .type-field {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .type-options {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 4px;
+    padding: 4px;
+    border: 1px solid #ffffff1f;
+    border-radius: 16px;
+    background: #ffffff0a;
+  }
+  .type-options button {
+    min-height: 42px;
+    padding: 6px 8px;
+    border: 0;
+    border-radius: 12px;
+    background: transparent;
+    color: #ffffffa8;
+    font-size: 12px;
+  }
+  .type-options button.chosen {
+    background: #ffffff20;
+    color: #fff;
+    box-shadow: 0 1px 5px #0004;
+  }
   .rules-view {
     display: flex;
     flex-direction: column;
@@ -588,7 +658,7 @@
     top: 68px;
     right: 8px;
     width: 197px;
-    background: rgba(18, 18, 24, 0.2);
+    background: #18181a;
     border: 1px solid rgba(255, 255, 255, 0.12);
     border-radius: 24px;
     padding: 10px;
@@ -633,6 +703,11 @@
     justify-content: center;
     flex-shrink: 0;
     color: #ffffff;
+  }
+  .menu-item-icon-circle img {
+    width: 15px;
+    height: 15px;
+    filter: brightness(0) invert(1);
   }
   .rules-list {
     display: flex;

@@ -35,7 +35,7 @@
 
 <nav class="bottom-nav">
   <div class="nav-pill">
-    <!-- Slot 1: Home (MISC Logo) -->
+    <!-- Slot 1: Home (Lumen Logo) -->
     <button
       class="pill-btn"
       aria-current={currentTab === 'home' ? 'page' : undefined}
@@ -47,7 +47,7 @@
       <span class="btn-surface" class:active-surface={currentTab === 'home'}>
         <img
           src={logoIcon}
-          alt="MISC"
+          alt="Lumen"
           class="tab-icon logo-icon"
           class:active-icon={currentTab === 'home'}
         />

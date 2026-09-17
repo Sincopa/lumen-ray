@@ -87,7 +87,7 @@
   <div class="app-ui" class:dim-backdrop={currentTab !== 'home'}>
     <!-- Top Desktop Window Bar -->
     <WindowHeader
-      title="misc"
+      title="lumen"
       darkSurface={currentTab !== 'home'}
       onOpenSettings={() => {
         currentTab = currentTab === 'settings' ? 'home' : 'settings';

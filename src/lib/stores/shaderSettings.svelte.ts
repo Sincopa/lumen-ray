@@ -8,8 +8,8 @@ export interface ShaderPreset {
 
 export const SHADER_PRESETS: ShaderPreset[] = [
   {
-    id: 'misc',
-    nameKey: 'settings.presetMisc',
+    id: 'lumen',
+    nameKey: 'settings.presetLumen',
     idleColor: '#363048',
     colorA: '#6841ee',
     colorB: '#8d68fa',
@@ -44,7 +44,7 @@ export const SHADER_PRESETS: ShaderPreset[] = [
   },
 ];
 
-const STORAGE_KEY = 'misc_shader_settings';
+const STORAGE_KEY = 'lumen_shader_settings';
 
 class ShaderSettingsManager {
   enabled = $state(true);
@@ -52,12 +52,14 @@ class ShaderSettingsManager {
   colorA = $state<string>('#6841ee');
   colorB = $state<string>('#8d68fa');
   exposure = $state<number>(1.6);
-  selectedPreset = $state<string>('misc');
+  selectedPreset = $state<string>('lumen');
 
   constructor() {
     if (typeof window !== 'undefined') {
       try {
-        const saved = localStorage.getItem(STORAGE_KEY);
+        const saved =
+          localStorage.getItem(STORAGE_KEY) ??
+          localStorage.getItem('misc_shader_settings');
         if (saved) {
           const parsed = JSON.parse(saved);
           if (typeof parsed.enabled === 'boolean')
@@ -161,7 +163,7 @@ class ShaderSettingsManager {
 
   reset() {
     this.enabled = true;
-    this.applyPreset('misc');
+    this.applyPreset('lumen');
     this.exposure = 1.6;
     this.persist();
   }

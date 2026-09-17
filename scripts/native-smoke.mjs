@@ -12,7 +12,7 @@ const reservation = createServer();
 await new Promise(resolve => reservation.listen(0, '127.0.0.1', resolve));
 const port = reservation.address().port;
 await new Promise(resolve => reservation.close(resolve));
-const profile = await mkdtemp(join(tmpdir(), 'misc-vpn-smoke-'));
+const profile = await mkdtemp(join(tmpdir(), 'lumen-smoke-'));
 const output = resolve('artifacts/verification');
 await mkdir(output, { recursive: true });
 const child = spawn(executable, [], {

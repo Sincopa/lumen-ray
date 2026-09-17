@@ -2,6 +2,7 @@
   import settingsIcon from '../../../assets/settings.svg';
   import reloadIcon from '../../../assets/reload.svg';
   import CountryFlag from '../../components/CountryFlag.svelte';
+  import Dropdown from '../../components/Dropdown.svelte';
   import {
     i18n,
     t,
@@ -13,19 +14,25 @@
     SHADER_PRESETS,
   } from '../../stores/shaderSettings.svelte';
 
-  let routingMode = $state('proxy');
   let killSwitch = $state(false);
   let autoConnect = $state(false);
-
-  function onLanguageChange(e: Event) {
-    const select = e.target as HTMLSelectElement;
-    i18n.setLanguage(select.value as SupportedLanguage);
-  }
-
-  function onPresetChange(e: Event) {
-    const select = e.target as HTMLSelectElement;
-    shaderSettings.applyPreset(select.value);
-  }
+  const languageOptions = SUPPORTED_LANGUAGES.map((lang) => ({
+    value: lang.code,
+    label: lang.name,
+  }));
+  let routingOptions = $derived([
+    { value: 'proxy', label: t('settings.modeProxy') },
+    { value: 'tun', label: t('settings.modeTun') },
+  ]);
+  let presetOptions = $derived([
+    ...SHADER_PRESETS.map((preset) => ({
+      value: preset.id,
+      label: t(preset.nameKey),
+    })),
+    ...(shaderSettings.selectedPreset === 'custom'
+      ? [{ value: 'custom', label: t('settings.shaderPresetCustom') }]
+      : []),
+  ]);
 </script>
 
 <div class="settings-view">
@@ -48,16 +55,13 @@
           countryCode={i18n.currentLanguage === 'ru' ? 'ru' : 'us'}
           size={20}
         />
-        <select
-          aria-label={t('settings.language')}
+        <Dropdown
+          label={t('settings.language')}
+          options={languageOptions}
           value={i18n.currentLanguage}
-          onchange={onLanguageChange}
-          class="select-field"
-        >
-          {#each SUPPORTED_LANGUAGES as lang (lang.code)}
-            <option value={lang.code}>{lang.name}</option>
-          {/each}
-        </select>
+          onChange={(value) => i18n.setLanguage(value as SupportedLanguage)}
+          compact
+        />
       </div>
     </div>
 
@@ -67,15 +71,13 @@
         <span class="label">{t('settings.routingMode')}</span>
         <span class="desc">{t('settings.routingDesc')}</span>
       </div>
-      <select
+      <Dropdown
+        label={t('settings.routingMode')}
+        options={routingOptions}
+        value="proxy"
         disabled
-        aria-label={t('settings.routingMode')}
-        bind:value={routingMode}
-        class="select-field select-styled"
-      >
-        <option value="proxy">{t('settings.modeProxy')}</option>
-        <option value="tun">{t('settings.modeTun')}</option>
-      </select>
+        compact
+      />
     </div>
 
     <!-- Kill Switch -->
@@ -141,19 +143,13 @@
         <span class="label">{t('settings.shaderPreset')}</span>
         <span class="desc">{t('settings.shaderPresetDesc')}</span>
       </div>
-      <select
-        aria-label={t('settings.shaderPreset')}
+      <Dropdown
+        label={t('settings.shaderPreset')}
+        options={presetOptions}
         value={shaderSettings.selectedPreset}
-        onchange={onPresetChange}
-        class="select-field select-styled"
-      >
-        {#each SHADER_PRESETS as preset (preset.id)}
-          <option value={preset.id}>{t(preset.nameKey)}</option>
-        {/each}
-        {#if shaderSettings.selectedPreset === 'custom'}
-          <option value="custom">{t('settings.shaderPresetCustom')}</option>
-        {/if}
-      </select>
+        onChange={(value) => shaderSettings.applyPreset(value)}
+        compact
+      />
     </div>
 
     <!-- Idle Color (Dark) -->
@@ -355,21 +351,6 @@
     padding: 4px 8px;
   }
 
-  .select-field {
-    background: transparent;
-    border: none;
-    color: #ffffff;
-    font-family: var(--font-family-base);
-    font-size: 13px;
-    outline: none;
-    cursor: pointer;
-  }
-
-  .select-field option {
-    background: #18181f;
-    color: #ffffff;
-  }
-
   .badge {
     font-family: var(--font-family-base);
     font-size: 13px;
@@ -447,14 +428,6 @@
     font-family: var(--font-family-base);
     font-size: 13px;
     color: #c7bcd0;
-  }
-
-  .select-styled {
-    background: rgba(255, 255, 255, 0.06);
-    border: 1px solid rgba(255, 255, 255, 0.12);
-    border-radius: 12px;
-    padding: 6px 12px;
-    color: #ffffff;
   }
 
   .color-picker-control {

@@ -38,7 +38,7 @@ describe('catalog', () => {
       'Test',
     );
     expect(JSON.stringify(get(service.state))).not.toContain('private-token');
-    expect(disk.getItem('misc_catalog_v1')).not.toContain('private-token');
+    expect(disk.getItem('lumen_catalog_v1')).not.toContain('private-token');
     expect(get(service.state).subscriptions).toHaveLength(2);
   });
   it('removing subscription cleans dangling servers, selection and rules', () => {

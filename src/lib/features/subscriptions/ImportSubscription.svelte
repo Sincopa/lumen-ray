@@ -26,14 +26,15 @@
 </script>
 
 <Dialog title={t('subscriptions.addSubscription')} {onClose}>
-  <form onsubmit={submit}>
-    <p>{t('demo.import')}</p>
+  <form class="panel-form" onsubmit={submit}>
+    <p class="form-intro">{t('subscriptions.addHint')}</p>
     <label
       >{t('common.name')}<input
         bind:value={name}
         required
         maxlength="80"
         autocomplete="off"
+        placeholder={t('subscriptions.namePlaceholder')}
       /></label
     >
     <label
@@ -42,9 +43,14 @@
         required
         maxlength="65536"
         autocomplete="off"
-        spellcheck="false"></textarea></label
+        spellcheck="false"
+        rows="3"
+        placeholder={t('subscriptions.sourcePlaceholder')}></textarea></label
     >
-    {#if error}<p role="alert">{error}</p>{/if}
-    <button type="submit" disabled={busy}>{t('common.add')}</button>
+    <p class="field-hint">{t('demo.import')}</p>
+    {#if error}<p class="form-error" role="alert">{error}</p>{/if}
+    <button class="form-submit" type="submit" disabled={busy}
+      >{t('subscriptions.addSubscription')}</button
+    >
   </form>
 </Dialog>
