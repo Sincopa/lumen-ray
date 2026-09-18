@@ -124,13 +124,14 @@
     </div>
 
     <p class="availability">{t('demo.unavailable')}</p>
-    <label class="animation-setting"
-      ><input
+    <label class="animation-setting">
+      <input
         type="checkbox"
         checked={shaderSettings.enabled}
         onchange={(e) => shaderSettings.setEnabled(e.currentTarget.checked)}
-      />{t('settings.animation')}</label
-    >
+      />
+      {t('settings.animation')}
+    </label>
     <!-- Section: Background Shader -->
     <div class="section-header">
       <span class="section-title">{t('settings.shaderTitle')}</span>

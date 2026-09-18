@@ -104,22 +104,27 @@
           onclick={() => {
             searching = !searching;
             if (!searching) query = '';
-          }}><img src={searchIcon} alt="" /></button
+          }}
         >
+          <img src={searchIcon} alt="" />
+        </button>
         <button
           class="header-action"
           onclick={refresh}
           disabled={busy || !$catalogStore.servers.length}
           aria-label={t('servers.reloadServers')}
-          ><img src={reloadIcon} alt="" /></button
         >
+          <img src={reloadIcon} alt="" />
+        </button>
         {#if !compact}<button
             class="header-action"
             class:active={menu}
             aria-label={t('common.menu')}
             aria-expanded={menu}
-            onclick={() => (menu = !menu)}><img src={menuIcon} alt="" /></button
-          >{/if}
+            onclick={() => (menu = !menu)}
+          >
+            <img src={menuIcon} alt="" />
+          </button>{/if}
       </div>
     </header>
     {#if menu}
@@ -186,21 +191,22 @@
         onclick={() => select(server)}
       >
         <CountryFlag countryCode={server.countryCode} size={32} />
-        <span class="server-text"
-          ><span class="protocol">{server.protocol}</span><span
-            >{t('servers.countries.' + server.countryCode)}</span
-          ></span
-        >
-        <span class="ping"
-          >{#if server.id === selectedId}<span
-              class="ping-dot"
-              aria-hidden="true"
-            ></span>{/if}{#if typeof server.latency === 'number'}<NumberFlow
-              value={server.latency}
-            /> ms{:else if server.latency === 'timeout'}{t(
-              'servers.timeout',
-            )}{:else}{server.latency} ms{/if}</span
-        >
+        <span class="server-text">
+          <span class="protocol">{server.protocol}</span>
+          <span>{t('servers.countries.' + server.countryCode)}</span>
+        </span>
+        <span class="ping">
+          {#if server.id === selectedId}
+            <span class="ping-dot" aria-hidden="true"></span>
+          {/if}
+          {#if typeof server.latency === 'number'}
+            <NumberFlow value={server.latency} /> ms
+          {:else if server.latency === 'timeout'}
+            {t('servers.timeout')}
+          {:else}
+            {server.latency} ms
+          {/if}
+        </span>
       </button>
     {:else}<p class="hint">{t('servers.empty')}</p>{/each}
   </div>

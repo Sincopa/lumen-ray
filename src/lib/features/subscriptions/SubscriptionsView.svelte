@@ -1,12 +1,21 @@
 <script lang="ts">
+  import { slide } from 'svelte/transition';
   import { catalog, connection } from '../../services';
   import { errorCode } from '../../services/errors';
-  import Dialog from '../../components/Dialog.svelte';
-
   import { t } from '../../i18n';
   import type { Subscription } from '../../services/catalog';
+  import Dialog from '../../components/Dialog.svelte';
+  import reloadIcon from '../../../assets/reload.svg';
+  import menuIcon from '../../../assets/menu.svg';
+  import pencilIcon from '../../../assets/pencil.svg';
+  import trashIcon from '../../../assets/trash.svg';
+  import shareIcon from '../../../assets/share.svg';
+  import chevronIcon from '../../../assets/chevron.svg';
+
   const catalogStore = catalog.state;
   const connectionStore = connection.state;
+
+  // Local state
   let expanded = $state<string | null>('grbnk');
   let editing = $state<Subscription | null>(null);
   let deleting = $state<Subscription | null>(null);
@@ -15,6 +24,8 @@
   let busy = $state<string | null>(null);
   let error = $state('');
   let exported = $state('');
+
+  // Action handlers
   async function refresh(id: string) {
     if (busy) return;
     busy = id;
@@ -27,6 +38,7 @@
       busy = null;
     }
   }
+
   function rename(e: SubmitEvent) {
     e.preventDefault();
     if (!editing) return;
@@ -38,6 +50,7 @@
       error = t('errors.' + errorCode(e));
     }
   }
+
   function remove() {
     if (!deleting) return;
     try {
@@ -49,13 +62,6 @@
     }
   }
 
-  import { slide } from 'svelte/transition';
-  import reloadIcon from '../../../assets/reload.svg';
-  import menuIcon from '../../../assets/menu.svg';
-  import pencilIcon from '../../../assets/pencil.svg';
-  import trashIcon from '../../../assets/trash.svg';
-  import shareIcon from '../../../assets/share.svg';
-  import chevronIcon from '../../../assets/chevron.svg';
   function exportSub(sub: Subscription) {
     exported = JSON.stringify(
       {
@@ -85,7 +91,8 @@
               aria-expanded={expanded === sub.id}
               onclick={() => (expanded = expanded === sub.id ? null : sub.id)}
             >
-              <span class="sub-name">{sub.name}</span><span
+              <span class="sub-name">{sub.name}</span>
+              <span
                 class="status-indicator"
                 class:expired={sub.status === 'expired'}
                 aria-hidden="true"
@@ -97,38 +104,43 @@
                 aria-label={t('common.reload')}
                 disabled={busy !== null}
                 onclick={() => refresh(sub.id)}
-                ><img src={reloadIcon} class="btn-icon" alt="" /></button
               >
+                <img src={reloadIcon} class="btn-icon" alt="" />
+              </button>
               <button
                 class="action-icon-btn"
                 class:active-menu-btn={menu === sub.id}
                 aria-label={t('common.menu')}
                 aria-expanded={menu === sub.id}
                 onclick={() => (menu = menu === sub.id ? null : sub.id)}
-                ><img src={menuIcon} class="btn-icon" alt="" /></button
               >
+                <img src={menuIcon} class="btn-icon" alt="" />
+              </button>
               <button
                 class="action-icon-btn card-chevron"
                 class:expanded={expanded === sub.id}
                 aria-label={sub.name}
                 aria-expanded={expanded === sub.id}
                 onclick={() => (expanded = expanded === sub.id ? null : sub.id)}
-                ><img src={chevronIcon} class="btn-icon" alt="" /></button
               >
+                <img src={chevronIcon} class="btn-icon" alt="" />
+              </button>
             </div>
           </div>
           {#if expanded === sub.id}
             <div class="card-body" transition:slide={{ duration: 240 }}>
               <div class="metrics-row">
                 <div class="metric-item">
-                  <span class="metric-label"
-                    >{t('subscriptions.daysLabel')}</span
-                  ><span class="metric-val">{sub.daysRemaining ?? '—'}</span>
+                  <span class="metric-label">
+                    {t('subscriptions.daysLabel')}
+                  </span>
+                  <span class="metric-val">{sub.daysRemaining ?? '—'}</span>
                 </div>
                 <div class="metric-item">
-                  <span class="metric-label"
-                    >{t('subscriptions.trafficLabel')}</span
-                  ><span class="metric-val">{sub.traffic ?? '—'}</span>
+                  <span class="metric-label">
+                    {t('subscriptions.trafficLabel')}
+                  </span>
+                  <span class="metric-val">{sub.traffic ?? '—'}</span>
                 </div>
               </div>
               <div class="updated-time">
@@ -199,36 +211,41 @@
     {:else}<p>{t('subscriptions.empty')}</p>{/each}
   </div>
 </section>
-{#if editing}<Dialog title={t('common.edit')} onClose={() => (editing = null)}
-    ><form onsubmit={rename}>
-      <label
-        >{t('common.name')}<input
-          bind:value={name}
-          maxlength="80"
-          required
-        /></label
-      >{#if error}<p role="alert">{error}</p>{/if}<button type="submit"
-        >{t('common.save')}</button
-      >
-    </form></Dialog
-  >{/if}
-{#if deleting}<Dialog
-    title={t('common.delete')}
-    onClose={() => (deleting = null)}
-    ><p>{t('subscriptions.deleteConfirm', { name: deleting.name })}</p>
-    {#if error}<p role="alert">{error}</p>{/if}<button
-      class="danger"
-      onclick={remove}>{t('common.delete')}</button
-    ></Dialog
-  >{/if}
-{#if exported}<Dialog title={t('common.export')} onClose={() => (exported = '')}
-    ><p>{t('demo.export')}</p>
+{#if editing}
+  <Dialog title={t('common.edit')} onClose={() => (editing = null)}>
+    <form onsubmit={rename}>
+      <label>
+        {t('common.name')}
+        <input bind:value={name} maxlength="80" required />
+      </label>
+      {#if error}
+        <p role="alert">{error}</p>
+      {/if}
+      <button type="submit">{t('common.save')}</button>
+    </form>
+  </Dialog>
+{/if}
+
+{#if deleting}
+  <Dialog title={t('common.delete')} onClose={() => (deleting = null)}>
+    <p>{t('subscriptions.deleteConfirm', { name: deleting.name })}</p>
+    {#if error}
+      <p role="alert">{error}</p>
+    {/if}
+    <button class="danger" onclick={remove}>{t('common.delete')}</button>
+  </Dialog>
+{/if}
+
+{#if exported}
+  <Dialog title={t('common.export')} onClose={() => (exported = '')}>
+    <p>{t('demo.export')}</p>
     <textarea
       readonly
       value={exported}
       aria-label={t('common.export')}
-      rows="10"></textarea></Dialog
-  >{/if}
+      rows="10"></textarea>
+  </Dialog>
+{/if}
 
 <style>
   .subscriptions-view {

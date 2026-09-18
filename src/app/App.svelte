@@ -10,15 +10,33 @@
   import ServersView from '../lib/features/servers/ServersView.svelte';
   import SettingsView from '../lib/features/settings/SettingsView.svelte';
   import RulesView from '../lib/features/rules/RulesView.svelte';
-
-  import { catalog, connection } from '../lib/services';
-  import { t } from '../lib/i18n';
-  import { errorCode } from '../lib/services/errors';
   import ImportSubscription from '../lib/features/subscriptions/ImportSubscription.svelte';
+  import { catalog, connection } from '../lib/services';
+  import { errorCode } from '../lib/services/errors';
+  import { t } from '../lib/i18n';
+
+  type TabName = 'home' | 'subscriptions' | 'servers' | 'settings' | 'rules';
+
+  const tabOrder: Record<TabName, number> = {
+    home: 0,
+    subscriptions: 1,
+    servers: 2,
+    rules: 3,
+    settings: 4,
+  };
 
   const connectionStore = connection.state;
   const catalogStore = catalog.state;
   const persistenceError = catalog.persistenceError;
+
+  // Local state
+  let currentTab = $state<TabName>('home');
+  let prevTab = $state<TabName>('home');
+  let importing = $state(false);
+  let actionError = $state('');
+  let ruleChrome = $state<'default' | 'selection' | 'picker'>('default');
+
+  // Derived state
   let connectionState = $derived($connectionStore.status);
   let info = $derived($connectionStore.info);
   let routingMode = $derived($catalogStore.routingMode);
@@ -28,25 +46,16 @@
     ),
   );
   let selectedCountry = $derived(selectedServer?.countryCode ?? 'fi');
-  let currentTab: 'home' | 'subscriptions' | 'servers' | 'settings' | 'rules' =
-    $state('home');
-  let prevTab: 'home' | 'subscriptions' | 'servers' | 'settings' | 'rules' =
-    $state('home');
-  let importing = $state(false);
-  let actionError = $state('');
-  let ruleChrome = $state<'default' | 'selection' | 'picker'>('default');
-  const tabOrder = {
-    home: 0,
-    subscriptions: 1,
-    servers: 2,
-    rules: 3,
-    settings: 4,
-  };
+
   onMount(() => {
     void connection.initialize();
   });
-  const toggleConnection = () =>
+
+  // Action handlers
+  const toggleConnection = () => {
     connection.toggle($catalogStore.selectedServerId);
+  };
+
   async function chooseServer(server: { id: string }) {
     try {
       await catalog.selectServer(server.id);
@@ -55,26 +64,29 @@
       actionError = t('errors.' + errorCode(e));
     }
   }
+
   function changeMode(mode: 'global' | 'rules') {
     try {
       catalog.setRoutingMode(mode);
-      if (mode === 'rules') handleTabChange('rules');
+      if (mode === 'rules') {
+        handleTabChange('rules');
+      }
     } catch (e) {
       actionError = t('errors.' + errorCode(e));
     }
   }
-  function handleTabChange(
-    tab: 'home' | 'subscriptions' | 'servers' | 'settings' | 'rules',
-  ) {
+
+  function handleTabChange(tab: TabName) {
     prevTab = currentTab;
     currentTab = tab;
-    if (tab !== 'rules') ruleChrome = 'default';
+    if (tab !== 'rules') {
+      ruleChrome = 'default';
+    }
   }
 
   // Direction: +1 = slide right→left (going deeper), -1 = slide left→right (going back)
   function getDir(to: string, from: string) {
-    return (tabOrder[to as keyof typeof tabOrder] ?? 0) >
-      (tabOrder[from as keyof typeof tabOrder] ?? 0)
+    return (tabOrder[to as TabName] ?? 0) > (tabOrder[from as TabName] ?? 0)
       ? 1
       : -1;
   }
@@ -95,8 +107,15 @@
     />
 
     <p class="demo-notice sr-only">{t('demo.notice')}</p>
-    {#if $persistenceError}<p role="alert">{t('errors.storage')}</p>{/if}
-    {#if actionError}<p role="alert">{actionError}</p>{/if}
+
+    {#if $persistenceError}
+      <p role="alert">{t('errors.storage')}</p>
+    {/if}
+
+    {#if actionError}
+      <p role="alert">{actionError}</p>
+    {/if}
+
     <!-- Tab Views with directional fly transitions -->
     <div class="view-content">
       {#if currentTab === 'rules'}
@@ -153,7 +172,10 @@
       />
     {/if}
   </div>
-  {#if importing}<ImportSubscription onClose={() => (importing = false)} />{/if}
+
+  {#if importing}
+    <ImportSubscription onClose={() => (importing = false)} />
+  {/if}
 </main>
 
 <style>

@@ -1,12 +1,17 @@
 <script lang="ts">
   import { onMount, type Snippet } from 'svelte';
   import { t } from '../i18n';
-  let {
-    title,
-    onClose,
-    children,
-  }: { title: string; onClose: () => void; children: Snippet } = $props();
+
+  interface Props {
+    title: string;
+    onClose: () => void;
+    children: Snippet;
+  }
+
+  let { title, onClose, children }: Props = $props();
+
   let dialog: HTMLDialogElement;
+
   onMount(() => {
     const previous = document.activeElement as HTMLElement | null;
     dialog.showModal();
@@ -27,9 +32,9 @@
 >
   <header>
     <h2>{title}</h2>
-    <button type="button" onclick={onClose} aria-label={t('common.close')}
-      >×</button
-    >
+    <button type="button" onclick={onClose} aria-label={t('common.close')}>
+      ×
+    </button>
   </header>
   {@render children()}
 </dialog>
@@ -46,10 +51,12 @@
     color: #fff;
     box-shadow: 0 24px 70px #000b;
   }
+
   dialog::backdrop {
     background: #000b;
     backdrop-filter: blur(10px);
   }
+
   header {
     display: flex;
     align-items: center;
@@ -57,12 +64,14 @@
     gap: 12px;
     margin-bottom: 18px;
   }
+
   h2 {
     font-size: 20px;
     line-height: 1.2;
     letter-spacing: -0.4px;
     margin: 0;
   }
+
   button {
     width: 36px;
     height: 36px;

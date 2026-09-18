@@ -9,6 +9,7 @@ export interface ConnectionSnapshot {
   busy: boolean;
   error: ErrorCode | null;
 }
+
 export class ConnectionController {
   private current: ConnectionSnapshot = {
     status: 'initializing',
@@ -16,17 +17,22 @@ export class ConnectionController {
     busy: true,
     error: null,
   };
+
   readonly state = writable(this.current);
-  private update(patch: Partial<ConnectionSnapshot>) {
-    this.current = { ...this.current, ...patch };
-    this.state.set(this.current);
-  }
+
   constructor(
     private vpn: VpnService,
     private timeoutMs = 10000,
   ) {}
+
+  private update(patch: Partial<ConnectionSnapshot>) {
+    this.current = { ...this.current, ...patch };
+    this.state.set(this.current);
+  }
+
   async initialize() {
     this.update({ status: 'initializing', busy: true, error: null });
+
     try {
       const [status, info] = await withTimeout(
         Promise.all([this.vpn.getStatus(), this.vpn.getConnectionInfo()]),
@@ -39,27 +45,35 @@ export class ConnectionController {
       this.update({ busy: false });
     }
   }
+
   async toggle(serverId: string | null) {
-    if (this.current.busy) return;
+    if (this.current.busy) {
+      return;
+    }
+
     const disconnecting = this.current.status === 'connected';
     if (!disconnecting && !serverId) {
       this.update({ error: 'invalidServer' });
       return;
     }
+
     this.update({
       busy: true,
       error: null,
       status: disconnecting ? 'disconnecting' : 'connecting',
     });
+
     try {
       await withTimeout(
         disconnecting ? this.vpn.disconnect() : this.vpn.connect(serverId!),
         this.timeoutMs,
       );
+
       const [status, info] = await withTimeout(
         Promise.all([this.vpn.getStatus(), this.vpn.getConnectionInfo()]),
         this.timeoutMs,
       );
+
       this.update({ status, info });
     } catch (e) {
       // An IPC timeout is an unknown outcome: reconcile before enabling another connect.

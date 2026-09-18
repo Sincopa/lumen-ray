@@ -2,15 +2,13 @@
   import { t } from '../i18n';
   import searchIcon from '../../assets/search.svg';
 
-  let {
-    value = $bindable(''),
-    placeholder,
-    onClose,
-  }: {
+  interface Props {
     value?: string;
     placeholder: string;
     onClose: () => void;
-  } = $props();
+  }
+
+  let { value = $bindable(''), placeholder, onClose }: Props = $props();
 </script>
 
 <div class="search-field">
@@ -27,8 +25,10 @@
     onclick={() => {
       value = '';
       onClose();
-    }}>×</button
+    }}
   >
+    ×
+  </button>
 </div>
 
 <style>
@@ -44,15 +44,18 @@
     background: #00000038;
     backdrop-filter: blur(14px);
   }
+
   .search-field:focus-within {
     border-color: #e0baff;
   }
+
   img {
     width: 18px;
     height: 18px;
     filter: brightness(0) invert(1);
     opacity: 0.65;
   }
+
   input[type='search'] {
     flex: 1;
     width: 0 !important;
@@ -64,15 +67,19 @@
     background: transparent !important;
     font-size: 14px;
   }
+
   input::placeholder {
     color: #ffffff80;
   }
+
   input:focus-visible {
     outline: none !important;
   }
+
   input::-webkit-search-cancel-button {
     display: none;
   }
+
   button {
     display: grid;
     place-items: center;
@@ -87,6 +94,7 @@
     font-size: 22px;
     line-height: 1;
   }
+
   button:hover {
     background: #ffffff24;
   }

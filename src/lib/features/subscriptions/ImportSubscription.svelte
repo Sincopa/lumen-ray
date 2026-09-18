@@ -3,11 +3,18 @@
   import { catalog } from '../../services';
   import { errorCode } from '../../services/errors';
   import { t } from '../../i18n';
-  let { onClose }: { onClose: () => void } = $props();
+
+  interface Props {
+    onClose: () => void;
+  }
+
+  let { onClose }: Props = $props();
+
   let name = $state('');
   let source = $state('');
   let error = $state('');
   let busy = $state(false);
+
   async function submit(e: SubmitEvent) {
     e.preventDefault();
     if (busy) return;
@@ -28,29 +35,38 @@
 <Dialog title={t('subscriptions.addSubscription')} {onClose}>
   <form class="panel-form" onsubmit={submit}>
     <p class="form-intro">{t('subscriptions.addHint')}</p>
-    <label
-      >{t('common.name')}<input
+
+    <label>
+      {t('common.name')}
+      <input
         bind:value={name}
         required
         maxlength="80"
         autocomplete="off"
         placeholder={t('subscriptions.namePlaceholder')}
-      /></label
-    >
-    <label
-      >{t('subscriptions.source')}<textarea
+      />
+    </label>
+
+    <label>
+      {t('subscriptions.source')}
+      <textarea
         bind:value={source}
         required
         maxlength="65536"
         autocomplete="off"
         spellcheck="false"
         rows="3"
-        placeholder={t('subscriptions.sourcePlaceholder')}></textarea></label
-    >
+        placeholder={t('subscriptions.sourcePlaceholder')}></textarea>
+    </label>
+
     <p class="field-hint">{t('demo.import')}</p>
-    {#if error}<p class="form-error" role="alert">{error}</p>{/if}
-    <button class="form-submit" type="submit" disabled={busy}
-      >{t('subscriptions.addSubscription')}</button
-    >
+
+    {#if error}
+      <p class="form-error" role="alert">{error}</p>
+    {/if}
+
+    <button class="form-submit" type="submit" disabled={busy}>
+      {t('subscriptions.addSubscription')}
+    </button>
   </form>
 </Dialog>

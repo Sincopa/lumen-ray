@@ -7,7 +7,9 @@
   import gb from 'flag-icons/flags/4x3/gb.svg';
   import jp from 'flag-icons/flags/4x3/jp.svg';
   import ru from 'flag-icons/flags/4x3/ru.svg';
+
   const flags: Record<string, string> = { fi, nl, de, se, us, gb, jp, ru };
+
   interface Props {
     countryCode?: string; // 'fi', 'nl', 'de', 'us', etc.
     size?: number;
@@ -17,11 +19,11 @@
 </script>
 
 <div class="flag-circle" style="width: {size}px; height: {size}px;">
-  {#if flags[countryCode.toLowerCase()]}<img
-      class="flag-icon"
-      src={flags[countryCode.toLowerCase()]}
-      alt=""
-    />{:else}<span aria-hidden="true">—</span>{/if}
+  {#if flags[countryCode.toLowerCase()]}
+    <img class="flag-icon" src={flags[countryCode.toLowerCase()]} alt="" />
+  {:else}
+    <span aria-hidden="true">—</span>
+  {/if}
 </div>
 
 <style>

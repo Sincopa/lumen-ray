@@ -21,8 +21,10 @@
   style:height="{size}px"
   style:font-variation-settings="'FILL' {fill ? 1 : 0}, 'wght' 400, 'GRAD' 0,
   'opsz' {Math.min(48, Math.max(20, Math.round(size)))}"
-  aria-hidden="true">{name}</span
+  aria-hidden="true"
 >
+  {name}
+</span>
 
 <style>
   .material-symbols-rounded {

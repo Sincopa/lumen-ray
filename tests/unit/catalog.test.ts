@@ -5,6 +5,7 @@ import {
   validateSubscription,
   type StoragePort,
 } from '../../src/lib/services/catalog';
+
 function storage(): StoragePort {
   const data = new Map<string, string>();
   return {
@@ -14,10 +15,12 @@ function storage(): StoragePort {
     },
   };
 }
+
 describe('catalog', () => {
   it('persists selection and rules across service recreation', async () => {
-    const disk = storage(),
-      service = new CatalogService(disk);
+    const disk = storage();
+    const service = new CatalogService(disk);
+
     await service.selectServer('demo-nl');
     service.saveRule({
       id: 'rule',
@@ -26,23 +29,29 @@ describe('catalog', () => {
       serverId: 'demo-nl',
       enabled: true,
     });
+
     const next = get(new CatalogService(disk).state);
     expect(next.selectedServerId).toBe('demo-nl');
     expect(next.rules[0].name).toBe('Discord.exe');
   });
+
   it('imports only demo metadata and never retains source credentials', async () => {
-    const disk = storage(),
-      service = new CatalogService(disk);
+    const disk = storage();
+    const service = new CatalogService(disk);
+
     await service.importSubscription(
       'https://example.com/private-token',
       'Test',
     );
+
     expect(JSON.stringify(get(service.state))).not.toContain('private-token');
     expect(disk.getItem('lumen_catalog_v1')).not.toContain('private-token');
     expect(get(service.state).subscriptions).toHaveLength(2);
   });
+
   it('removing subscription cleans dangling servers, selection and rules', () => {
     const service = new CatalogService();
+
     service.saveRule({
       id: 'rule',
       name: 'example.com',
@@ -51,6 +60,7 @@ describe('catalog', () => {
       enabled: true,
     });
     service.removeSubscription('demo');
+
     expect(get(service.state)).toMatchObject({
       selectedServerId: null,
       servers: [],
@@ -58,16 +68,20 @@ describe('catalog', () => {
       subscriptions: [],
     });
   });
+
   it('rejects invalid input and missing servers', async () => {
     for (const source of [
       '',
       'javascript:alert(1)',
       'http://example.com',
       'garbage',
-    ])
+    ]) {
       expect(() => validateSubscription(source)).toThrow();
+    }
+
     const service = new CatalogService();
     await expect(service.selectServer('missing')).rejects.toThrow();
+
     expect(() =>
       service.saveRule({
         id: 'bad',
@@ -78,14 +92,17 @@ describe('catalog', () => {
       }),
     ).toThrow();
   });
+
   it('recovers from malformed storage and reports the issue', () => {
     const service = new CatalogService({
       getItem: () => '{',
       setItem: () => {},
     });
+
     expect(get(service.state).servers.length).toBeGreaterThan(0);
     expect(get(service.persistenceError)).toBe(true);
   });
+
   it('does not publish a change that failed to persist', async () => {
     const service = new CatalogService({
       getItem: () => null,
@@ -93,6 +110,7 @@ describe('catalog', () => {
         throw new Error('quota');
       },
     });
+
     await expect(service.selectServer('demo-de')).rejects.toThrow('storage');
     expect(get(service.state).selectedServerId).toBe('demo-fi');
   });

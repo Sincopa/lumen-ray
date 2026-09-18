@@ -1,17 +1,17 @@
 <script lang="ts">
+  import { onMount } from 'svelte';
   import NumberFlow from '@number-flow/svelte';
-  import logoIcon from '../../../assets/logo.svg';
-  import chevronIcon from '../../../assets/chevron.svg';
   import CountryFlag from '../../components/CountryFlag.svelte';
   import { t } from '../../i18n';
   import type {
     VpnConnectionState,
     VpnConnectionInfo,
   } from '../../types/models';
-
   import type { Server } from '../../services/catalog';
   import type { ErrorCode } from '../../services/errors';
-  import { onMount } from 'svelte';
+  import logoIcon from '../../../assets/logo.svg';
+  import chevronIcon from '../../../assets/chevron.svg';
+
   interface Props {
     server?: Server;
     busy: boolean;
@@ -46,6 +46,7 @@
   let hours = $derived(Math.floor(elapsed / 3600));
   let minutes = $derived(Math.floor(elapsed / 60) % 60);
   let seconds = $derived(elapsed % 60);
+
   onMount(() => {
     const tick = () => (now = Date.now());
     const timer = setInterval(tick, 1000);
@@ -84,10 +85,13 @@
     >
       {t('home.' + connectionState)}
     </p>
-    {#if error}<div class="connection-error" role="alert">
+
+    {#if error}
+      <div class="connection-error" role="alert">
         {t('errors.' + error)}
         <button onclick={onRetry} disabled={busy}>{t('common.retry')}</button>
-      </div>{/if}
+      </div>
+    {/if}
     <!-- Animated Timer with NumberFlow -->
     {#if isConnected}
       <div class="timer">
@@ -95,12 +99,12 @@
           <NumberFlow value={hours} format={{ minimumIntegerDigits: 1 }} />
           <span class="time-label">{t('home.hoursUnit')}</span>
         </span>
-        <span class="time-separator"> </span>
+        <span class="time-separator"></span>
         <span class="time-segment">
           <NumberFlow value={minutes} format={{ minimumIntegerDigits: 2 }} />
           <span class="time-label">{t('home.minutesUnit')}</span>
         </span>
-        <span class="time-separator"> </span>
+        <span class="time-separator"></span>
         <span class="time-segment">
           <NumberFlow value={seconds} format={{ minimumIntegerDigits: 2 }} />
           <span class="time-label">{t('home.secondsUnit')}</span>
@@ -129,7 +133,7 @@
           {:else}
             {server?.latency ?? '—'}
           {/if}
-          <span class="latency-unit"> ms</span>
+          <span class="latency-unit">ms</span>
         </span>
       </div>
     </div>

@@ -1,20 +1,11 @@
 <script lang="ts">
+  import { getCurrentWindow } from '@tauri-apps/api/window';
+  import { runtime } from '../runtime';
+  import { t } from '../i18n';
   import minimizeIcon from '../../assets/minimaze.svg';
   import maximizeIcon from '../../assets/maximaze.svg';
   import crossIcon from '../../assets/cross.svg';
-  import { t } from '../i18n';
 
-  import { runtime } from '../runtime';
-  import { getCurrentWindow } from '@tauri-apps/api/window';
-  let failure = $state(false);
-  async function control(action: 'minimize' | 'toggleMaximize' | 'close') {
-    if (!runtime.isTauri) return;
-    try {
-      await getCurrentWindow()[action]();
-    } catch {
-      failure = true;
-    }
-  }
   interface Props {
     title?: string;
     showControls?: boolean;
@@ -28,6 +19,17 @@
     darkSurface = false,
     onOpenSettings,
   }: Props = $props();
+
+  let failure = $state(false);
+
+  async function control(action: 'minimize' | 'toggleMaximize' | 'close') {
+    if (!runtime.isTauri) return;
+    try {
+      await getCurrentWindow()[action]();
+    } catch {
+      failure = true;
+    }
+  }
 </script>
 
 <header
@@ -43,6 +45,7 @@
   >
     <div class="logo">{title}</div>
   </button>
+
   {#if showControls}
     <div class="controls-pill">
       <button
@@ -53,6 +56,7 @@
       >
         <img src={minimizeIcon} alt="" width="14" height="14" />
       </button>
+
       <button
         class="control-btn"
         onclick={() => control('toggleMaximize')}
@@ -61,6 +65,7 @@
       >
         <img src={maximizeIcon} alt="" width="14" height="14" />
       </button>
+
       <button
         class="control-btn close"
         onclick={() => control('close')}
@@ -72,7 +77,10 @@
     </div>
   {/if}
 </header>
-{#if failure}<p role="alert">{t('errors.unavailable')}</p>{/if}
+
+{#if failure}
+  <p role="alert">{t('errors.unavailable')}</p>
+{/if}
 
 <style>
   .window-header {

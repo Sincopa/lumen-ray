@@ -138,8 +138,9 @@
       onkeydown={(event) => onOptionKeydown(event, index)}
     >
       <span>{option.label}</span>
-      {#if option.value === value}<span class="check" aria-hidden="true">✓</span
-        >{/if}
+      {#if option.value === value}
+        <span class="check" aria-hidden="true">✓</span>
+      {/if}
     </div>
   {/each}
 </div>

@@ -2,35 +2,12 @@
   import { catalog } from '../../services';
   import { errorCode } from '../../services/errors';
   import { t } from '../../i18n';
+  import type { Rule } from '../../services/catalog';
   import Dialog from '../../components/Dialog.svelte';
   import CountryFlag from '../../components/CountryFlag.svelte';
   import MaterialIcon from '../../components/MaterialIcon.svelte';
   import SearchField from '../../components/SearchField.svelte';
   import Dropdown from '../../components/Dropdown.svelte';
-  import type { Rule } from '../../services/catalog';
-  import discordIcon from '../../../assets/discord.png';
-  import yandexIcon from '../../../assets/yandex.png';
-  const catalogStore = catalog.state;
-  let query = $state('');
-  let searching = $state(false);
-  let menu = $state(false);
-  let selectMode = $state(false);
-  let selectingRule = $state<Rule | null>(null);
-  let pendingServerId = $state('');
-  let {
-    onChromeChange,
-  }: {
-    onChromeChange?: (mode: 'default' | 'selection' | 'picker') => void;
-  } = $props();
-  const activeSub = $derived(
-    $catalogStore.subscriptions.find(
-      (s) =>
-        s.id ===
-        $catalogStore.servers.find(
-          (s) => s.id === $catalogStore.selectedServerId,
-        )?.subscriptionId,
-    ) ?? $catalogStore.subscriptions[0],
-  );
   import ServersView from '../servers/ServersView.svelte';
   import searchIcon from '../../../assets/search.svg';
   import reloadIcon from '../../../assets/reload.svg';
@@ -41,14 +18,76 @@
   import shareIcon from '../../../assets/share.svg';
   import checkIcon from '../../../assets/check.svg';
   import chevronIcon from '../../../assets/chevron.svg';
+  import discordIcon from '../../../assets/discord.png';
+  import yandexIcon from '../../../assets/yandex.png';
+
+  interface Props {
+    onChromeChange?: (mode: 'default' | 'selection' | 'picker') => void;
+  }
+
+  let { onChromeChange }: Props = $props();
+
+  const catalogStore = catalog.state;
+
+  // Local state
+  let query = $state('');
+  let searching = $state(false);
+  let menu = $state(false);
+  let selectMode = $state(false);
+  let selectingRule = $state<Rule | null>(null);
+  let pendingServerId = $state('');
+  let editing = $state<Rule | null>(null);
+  let deleting = $state(false);
+  let selected = $state<string[]>([]);
+  let error = $state('');
+  let exported = $state('');
+
+  // Derived state
+  const activeSub = $derived(
+    $catalogStore.subscriptions.find(
+      (s) =>
+        s.id ===
+        $catalogStore.servers.find(
+          (s) => s.id === $catalogStore.selectedServerId,
+        )?.subscriptionId,
+    ) ?? $catalogStore.subscriptions[0],
+  );
+
+  let filtered = $derived(
+    $catalogStore.rules.filter((r) =>
+      r.name.toLowerCase().includes(query.toLowerCase()),
+    ),
+  );
+
+  let serverOptions = $derived(
+    $catalogStore.servers.map((server) => ({
+      value: server.id,
+      label: `${t('servers.countries.' + server.countryCode)} · ${
+        $catalogStore.subscriptions.find(
+          (subscription) => subscription.id === server.subscriptionId,
+        )?.name ?? ''
+      }`,
+    })),
+  );
+
+  $effect(() => {
+    onChromeChange?.(
+      selectingRule ? 'picker' : selectMode ? 'selection' : 'default',
+    );
+  });
+
+  // Action handlers
   async function refresh() {
     try {
-      if (activeSub) await catalog.refreshSubscription(activeSub.id);
+      if (activeSub) {
+        await catalog.refreshSubscription(activeSub.id);
+      }
       error = '';
     } catch (e) {
       error = t('errors.' + errorCode(e));
     }
   }
+
   function pickServer(server: { id: string }) {
     if (!selectingRule) return;
     pendingServerId = server.id;
@@ -61,32 +100,12 @@
       error = t('errors.' + errorCode(e));
     }
   }
+
   function confirmServer() {
     if (!selectingRule || !pendingServerId) return;
     pickServer({ id: pendingServerId });
   }
 
-  let editing = $state<Rule | null>(null);
-  let deleting = $state(false);
-  let selected = $state<string[]>([]);
-  let error = $state('');
-  let exported = $state('');
-  let filtered = $derived(
-    $catalogStore.rules.filter((r) =>
-      r.name.toLowerCase().includes(query.toLowerCase()),
-    ),
-  );
-  let serverOptions = $derived(
-    $catalogStore.servers.map((server) => ({
-      value: server.id,
-      label: `${t('servers.countries.' + server.countryCode)} · ${$catalogStore.subscriptions.find((subscription) => subscription.id === server.subscriptionId)?.name ?? ''}`,
-    })),
-  );
-  $effect(() => {
-    onChromeChange?.(
-      selectingRule ? 'picker' : selectMode ? 'selection' : 'default',
-    );
-  });
   function add() {
     error = '';
     editing = {
@@ -97,12 +116,14 @@
       enabled: true,
     };
   }
+
   function setRuleType(isDomain: boolean) {
     if (editing && editing.isDomain !== isDomain) {
       editing = { ...editing, isDomain, name: '' };
       error = '';
     }
   }
+
   function save(e: SubmitEvent) {
     e.preventDefault();
     if (!editing) return;
@@ -114,6 +135,7 @@
       error = t('errors.' + errorCode(e));
     }
   }
+
   function toggle(rule: Rule) {
     try {
       catalog.saveRule({ ...rule, enabled: !rule.enabled });
@@ -121,6 +143,7 @@
       error = t('errors.' + errorCode(e));
     }
   }
+
   function remove() {
     try {
       catalog.removeRules(new Set(selected));
@@ -144,21 +167,25 @@
           onclick={() => {
             selectingRule = null;
             pendingServerId = '';
-          }}><img src={chevronIcon} alt="" /></button
+          }}
         >
+          <img src={chevronIcon} alt="" />
+        </button>
         <button
           class="select-bar-btn confirm-btn"
           aria-label={t('common.save')}
-          onclick={confirmServer}><img src={checkIcon} alt="" /></button
+          onclick={confirmServer}
         >
+          <img src={checkIcon} alt="" />
+        </button>
       </div>
     </div>
   {:else}
     {#if selectMode}
       <div class="selection-header">
         <div class="sub-info">
-          <span class="sub-title">{activeSub?.name ?? t('rules.title')}</span
-          ><span class="status-dot" aria-hidden="true"></span>
+          <span class="sub-title">{activeSub?.name ?? t('rules.title')}</span>
+          <span class="status-dot" aria-hidden="true"></span>
         </div>
         <button
           class="select-all"
@@ -176,11 +203,12 @@
             class="select-checkbox"
             class:checked={selected.length === filtered.length &&
               filtered.length > 0}
-            >{#if selected.length === filtered.length && filtered.length > 0}<img
+          >
+            {#if selected.length === filtered.length && filtered.length > 0}<img
                 src={checkIcon}
                 alt=""
-              />{/if}</span
-          >
+              />{/if}
+          </span>
         </button>
       </div>
     {:else}
@@ -188,9 +216,10 @@
         <div class="header-row">
           <div class="active-sub-card">
             <div class="sub-info">
-              <span class="sub-title"
-                >{activeSub?.name ?? t('rules.title')}</span
-              ><span class="status-dot" aria-hidden="true"></span>
+              <span class="sub-title">
+                {activeSub?.name ?? t('rules.title')}
+              </span>
+              <span class="status-dot" aria-hidden="true"></span>
             </div>
             <div class="card-actions">
               <button
@@ -200,35 +229,43 @@
                 onclick={() => {
                   searching = !searching;
                   if (!searching) query = '';
-                }}><img src={searchIcon} alt="" /></button
+                }}
               >
+                <img src={searchIcon} alt="" />
+              </button>
               <button
                 class="action-btn"
                 aria-label={t('common.reload')}
-                onclick={refresh}><img src={reloadIcon} alt="" /></button
+                onclick={refresh}
               >
+                <img src={reloadIcon} alt="" />
+              </button>
               <button
                 class="action-btn"
                 class:active-action={menu}
                 aria-label={t('common.menu')}
                 aria-expanded={menu}
                 onclick={() => (menu = !menu)}
-                ><img src={menuIcon} alt="" /></button
               >
+                <img src={menuIcon} alt="" />
+              </button>
               <button
                 class="action-btn"
                 aria-label={t('rules.selectMode')}
                 onclick={() => (selectMode = true)}
-                ><img src={pencilIcon} alt="" /></button
               >
+                <img src={pencilIcon} alt="" />
+              </button>
             </div>
           </div>
           <button
             class="separate-add-btn"
             aria-label={t('common.add')}
             disabled={!$catalogStore.servers.length}
-            onclick={add}><img src={addIcon} alt="" /></button
+            onclick={add}
           >
+            <img src={addIcon} alt="" />
+          </button>
         </div>
         {#if menu}
           <div class="popup-menu">
@@ -313,12 +350,12 @@
                   class="app-icon"
                   src={/^discord/i.test(rule.name) ? discordIcon : yandexIcon}
                   alt=""
-                />{:else}<span class="globe-text" aria-hidden="true"
-                  ><MaterialIcon
+                />{:else}<span class="globe-text" aria-hidden="true">
+                  <MaterialIcon
                     name={rule.isDomain ? 'public' : 'description'}
                     size={20}
-                  /></span
-                >{/if}
+                  />
+                </span>{/if}
             </div>
             <button
               class="rule-text"
@@ -327,10 +364,10 @@
                 editing = { ...rule };
               }}
               aria-label={t('rules.edit', { name: rule.name })}
-              ><span class="rule-name">{rule.name}</span><span
-                class="rule-details">{country}</span
-              ></button
             >
+              <span class="rule-name">{rule.name}</span>
+              <span class="rule-details">{country}</span>
+            </button>
           </div>
           <div class="rule-right">
             <button
@@ -341,12 +378,10 @@
               }}
               aria-label={rule.name + ': ' + t('servers.title')}
             >
-              {#if server}<span class="flag-sm"
-                  ><CountryFlag
-                    countryCode={server.countryCode}
-                    size={20}
-                  /></span
-                >{/if}<span class="server-pill-name">{country}</span>
+              {#if server}<span class="flag-sm">
+                  <CountryFlag countryCode={server.countryCode} size={20} />
+                </span>{/if}
+              <span class="server-pill-name">{country}</span>
             </button>
             {#if selectMode}
               <button
@@ -359,11 +394,12 @@
                   (selected = selected.includes(rule.id)
                     ? selected.filter((id) => id !== rule.id)
                     : [...selected, rule.id])}
-                >{#if selected.includes(rule.id)}<img
+              >
+                {#if selected.includes(rule.id)}<img
                     src={checkIcon}
                     alt=""
-                  />{/if}</button
-              >
+                  />{/if}
+              </button>
             {:else}
               <button
                 class="toggle-switch"
@@ -372,8 +408,9 @@
                 aria-checked={rule.enabled}
                 aria-label={t('rules.toggle', { name: rule.name })}
                 onclick={() => toggle(rule)}
-                ><span class="toggle-thumb"></span></button
               >
+                <span class="toggle-thumb"></span>
+              </button>
             {/if}
           </div>
         </article>
@@ -386,16 +423,19 @@
           aria-label={t('rules.deleteSelected')}
           disabled={!selected.length}
           onclick={() => (deleting = true)}
-          ><img src={trashIcon} alt="" /></button
         >
+          <img src={trashIcon} alt="" />
+        </button>
         <button
           class="select-bar-btn confirm-btn"
           aria-label={t('common.close')}
           onclick={() => {
             selectMode = false;
             selected = [];
-          }}><img src={checkIcon} alt="" /></button
+          }}
         >
+          <img src={checkIcon} alt="" />
+        </button>
       </div>
     {/if}
   {/if}
@@ -411,18 +451,23 @@
             type="button"
             class:chosen={editing.isDomain}
             aria-pressed={editing.isDomain}
-            onclick={() => setRuleType(true)}>{t('rules.domain')}</button
+            onclick={() => setRuleType(true)}
           >
+            {t('rules.domain')}
+          </button>
           <button
             type="button"
             class:chosen={!editing.isDomain}
             aria-pressed={!editing.isDomain}
-            onclick={() => setRuleType(false)}>{t('rules.application')}</button
+            onclick={() => setRuleType(false)}
           >
+            {t('rules.application')}
+          </button>
         </div>
       </div>
-      <label
-        >{t('common.name')}<input
+      <label>
+        {t('common.name')}
+        <input
           bind:value={editing.name}
           aria-label={t('common.name')}
           placeholder={editing.isDomain ? 'example.com' : 'Discord.exe'}
@@ -430,12 +475,13 @@
           autocomplete="off"
           spellcheck="false"
           required
-        /><span class="field-hint"
-          >{editing.isDomain
+        />
+        <span class="field-hint">
+          {editing.isDomain
             ? t('rules.domainHint')
-            : t('rules.applicationHint')}</span
-        ></label
-      >
+            : t('rules.applicationHint')}
+        </span>
+      </label>
       <div class="server-field">
         <span class="field-label">{t('servers.title')}</span>
         <Dropdown
@@ -445,31 +491,35 @@
         />
       </div>
       {#if error}<p class="form-error" role="alert">{error}</p>{/if}
-      <button class="form-submit" type="submit"
-        >{$catalogStore.rules.some((rule) => rule.id === editing?.id)
+      <button class="form-submit" type="submit">
+        {$catalogStore.rules.some((rule) => rule.id === editing?.id)
           ? t('common.save')
-          : t('rules.addRule')}</button
-      >
+          : t('rules.addRule')}
+      </button>
     </form>
   </Dialog>
 {/if}
-{#if deleting}<Dialog
-    title={t('common.delete')}
-    onClose={() => (deleting = false)}
-    ><p>{t('rules.deleteConfirm', { count: selected.length })}</p>
-    {#if error}<p role="alert">{error}</p>{/if}<button
-      class="danger"
-      onclick={remove}>{t('common.delete')}</button
-    ></Dialog
-  >{/if}
-{#if exported}<Dialog title={t('common.export')} onClose={() => (exported = '')}
-    ><p>{t('demo.export')}</p>
+
+{#if deleting}
+  <Dialog title={t('common.delete')} onClose={() => (deleting = false)}>
+    <p>{t('rules.deleteConfirm', { count: selected.length })}</p>
+    {#if error}
+      <p role="alert">{error}</p>
+    {/if}
+    <button class="danger" onclick={remove}>{t('common.delete')}</button>
+  </Dialog>
+{/if}
+
+{#if exported}
+  <Dialog title={t('common.export')} onClose={() => (exported = '')}>
+    <p>{t('demo.export')}</p>
     <textarea
       readonly
       value={exported}
       rows="10"
-      aria-label={t('common.export')}></textarea></Dialog
-  >{/if}
+      aria-label={t('common.export')}></textarea>
+  </Dialog>
+{/if}
 
 <style>
   .server-field {
