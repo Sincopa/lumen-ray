@@ -18,6 +18,7 @@
 
 	let killSwitch = $state(false);
 	let autoConnect = $state(false);
+
 	const languageOptions = SUPPORTED_LANGUAGES.map((lang) => ({
 		value: lang.code,
 		label: lang.name,
@@ -137,6 +138,35 @@
 				onchange={(val) => shaderSettings.setTooltipsEnabled(val)}
 			/>
 		</SettingRow>
+
+		<!-- Section: Interface -->
+		<div class="section-header">
+			<span class="section-title">{t('settings.uiSection')}</span>
+		</div>
+
+		<!-- UI Scale Slider -->
+		<SettingRow
+			label={t('settings.uiScale')}
+			description={t('settings.uiScaleDesc')}
+		>
+			<div class="range-control">
+				<input
+					type="range"
+					min="0.75"
+					max="1.5"
+					step="0.05"
+					aria-label={t('settings.uiScale')}
+					value={shaderSettings.uiScale}
+					oninput={(e) =>
+						shaderSettings.setUiScale(
+							parseFloat((e.target as HTMLInputElement).value),
+						)}
+					class="range-slider"
+				/>
+				<span class="range-val">{Math.round(shaderSettings.uiScale * 100)}%</span>
+			</div>
+		</SettingRow>
+
 
 		<!-- Section: Background Shader -->
 		<div class="section-header">

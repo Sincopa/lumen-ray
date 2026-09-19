@@ -4,6 +4,12 @@ import './styles/tokens.css';
 
 import App from './app/App.svelte';
 import { i18n } from './lib/i18n';
+import { APP_WIDTH, APP_HEIGHT } from './lib/constants/app';
+
+// Keep CSS custom properties in sync with the TS constants.
+const root = document.documentElement;
+root.style.setProperty('--app-width', `${APP_WIDTH}px`);
+root.style.setProperty('--app-height', `${APP_HEIGHT}px`);
 
 document.documentElement.lang = i18n.currentLanguage;
 

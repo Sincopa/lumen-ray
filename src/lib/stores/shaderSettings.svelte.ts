@@ -69,6 +69,12 @@ class ShaderSettingsManager {
 	colorB = $state<string>('#06b6d4');
 	exposure = $state<number>(1.6);
 	selectedPreset = $state<string>('aurora');
+	/**
+	 * UI scale multiplier (0.75 – 1.5).
+	 * In Tauri: resizes the native window proportionally (390×s by 845×s).
+	 * In browser dev-mode: applies CSS zoom on the root element.
+	 */
+	uiScale = $state<number>(1.0);
 
 	// Compatibility getter/setter for idleColor
 	get idleColor(): string {
@@ -131,6 +137,13 @@ class ShaderSettingsManager {
 					) {
 						this.selectedPreset = parsed.selectedPreset;
 					}
+					if (
+						typeof parsed.uiScale === 'number' &&
+						Number.isFinite(parsed.uiScale) &&
+						parsed.uiScale >= 0.75 &&
+						parsed.uiScale <= 1.5
+					)
+						this.uiScale = parsed.uiScale;
 				}
 			} catch (e) {
 				console.error('Failed to load shader settings from localStorage', e);
@@ -152,6 +165,7 @@ class ShaderSettingsManager {
 						colorB: this.colorB,
 						exposure: this.exposure,
 						selectedPreset: this.selectedPreset,
+						uiScale: this.uiScale,
 					}),
 				);
 			} catch (e) {
@@ -217,12 +231,19 @@ class ShaderSettingsManager {
 		}
 	}
 
+	setUiScale(val: number) {
+		if (!Number.isFinite(val)) return;
+		this.uiScale = Math.max(0.75, Math.min(1.5, val));
+		this.persist();
+	}
+
 	reset() {
 		this.enabled = true;
 		this.idleColorA = '#4d4d4d';
 		this.idleColorB = '#a8a8a8';
 		this.applyPreset('aurora');
 		this.exposure = 1.6;
+		this.uiScale = 1.0;
 		this.persist();
 	}
 }

@@ -15,6 +15,11 @@
 	import { catalog, connection } from '../lib/services';
 	import { errorCode } from '../lib/services/errors';
 	import { t } from '../lib/i18n';
+	import { shaderSettings } from '../lib/stores/shaderSettings.svelte';
+	import { runtime } from '../lib/runtime';
+	import { APP_WIDTH, APP_HEIGHT } from '../lib/constants/app';
+	import { getCurrentWindow } from '@tauri-apps/api/window';
+	import { LogicalSize } from '@tauri-apps/api/dpi';
 
 	type TabName = 'home' | 'subscriptions' | 'servers' | 'settings' | 'rules';
 
@@ -49,9 +54,49 @@
 	);
 	let selectedCountry = $derived(selectedServer?.countryCode ?? 'fi');
 
+	/**
+	 * Applies the current uiScale:
+	 * - Tauri: resizes the native window (390 × scale, 845 × scale).
+	 *   The CSS width/height stay at 100vw/100vh so the UI fills the window.
+	 *   CSS custom properties --app-width/--app-height are updated so
+	 *   border-radius and clamp() calculations remain correct.
+	 * - Browser dev-mode: CSS zoom on <html> as a visual approximation.
+	 */
+	async function applyScale(scale: number) {
+		const w = Math.round(APP_WIDTH * scale);
+		const h = Math.round(APP_HEIGHT * scale);
+
+		// Set CSS zoom on .app-viewport — scales ALL UI elements proportionally
+		// (text, padding, border-radius, icons — everything).
+		// --app-width stays at 390px; zoom makes the 390px box visually larger.
+		document.documentElement.style.setProperty('--ui-zoom', String(scale));
+
+		if (runtime.isTauri) {
+			// Resize the native window to match the zoomed dimensions so the
+			// scaled content fits perfectly without clipping or empty space.
+			try {
+				console.log(`[scale] setSize → ${w}×${h} (scale=${scale})`);
+				await getCurrentWindow().setSize(new LogicalSize(w, h));
+				console.log(`[scale] setSize OK`);
+			} catch (e) {
+				console.error('[scale] Failed to resize Tauri window:', e);
+			}
+		} else {
+			// Browser dev-mode: zoom the html element so the page shrinks/grows
+			// without needing a native window resize.
+			document.documentElement.style.zoom = scale === 1 ? '' : String(scale);
+		}
+	}
+
+	// Reactively resize whenever uiScale changes
+	$effect(() => {
+		void applyScale(shaderSettings.uiScale);
+	});
+
 	onMount(() => {
 		void connection.initialize();
 	});
+
 
 	// Action handlers
 	const toggleConnection = () => {
@@ -200,14 +245,18 @@
 	}
 	.app-viewport {
 		position: relative;
-		width: min(390px, 100vw);
-		height: min(845px, 100vh);
+		width: min(var(--app-width), 100vw);
+		height: min(var(--app-height), 100vh);
 		display: flex;
 		justify-content: center;
 		align-items: center;
 		overflow: hidden;
 		background-color: #08080b;
-		border-radius: var(--radius-window);
+		border-radius: var(--radius-window) var(--radius-window) var(--radius-window-bottom) var(--radius-window-bottom);
+		/* Scales the entire UI (text, spacing, icons) proportionally.
+		   --app-width/height stay at base 390×845; the native window is resized
+		   separately to accommodate the zoomed content. */
+		zoom: var(--ui-zoom, 1);
 	}
 
 	.app-ui {
@@ -216,13 +265,13 @@
 		display: flex;
 		flex-direction: column;
 		width: 100%;
-		max-width: 390px;
+		max-width: var(--app-width);
 		min-width: 0;
 		height: 100%;
 		min-height: 0;
 		padding: 16px 16px 0;
 		box-sizing: border-box;
-		border-radius: var(--radius-window);
+		border-radius: var(--radius-window) var(--radius-window) var(--radius-window-bottom) var(--radius-window-bottom);
 		transition: background-color 0.3s ease;
 	}
 
@@ -239,7 +288,7 @@
 		backdrop-filter: blur(12px);
 		background-repeat: no-repeat;
 		background-position: bottom;
-		border-radius: var(--radius-window);
+		border-radius: var(--radius-window) var(--radius-window) var(--radius-window-bottom) var(--radius-window-bottom);
 		pointer-events: none;
 		z-index: -1;
 		opacity: 0;

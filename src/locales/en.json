@@ -121,7 +121,12 @@
 		"shaderReset": "Reset to Default",
 		"animation": "Animated background",
 		"tooltips": "Tooltips",
-		"tooltipsDesc": "Show tooltips when hovering over buttons"
+		"tooltipsDesc": "Show tooltips when hovering over buttons",
+		"uiSection": "Interface",
+		"uiScale": "Interface Scale",
+		"uiScaleDesc": "Increase scale for high-resolution (2K/4K) monitors",
+		"uiAutoScale": "Auto DPI",
+		"uiAutoScaleDesc": "Automatically adjust scale to match screen pixel density"
 	},
 	"demo": {
 		"notice": "Demo mode · traffic is not protected",

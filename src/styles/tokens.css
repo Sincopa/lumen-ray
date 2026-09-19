@@ -1,4 +1,8 @@
 :root {
+	/* App dimensions — set programmatically from src/lib/constants/app.ts */
+	--app-width: 400px;
+	--app-height: 700px;
+
 	/* Colors */
 	--color-background: #0a0a0a;
 	--color-surface: rgba(0, 0, 0, 0.2);
@@ -31,6 +35,7 @@
 	--radius-md: 24px;
 	--radius-pill: 124px;
 	--radius-window: 24px;
+	--radius-window-bottom: 48px;
 
 	/* Motion */
 	--ease-spring: cubic-bezier(0.22, 1, 0.36, 1);
