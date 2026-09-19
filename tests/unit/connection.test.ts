@@ -5,115 +5,137 @@ import { ConnectionController } from '../../src/lib/stores/connection';
 import { ServiceError } from '../../src/lib/services/errors';
 
 afterEach(() => {
-  vi.useRealTimers();
+	vi.useRealTimers();
 });
 
 describe('connection lifecycle', () => {
-  it('connects to selected ID and preserves timestamp independently of views', async () => {
-    const vpn = new BrowserVpnService(0);
-    const controller = new ConnectionController(vpn);
+	it.each(['toggle', 'switchServer'] as const)(
+		'%s reports an unknown state when both connection and reconciliation fail',
+		async (operation) => {
+			const vpn = new BrowserVpnService(0);
+			const controller = new ConnectionController(vpn);
+			await controller.initialize();
+			vi.spyOn(vpn, 'connect').mockRejectedValueOnce(
+				new ServiceError('unavailable'),
+			);
+			vi.spyOn(vpn, 'getStatus').mockRejectedValueOnce(
+				new Error('IPC unavailable'),
+			);
+			await controller[operation]('demo-fi');
+			expect(get(controller.state)).toEqual({
+				status: 'error',
+				info: null,
+				busy: false,
+				error: 'unavailable',
+			});
+		},
+	);
 
-    await controller.initialize();
-    await controller.toggle('demo-nl');
+	it('connects to selected ID and preserves timestamp independently of views', async () => {
+		const vpn = new BrowserVpnService(0);
+		const controller = new ConnectionController(vpn);
 
-    const snapshot = get(controller.state);
-    expect(snapshot.status).toBe('connected');
-    expect(snapshot.info?.serverId).toBe('demo-nl');
-    expect(snapshot.info?.demo).toBe(true);
-    expect(snapshot.info?.ip).toBe('');
+		await controller.initialize();
+		await controller.toggle('demo-nl');
 
-    await controller.initialize();
-    expect(get(controller.state).info?.connectedAt).toBe(
-      snapshot.info?.connectedAt,
-    );
+		const snapshot = get(controller.state);
+		expect(snapshot.status).toBe('connected');
+		expect(snapshot.info?.serverId).toBe('demo-nl');
+		expect(snapshot.info?.demo).toBe(true);
+		expect(snapshot.info?.ip).toBe('');
 
-    await controller.toggle('demo-nl');
-    expect(get(controller.state).status).toBe('disconnected');
-  });
+		await controller.initialize();
+		expect(get(controller.state).info?.connectedAt).toBe(
+			snapshot.info?.connectedAt,
+		);
 
-  it('releases the lock after failure and allows retry', async () => {
-    const vpn = new BrowserVpnService(0);
-    const controller = new ConnectionController(vpn);
+		await controller.toggle('demo-nl');
+		expect(get(controller.state).status).toBe('disconnected');
+	});
 
-    await controller.initialize();
-    vi.spyOn(vpn, 'connect').mockRejectedValueOnce(
-      new ServiceError('unavailable'),
-    );
+	it('releases the lock after failure and allows retry', async () => {
+		const vpn = new BrowserVpnService(0);
+		const controller = new ConnectionController(vpn);
 
-    await controller.toggle('demo-fi');
-    expect(get(controller.state).busy).toBe(false);
-    expect(get(controller.state).error).toBe('unavailable');
+		await controller.initialize();
+		vi.spyOn(vpn, 'connect').mockRejectedValueOnce(
+			new ServiceError('unavailable'),
+		);
 
-    await controller.toggle('demo-fi');
-    expect(get(controller.state).status).toBe('connected');
-  });
+		await controller.toggle('demo-fi');
+		expect(get(controller.state).busy).toBe(false);
+		expect(get(controller.state).error).toBe('unavailable');
 
-  it('ignores duplicate connect clicks', async () => {
-    const vpn = new BrowserVpnService(0);
-    const controller = new ConnectionController(vpn);
+		await controller.toggle('demo-fi');
+		expect(get(controller.state).status).toBe('connected');
+	});
 
-    await controller.initialize();
-    const spy = vi.spyOn(vpn, 'connect');
+	it('ignores duplicate connect clicks', async () => {
+		const vpn = new BrowserVpnService(0);
+		const controller = new ConnectionController(vpn);
 
-    await Promise.all([
-      controller.toggle('demo-fi'),
-      controller.toggle('demo-nl'),
-    ]);
+		await controller.initialize();
+		const spy = vi.spyOn(vpn, 'connect');
 
-    expect(spy).toHaveBeenCalledTimes(1);
-    expect(get(controller.state).info?.serverId).toBe('demo-fi');
-  });
+		await Promise.all([
+			controller.toggle('demo-fi'),
+			controller.toggle('demo-nl'),
+		]);
 
-  it('reports timeout without claiming disconnection', async () => {
-    vi.useFakeTimers();
-    const vpn = new BrowserVpnService(0);
-    const controller = new ConnectionController(vpn, 20);
+		expect(spy).toHaveBeenCalledTimes(1);
+		expect(get(controller.state).info?.serverId).toBe('demo-fi');
+	});
 
-    vi.spyOn(vpn, 'getStatus').mockImplementation(() => new Promise(() => {}));
+	it('reports timeout without claiming disconnection', async () => {
+		vi.useFakeTimers();
+		const vpn = new BrowserVpnService(0);
+		const controller = new ConnectionController(vpn, 20);
 
-    const pending = controller.initialize();
-    await vi.advanceTimersByTimeAsync(21);
-    await pending;
+		vi.spyOn(vpn, 'getStatus').mockImplementation(() => new Promise(() => {}));
 
-    expect(get(controller.state)).toMatchObject({
-      status: 'error',
-      busy: false,
-      error: 'timeout',
-    });
-  });
+		const pending = controller.initialize();
+		await vi.advanceTimersByTimeAsync(21);
+		await pending;
 
-  it('reconnect remembers server after disconnect clears it', async () => {
-    const vpn = new BrowserVpnService(0);
+		expect(get(controller.state)).toMatchObject({
+			status: 'error',
+			busy: false,
+			error: 'timeout',
+		});
+	});
 
-    await vpn.connect('demo-de');
-    await vpn.reconnect();
+	it('reconnect remembers server after disconnect clears it', async () => {
+		const vpn = new BrowserVpnService(0);
 
-    expect((await vpn.getConnectionInfo())?.serverId).toBe('demo-de');
-  });
+		await vpn.connect('demo-de');
+		await vpn.reconnect();
 
-  it('disconnect invalidates a pending browser connection', async () => {
-    const vpn = new BrowserVpnService(5);
+		expect((await vpn.getConnectionInfo())?.serverId).toBe('demo-de');
+	});
 
-    const pending = vpn.connect('demo-fi');
-    await vpn.disconnect();
-    await pending;
+	it('disconnect invalidates a pending browser connection', async () => {
+		const vpn = new BrowserVpnService(5);
 
-    expect(await vpn.getStatus()).toBe('disconnected');
-    expect(await vpn.getConnectionInfo()).toBeNull();
-  });
+		const pending = vpn.connect('demo-fi');
+		await vpn.disconnect();
+		await pending;
 
-  it('switches server seamlessly when already connected', async () => {
-    const vpn = new BrowserVpnService(0);
-    const controller = new ConnectionController(vpn);
+		expect(await vpn.getStatus()).toBe('disconnected');
+		expect(await vpn.getConnectionInfo()).toBeNull();
+	});
 
-    await controller.initialize();
-    await controller.toggle('demo-fi');
-    expect(get(controller.state).status).toBe('connected');
-    expect(get(controller.state).info?.serverId).toBe('demo-fi');
+	it('switches server seamlessly when already connected', async () => {
+		const vpn = new BrowserVpnService(0);
+		const controller = new ConnectionController(vpn);
 
-    await controller.switchServer('demo-nl');
-    expect(get(controller.state).status).toBe('connected');
-    expect(get(controller.state).info?.serverId).toBe('demo-nl');
-    expect(get(controller.state).busy).toBe(false);
-  });
+		await controller.initialize();
+		await controller.toggle('demo-fi');
+		expect(get(controller.state).status).toBe('connected');
+		expect(get(controller.state).info?.serverId).toBe('demo-fi');
+
+		await controller.switchServer('demo-nl');
+		expect(get(controller.state).status).toBe('connected');
+		expect(get(controller.state).info?.serverId).toBe('demo-nl');
+		expect(get(controller.state).busy).toBe(false);
+	});
 });

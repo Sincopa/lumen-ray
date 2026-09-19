@@ -4,141 +4,134 @@ import type { VpnConnectionState, VpnConnectionInfo } from '../types/models';
 import { errorCode, withTimeout, type ErrorCode } from '../services/errors';
 
 export interface ConnectionSnapshot {
-  status: VpnConnectionState;
-  info: VpnConnectionInfo | null;
-  busy: boolean;
-  error: ErrorCode | null;
+	status: VpnConnectionState;
+	info: VpnConnectionInfo | null;
+	busy: boolean;
+	error: ErrorCode | null;
 }
 
 export class ConnectionController {
-  private current: ConnectionSnapshot = {
-    status: 'initializing',
-    info: null,
-    busy: true,
-    error: null,
-  };
+	private current: ConnectionSnapshot = {
+		status: 'initializing',
+		info: null,
+		busy: true,
+		error: null,
+	};
 
-  readonly state = writable(this.current);
+	readonly state = writable(this.current);
 
-  constructor(
-    private vpn: VpnService,
-    private timeoutMs = 10000,
-  ) {}
+	constructor(
+		private vpn: VpnService,
+		private timeoutMs = 10000,
+	) {}
 
-  private update(patch: Partial<ConnectionSnapshot>) {
-    this.current = { ...this.current, ...patch };
-    this.state.set(this.current);
-  }
+	private update(patch: Partial<ConnectionSnapshot>) {
+		this.current = { ...this.current, ...patch };
+		this.state.set(this.current);
+	}
 
-  async initialize() {
-    this.update({ status: 'initializing', busy: true, error: null });
+	private async readConnection() {
+		const [status, info] = await withTimeout(
+			Promise.all([this.vpn.getStatus(), this.vpn.getConnectionInfo()]),
+			this.timeoutMs,
+		);
+		return { status, info };
+	}
 
-    try {
-      const [status, info] = await withTimeout(
-        Promise.all([this.vpn.getStatus(), this.vpn.getConnectionInfo()]),
-        this.timeoutMs,
-      );
-      this.update({ status, info });
-    } catch (e) {
-      this.update({ status: 'error', error: errorCode(e) });
-    } finally {
-      this.update({ busy: false });
-    }
-  }
+	private async reconcileAfterError(cause: unknown) {
+		// An IPC timeout is an unknown outcome: reconcile before enabling another connect.
+		const error = errorCode(cause);
+		try {
+			const { status, info } = await this.readConnection();
+			this.update({ status, info, error });
+		} catch {
+			this.update({ status: 'error', info: null, error });
+		}
+	}
 
-  async toggle(serverId: string | null) {
-    if (this.current.busy) {
-      return;
-    }
+	async initialize() {
+		this.update({ status: 'initializing', busy: true, error: null });
 
-    const disconnecting = this.current.status === 'connected';
-    if (!disconnecting && !serverId) {
-      this.update({ error: 'invalidServer' });
-      return;
-    }
+		try {
+			const { status, info } = await this.readConnection();
+			this.update({ status, info });
+		} catch (e) {
+			this.update({ status: 'error', error: errorCode(e) });
+		} finally {
+			this.update({ busy: false });
+		}
+	}
 
-    this.update({
-      busy: true,
-      error: null,
-      status: disconnecting ? 'disconnecting' : 'connecting',
-    });
+	async toggle(serverId: string | null) {
+		if (this.current.busy) {
+			return;
+		}
 
-    try {
-      await withTimeout(
-        disconnecting ? this.vpn.disconnect() : this.vpn.connect(serverId!),
-        this.timeoutMs,
-      );
+		const disconnecting = this.current.status === 'connected';
+		if (!disconnecting && !serverId) {
+			this.update({ error: 'invalidServer' });
+			return;
+		}
 
-      const [status, info] = await withTimeout(
-        Promise.all([this.vpn.getStatus(), this.vpn.getConnectionInfo()]),
-        this.timeoutMs,
-      );
+		this.update({
+			busy: true,
+			error: null,
+			status: disconnecting ? 'disconnecting' : 'connecting',
+		});
 
-      this.update({ status, info });
-    } catch (e) {
-      // An IPC timeout is an unknown outcome: reconcile before enabling another connect.
-      try {
-        const [status, info] = await withTimeout(
-          Promise.all([this.vpn.getStatus(), this.vpn.getConnectionInfo()]),
-          this.timeoutMs,
-        );
-        this.update({ status, info, error: errorCode(e) });
-      } catch {
-        this.update({ status: 'error', info: null, error: errorCode(e) });
-      }
-    } finally {
-      this.update({ busy: false });
-    }
-  }
+		try {
+			await withTimeout(
+				disconnecting ? this.vpn.disconnect() : this.vpn.connect(serverId!),
+				this.timeoutMs,
+			);
 
-  async switchServer(serverId: string) {
-    if (this.current.busy) {
-      return;
-    }
-    if (!serverId) {
-      this.update({ error: 'invalidServer' });
-      return;
-    }
+			const { status, info } = await this.readConnection();
 
-    const wasActive =
-      this.current.status === 'connected' ||
-      this.current.status === 'connecting';
+			this.update({ status, info });
+		} catch (e) {
+			await this.reconcileAfterError(e);
+		} finally {
+			this.update({ busy: false });
+		}
+	}
 
-    this.update({
-      busy: true,
-      error: null,
-      status: 'connecting',
-    });
+	async switchServer(serverId: string) {
+		if (this.current.busy) {
+			return;
+		}
+		if (!serverId) {
+			this.update({ error: 'invalidServer' });
+			return;
+		}
 
-    try {
-      if (wasActive) {
-        try {
-          await withTimeout(this.vpn.disconnect(), this.timeoutMs);
-        } catch {
-          // Ignore disconnect error during seamless switch
-        }
-      }
+		const wasActive =
+			this.current.status === 'connected' ||
+			this.current.status === 'connecting';
 
-      await withTimeout(this.vpn.connect(serverId), this.timeoutMs);
+		this.update({
+			busy: true,
+			error: null,
+			status: 'connecting',
+		});
 
-      const [status, info] = await withTimeout(
-        Promise.all([this.vpn.getStatus(), this.vpn.getConnectionInfo()]),
-        this.timeoutMs,
-      );
+		try {
+			if (wasActive) {
+				try {
+					await withTimeout(this.vpn.disconnect(), this.timeoutMs);
+				} catch {
+					// Ignore disconnect error during seamless switch
+				}
+			}
 
-      this.update({ status, info });
-    } catch (e) {
-      try {
-        const [status, info] = await withTimeout(
-          Promise.all([this.vpn.getStatus(), this.vpn.getConnectionInfo()]),
-          this.timeoutMs,
-        );
-        this.update({ status, info, error: errorCode(e) });
-      } catch {
-        this.update({ status: 'error', info: null, error: errorCode(e) });
-      }
-    } finally {
-      this.update({ busy: false });
-    }
-  }
+			await withTimeout(this.vpn.connect(serverId), this.timeoutMs);
+
+			const { status, info } = await this.readConnection();
+
+			this.update({ status, info });
+		} catch (e) {
+			await this.reconcileAfterError(e);
+		} finally {
+			this.update({ busy: false });
+		}
+	}
 }

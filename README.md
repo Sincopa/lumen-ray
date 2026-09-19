@@ -62,6 +62,7 @@ pausing, WebGL context restoration and a 30 FPS limit. Fonts and icons are local
 - `npm run lint`: ESLint for TypeScript and Svelte.
 - `npm run format:check` / `npm run format`: Prettier.
 - `npm test`: unit tests for lifecycle, persistence, validation and locales.
+- `npm run benchmark:catalog`: repeatable batch persistence benchmark; see [PERFORMANCE.md](PERFORMANCE.md) for scope and measurements.
 - `npm run build && npm run test:e2e`: production-browser scenarios in local Edge.
 - `cargo test --locked --manifest-path src-tauri/Cargo.toml`: native command tests.
 

@@ -1,3 +1,3 @@
 interface Window {
-  __TAURI_INTERNALS__?: Record<string, unknown>;
+	__TAURI_INTERNALS__?: Record<string, unknown>;
 }

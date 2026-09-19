@@ -1,52 +1,53 @@
 {
-  "name": "lumen",
-  "private": true,
-  "version": "0.1.0",
-  "description": "Lumen — Modern, ultra-lightweight desktop VPN & proxy client built with Svelte 5 and Tauri 2",
-  "license": "Apache-2.0",
-  "type": "module",
-  "scripts": {
-    "lint": "eslint src tests *.ts *.js --max-warnings 0",
-    "format": "prettier --write src tests *.ts *.js *.json README.md",
-    "format:check": "prettier --check src tests *.ts *.js *.json README.md",
-    "test": "vitest run",
-    "test:e2e": "playwright test",
-    "test:smoke": "node scripts/native-smoke.mjs",
-    "dev": "vite",
-    "build": "vite build",
-    "preview": "vite preview",
-    "check": "svelte-check --tsconfig ./tsconfig.app.json && tsc -p tsconfig.node.json",
-    "tauri": "tauri",
-    "tauri:dev": "tauri dev",
-    "tauri:build": "tauri build",
-    "build:release": "tauri build --no-bundle",
-    "build:installer": "tauri build"
-  },
-  "engines": {
-    "node": ">=22.12.0"
-  },
-  "devDependencies": {
-    "@eslint/js": "^10.0.1",
-    "@playwright/test": "^1.63.0",
-    "@sveltejs/vite-plugin-svelte": "^7.3.0",
-    "@tauri-apps/cli": "^2.11.4",
-    "@tsconfig/svelte": "^5.0.8",
-    "@types/node": "^24.13.3",
-    "eslint": "^10.10.0",
-    "eslint-plugin-svelte": "^3.23.0",
-    "globals": "^17.12.0",
-    "prettier": "^3.9.6",
-    "prettier-plugin-svelte": "^4.1.1",
-    "svelte": "^5.57.0",
-    "svelte-check": "^4.7.6",
-    "typescript": "~6.0.2",
-    "typescript-eslint": "^8.70.0",
-    "vite": "^8.3.0",
-    "vitest": "^5.0.0"
-  },
-  "dependencies": {
-    "@number-flow/svelte": "^0.4.2",
-    "@tauri-apps/api": "^2.11.1",
-    "flag-icons": "^7.5.0"
-  }
+	"name": "lumen",
+	"private": true,
+	"version": "0.1.0",
+	"description": "Lumen — Modern, ultra-lightweight desktop VPN & proxy client built with Svelte 5 and Tauri 2",
+	"license": "Apache-2.0",
+	"type": "module",
+	"scripts": {
+		"lint": "eslint src tests *.ts *.js --max-warnings 0",
+		"format": "prettier --write src tests *.ts *.js *.json README.md",
+		"format:check": "prettier --check src tests *.ts *.js *.json README.md",
+		"test": "vitest run",
+		"test:e2e": "playwright test",
+		"test:smoke": "node scripts/native-smoke.mjs",
+		"benchmark:catalog": "node scripts/benchmark-catalog.mjs",
+		"dev": "vite",
+		"build": "vite build",
+		"preview": "vite preview",
+		"check": "svelte-check --tsconfig ./tsconfig.app.json && tsc -p tsconfig.node.json",
+		"tauri": "tauri",
+		"tauri:dev": "tauri dev",
+		"tauri:build": "tauri build",
+		"build:release": "tauri build --no-bundle",
+		"build:installer": "tauri build"
+	},
+	"engines": {
+		"node": ">=22.12.0"
+	},
+	"devDependencies": {
+		"@eslint/js": "^10.0.1",
+		"@playwright/test": "^1.63.0",
+		"@sveltejs/vite-plugin-svelte": "^7.3.0",
+		"@tauri-apps/cli": "^2.11.4",
+		"@tsconfig/svelte": "^5.0.8",
+		"@types/node": "^24.13.3",
+		"eslint": "^10.10.0",
+		"eslint-plugin-svelte": "^3.23.0",
+		"globals": "^17.12.0",
+		"prettier": "^3.9.6",
+		"prettier-plugin-svelte": "^4.1.1",
+		"svelte": "^5.57.0",
+		"svelte-check": "^4.7.6",
+		"typescript": "~6.0.2",
+		"typescript-eslint": "^8.70.0",
+		"vite": "^8.3.0",
+		"vitest": "^5.0.0"
+	},
+	"dependencies": {
+		"@number-flow/svelte": "^0.4.2",
+		"@tauri-apps/api": "^2.11.1",
+		"flag-icons": "^7.5.0"
+	}
 }

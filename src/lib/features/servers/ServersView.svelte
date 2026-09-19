@@ -1,494 +1,580 @@
 <script lang="ts">
-  import CountryFlag from '../../components/CountryFlag.svelte';
-  import IconButton from '../../components/IconButton.svelte';
-  import PopupMenu from '../../components/PopupMenu.svelte';
-  import MenuItem from '../../components/MenuItem.svelte';
-  import StatusDot from '../../components/StatusDot.svelte';
-  import NumberFlow from '@number-flow/svelte';
-  import { catalog } from '../../services';
-  import { errorCode } from '../../services/errors';
-  import { t } from '../../i18n';
-  import type { Server } from '../../services/catalog';
-  import reloadIcon from '../../../assets/reload.svg';
-  import searchIcon from '../../../assets/search.svg';
-  import crossIcon from '../../../assets/cross.svg';
-  import menuIcon from '../../../assets/menu.svg';
-  import pencilIcon from '../../../assets/pencil.svg';
-  import trashIcon from '../../../assets/trash.svg';
-  import shareIcon from '../../../assets/share.svg';
+	import { onDestroy } from 'svelte';
+	import { createDeferredTask } from '../../utils/deferredTask';
+	import CountryFlag from '../../components/CountryFlag.svelte';
+	import IconButton from '../../components/IconButton.svelte';
+	import PopupMenu from '../../components/PopupMenu.svelte';
+	import MenuItem from '../../components/MenuItem.svelte';
+	import StatusDot from '../../components/StatusDot.svelte';
+	import NumberFlow from '@number-flow/svelte';
+	import { catalog } from '../../services';
+	import { errorCode } from '../../services/errors';
+	import { t } from '../../i18n';
+	import type { Server } from '../../services/catalog';
+	import reloadIcon from '../../../assets/reload.svg';
+	import searchIcon from '../../../assets/search.svg';
+	import checkIcon from '../../../assets/check.svg';
+	import crossIcon from '../../../assets/cross.svg';
+	import menuIcon from '../../../assets/menu.svg';
+	import pencilIcon from '../../../assets/pencil.svg';
+	import trashIcon from '../../../assets/trash.svg';
+	import shareIcon from '../../../assets/share.svg';
 
-  const catalogStore = catalog.state;
-  let {
-    selectedId = '',
-    disabled = false,
-    compact = false,
-    onSelect,
-    onManageSubscription,
-  }: {
-    selectedId?: string;
-    disabled?: boolean;
-    compact?: boolean;
-    onManageSubscription?: () => void;
-    onSelect?: (server: {
-      id: string;
-      countryCode: string;
-      name: string;
-    }) => void;
-  } = $props();
+	const searchTask = createDeferredTask();
+	const renameTask = createDeferredTask();
+	onDestroy(() => {
+		searchTask.cancel();
+		renameTask.cancel();
+	});
+	const catalogStore = catalog.state;
+	let {
+		selectedId = '',
+		disabled = false,
+		compact = false,
+		onSelect,
+	}: {
+		selectedId?: string;
+		disabled?: boolean;
+		compact?: boolean;
+		onManageSubscription?: () => void;
+		onSelect?: (server: {
+			id: string;
+			countryCode: string;
+			name: string;
+		}) => void;
+	} = $props();
 
-  let query = $state('');
-  let searching = $state(false);
-  let searchClosing = $state(false);
-  let searchInputEl = $state<HTMLInputElement | null>(null);
-  let menu = $state(false);
-  let busy = $state(false);
-  let error = $state('');
-  let filtered = $derived(
-    $catalogStore.servers.filter((server) =>
-      (
-        t('servers.countries.' + server.countryCode) +
-        ' ' +
-        server.protocol +
-        ' ' +
-        ($catalogStore.subscriptions.find(
-          (sub) => sub.id === server.subscriptionId,
-        )?.name ?? '')
-      )
-        .toLowerCase()
-        .includes(query.toLowerCase()),
-    ),
-  );
-  let activeSubscription = $derived(
-    $catalogStore.subscriptions.find(
-      (sub) =>
-        sub.id ===
-        ($catalogStore.selectedSubscriptionId ??
-          $catalogStore.servers.find(
-            (server) =>
-              server.id === (selectedId || $catalogStore.selectedServerId),
-          )?.subscriptionId),
-    ) ?? $catalogStore.subscriptions[0],
-  );
+	let query = $state('');
+	let searching = $state(false);
+	let searchClosing = $state(false);
+	let searchInputEl = $state<HTMLInputElement | null>(null);
+	let editingSub = $state(false);
+	let editClosing = $state(false);
+	let editSubName = $state('');
+	let renameInputEl = $state<HTMLInputElement | null>(null);
+	let menu = $state(false);
+	let busy = $state(false);
+	let error = $state('');
+	const subscriptionsById = $derived(
+		new Map(
+			$catalogStore.subscriptions.map((subscription) => [
+				subscription.id,
+				subscription,
+			]),
+		),
+	);
+	const searchableServers = $derived(
+		$catalogStore.servers.map((server) => ({
+			server,
+			text: `${t('servers.countries.' + server.countryCode)} ${server.protocol} ${subscriptionsById.get(server.subscriptionId)?.name ?? ''}`.toLowerCase(),
+		})),
+	);
+	const normalizedQuery = $derived(query.toLowerCase());
+	let filtered = $derived(
+		normalizedQuery
+			? searchableServers
+					.filter((entry) => entry.text.includes(normalizedQuery))
+					.map((entry) => entry.server)
+			: $catalogStore.servers,
+	);
+	const activeSubscriptionId = $derived(
+		$catalogStore.selectedSubscriptionId ??
+			$catalogStore.servers.find(
+				(server) =>
+					server.id === (selectedId || $catalogStore.selectedServerId),
+			)?.subscriptionId,
+	);
+	let activeSubscription = $derived(
+		subscriptionsById.get(activeSubscriptionId ?? '') ??
+			$catalogStore.subscriptions[0],
+	);
 
-  async function refresh() {
-    if (busy) return;
-    busy = true;
-    error = '';
-    try {
-      await Promise.all(
-        $catalogStore.servers.map((server) => catalog.pingServer(server.id)),
-      );
-    } catch (e) {
-      error = t('errors.' + errorCode(e));
-    } finally {
-      busy = false;
-    }
-  }
+	async function refresh() {
+		if (busy) return;
+		busy = true;
+		error = '';
+		try {
+			await Promise.all(
+				$catalogStore.servers.map((server) => catalog.pingServer(server.id)),
+			);
+		} catch (e) {
+			error = t('errors.' + errorCode(e));
+		} finally {
+			busy = false;
+		}
+	}
 
-  function handleOpenSearch() {
-    searching = true;
-    searchClosing = false;
-    setTimeout(() => {
-      searchInputEl?.focus();
-    }, 180);
-  }
+	function handleOpenSearch() {
+		searching = true;
+		searchClosing = false;
+		searchTask.schedule(() => {
+			searchInputEl?.focus();
+		}, 180);
+	}
 
-  function handleCloseSearch() {
-    searchClosing = true;
-    setTimeout(() => {
-      searching = false;
-      searchClosing = false;
-      query = '';
-    }, 240);
-  }
+	function handleCloseSearch() {
+		searchClosing = true;
+		searchTask.schedule(() => {
+			searching = false;
+			searchClosing = false;
+			query = '';
+		}, 240);
+	}
 
-  function select(server: Server) {
-    onSelect?.({
-      id: server.id,
-      countryCode: server.countryCode,
-      name: t('servers.countries.' + server.countryCode),
-    });
-  }
+	function handleOpenRename() {
+		menu = false;
+		editSubName = activeSubscription?.name ?? '';
+		editingSub = true;
+		editClosing = false;
+		renameTask.schedule(() => {
+			renameInputEl?.focus();
+			renameInputEl?.select();
+		}, 180);
+	}
+
+	function handleCloseRename() {
+		editClosing = true;
+		renameTask.schedule(() => {
+			editingSub = false;
+			editClosing = false;
+			editSubName = '';
+		}, 240);
+	}
+
+	function handleSaveRename() {
+		const trimmed = editSubName.trim();
+		if (!trimmed || !activeSubscription) return;
+		try {
+			catalog.renameSubscription(activeSubscription.id, trimmed);
+			handleCloseRename();
+		} catch (e) {
+			error = t('errors.' + errorCode(e));
+		}
+	}
+
+	function select(server: Server) {
+		onSelect?.({
+			id: server.id,
+			countryCode: server.countryCode,
+			name: t('servers.countries.' + server.countryCode),
+		});
+	}
 </script>
 
 <svelte:window
-  onclick={(e) => {
-    if (menu) {
-      const target = e.target as HTMLElement | null;
-      if (!target?.closest('.popup-menu') && !target?.closest('.icon-btn')) {
-        menu = false;
-      }
-    }
-  }}
+	onclick={(e) => {
+		if (menu) {
+			const target = e.target as HTMLElement | null;
+			if (!target?.closest('.popup-menu') && !target?.closest('.icon-btn')) {
+				menu = false;
+			}
+		}
+	}}
 />
 
 <section class="servers-view" class:compact aria-label={t('servers.title')}>
-  <div class="header-wrapper">
-    <div class="header-pill">
-      <!-- Standard header content -->
-      <div class="header-normal" class:header-hidden={searching}>
-        <div class="header-card-title">
-          <span class="title-text">
-            {activeSubscription?.name ?? t('servers.title')}
-          </span>
-          <StatusDot variant="active" />
-        </div>
-        <div class="header-card-actions">
-          <IconButton
-            icon={searchIcon}
-            ariaLabel={t('common.search')}
-            onclick={handleOpenSearch}
-          />
-          <IconButton
-            icon={reloadIcon}
-            ariaLabel={t('servers.reloadServers')}
-            disabled={busy || !$catalogStore.servers.length}
-            onclick={refresh}
-          />
-          {#if !compact}
-            <IconButton
-              icon={menuIcon}
-              ariaLabel={t('common.menu')}
-              active={menu}
-              expanded={menu}
-              onclick={() => (menu = !menu)}
-            />
-          {/if}
-        </div>
-      </div>
+	<div class="header-wrapper">
+		<div class="header-pill">
+			<!-- Standard header content -->
+			<div class="header-normal" class:header-hidden={searching || editingSub}>
+				<div class="header-card-title">
+					<span class="title-text">
+						{activeSubscription?.name ?? t('servers.title')}
+					</span>
+					<StatusDot variant="active" />
+				</div>
+				<div class="header-card-actions">
+					<IconButton
+						icon={searchIcon}
+						ariaLabel={t('common.search')}
+						onclick={handleOpenSearch}
+					/>
+					<IconButton
+						icon={reloadIcon}
+						ariaLabel={t('servers.reloadServers')}
+						disabled={busy || !$catalogStore.servers.length}
+						onclick={refresh}
+					/>
+					{#if !compact}
+						<IconButton
+							icon={menuIcon}
+							ariaLabel={t('common.menu')}
+							active={menu}
+							expanded={menu}
+							onclick={() => (menu = !menu)}
+						/>
+					{/if}
+				</div>
+			</div>
 
-      <!-- Search bar inside header pill -->
-      <div
-        class="header-search"
-        class:search-open={searching && !searchClosing}
-        class:search-closing={searchClosing}
-      >
-        <img src={searchIcon} alt="" class="search-header-icon" />
-        <input
-          bind:this={searchInputEl}
-          type="text"
-          class="search-header-input"
-          placeholder={t('servers.searchPlaceholder') || 'Поиск серверов...'}
-          bind:value={query}
-          autocomplete="off"
-          spellcheck="false"
-        />
-        <button
-          type="button"
-          class="close-search-btn"
-          onclick={handleCloseSearch}
-          aria-label={t('common.close')}
-        >
-          <img src={crossIcon} alt="" class="close-icon" />
-        </button>
-      </div>
-    </div>
+			<!-- Search bar inside header pill -->
+			<div
+				class="header-search"
+				class:search-open={searching && !searchClosing}
+				class:search-closing={searchClosing}
+			>
+				<img src={searchIcon} alt="" class="search-header-icon" />
+				<input
+					bind:this={searchInputEl}
+					type="text"
+					class="search-header-input"
+					placeholder={t('servers.searchPlaceholder') || 'Поиск серверов...'}
+					bind:value={query}
+					autocomplete="off"
+					spellcheck="false"
+				/>
+				<button
+					type="button"
+					class="close-search-btn"
+					onclick={handleCloseSearch}
+					aria-label={t('common.close')}
+				>
+					<img src={crossIcon} alt="" class="close-icon" />
+				</button>
+			</div>
 
-    {#if menu && !searching}
-      <PopupMenu top="68px" right="8px">
-        <MenuItem
-          icon={pencilIcon}
-          label={t('common.edit')}
-          onclick={() => {
-            menu = false;
-            onManageSubscription?.();
-          }}
-        />
-        <MenuItem
-          icon={reloadIcon}
-          label={t('common.reload')}
-          onclick={() => {
-            menu = false;
-            void refresh();
-          }}
-        />
-        <MenuItem icon={shareIcon} label={t('common.share')} disabled />
-        <MenuItem
-          icon={trashIcon}
-          label={t('common.delete')}
-          variant="danger"
-          disabled
-        />
-      </PopupMenu>
-    {/if}
-  </div>
+			<!-- Rename bar inside header pill -->
+			<div
+				class="header-search"
+				class:search-open={editingSub && !editClosing}
+				class:search-closing={editClosing}
+			>
+				<img src={pencilIcon} alt="" class="search-header-icon" />
+				<input
+					bind:this={renameInputEl}
+					type="text"
+					class="search-header-input"
+					placeholder={t('common.name')}
+					bind:value={editSubName}
+					maxlength="80"
+					autocomplete="off"
+					spellcheck="false"
+					onkeydown={(e) => {
+						if (e.key === 'Enter') {
+							e.preventDefault();
+							handleSaveRename();
+						} else if (e.key === 'Escape') {
+							e.preventDefault();
+							handleCloseRename();
+						}
+					}}
+				/>
+				<button
+					type="button"
+					class="close-search-btn"
+					onclick={handleSaveRename}
+					aria-label={t('common.save')}
+				>
+					<img src={checkIcon} alt="" class="close-icon" />
+				</button>
+				<button
+					type="button"
+					class="close-search-btn"
+					onclick={handleCloseRename}
+					aria-label={t('common.close')}
+				>
+					<img src={crossIcon} alt="" class="close-icon" />
+				</button>
+			</div>
+		</div>
 
-  {#if error}<p role="alert">{error}</p>{/if}
+		{#if menu && !searching && !editingSub}
+			<PopupMenu top="68px" right="8px">
+				<MenuItem
+					icon={pencilIcon}
+					label={t('common.edit')}
+					onclick={handleOpenRename}
+				/>
+				<MenuItem icon={shareIcon} label={t('common.share')} disabled />
+				<MenuItem
+					icon={trashIcon}
+					label={t('common.delete')}
+					variant="danger"
+					disabled
+				/>
+			</PopupMenu>
+		{/if}
+	</div>
 
-  <div class="servers-list">
-    {#each filtered as server (server.id)}
-      <button
-        class="server-row"
-        class:active-server={server.id === selectedId}
-        {disabled}
-        aria-pressed={server.id === selectedId}
-        onclick={() => select(server)}
-      >
-        <CountryFlag countryCode={server.countryCode} size={32} />
-        <span class="server-text">
-          <span class="protocol">{server.protocol}</span>
-          <span>{t('servers.countries.' + server.countryCode)}</span>
-        </span>
-        <span class="ping">
-          {#if server.id === selectedId && !busy}
-            <StatusDot size={8} />
-          {/if}
-          {#if busy}
-            <span class="ping-spinner" aria-label="Loading ping"></span>
-          {:else if typeof server.latency === 'number'}
-            <NumberFlow value={server.latency} /> ms
-          {:else if server.latency === 'timeout'}
-            {t('servers.timeout')}
-          {:else}
-            {server.latency} ms
-          {/if}
-        </span>
-      </button>
-    {:else}<p class="hint">{t('servers.empty')}</p>{/each}
-  </div>
+	{#if error}<p role="alert">{error}</p>{/if}
+
+	<div class="servers-list">
+		{#each filtered as server (server.id)}
+			<button
+				class="server-row"
+				class:active-server={server.id === selectedId}
+				{disabled}
+				aria-pressed={server.id === selectedId}
+				onclick={() => select(server)}
+			>
+				<CountryFlag countryCode={server.countryCode} size={32} />
+				<span class="server-text">
+					<span class="protocol">{server.protocol}</span>
+					<span>{t('servers.countries.' + server.countryCode)}</span>
+				</span>
+				<span class="ping">
+					{#if server.id === selectedId && !busy}
+						<StatusDot size={8} />
+					{/if}
+					{#if busy}
+						<span class="ping-spinner" aria-label="Loading ping"></span>
+					{:else if typeof server.latency === 'number'}
+						<NumberFlow value={server.latency} /> ms
+					{:else if server.latency === 'timeout'}
+						{t('servers.timeout')}
+					{:else}
+						{server.latency} ms
+					{/if}
+				</span>
+			</button>
+		{:else}<p class="hint">{t('servers.empty')}</p>{/each}
+	</div>
 </section>
 
 <style>
-  .servers-view {
-    display: flex;
-    flex-direction: column;
-    gap: 10px;
-    height: 100%;
-    min-height: 0;
-    position: relative;
-  }
-  .header-wrapper {
-    position: relative;
-    flex-shrink: 0;
-  }
-  .header-pill {
-    position: relative;
-    height: 62px;
-    background: #00000038;
-    border-radius: 124px;
-    -webkit-backdrop-filter: blur(14px);
-    backdrop-filter: blur(14px);
-    box-sizing: border-box;
-    width: 100%;
-    overflow: hidden;
-    border: 1px solid transparent;
-    transition: border-color 180ms ease;
-  }
+	.servers-view {
+		display: flex;
+		flex-direction: column;
+		gap: 10px;
+		height: 100%;
+		min-height: 0;
+		position: relative;
+	}
+	.header-wrapper {
+		position: relative;
+		flex-shrink: 0;
+	}
+	.header-pill {
+		position: relative;
+		height: 62px;
+		background: #00000038;
+		border-radius: 124px;
+		-webkit-backdrop-filter: blur(14px);
+		backdrop-filter: blur(14px);
+		box-sizing: border-box;
+		width: 100%;
+		overflow: hidden;
+		border: 1px solid transparent;
+		transition: border-color 180ms ease;
+	}
 
-  .header-pill:focus-within {
-    border-color: rgba(255, 255, 255, 0.35);
-  }
+	.header-pill:focus-within {
+		border-color: rgba(255, 255, 255, 0.35);
+	}
 
-  .header-normal {
-    width: 100%;
-    height: 100%;
-    padding: 0 12px 0 24px;
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    box-sizing: border-box;
-    gap: 8px;
-    transition:
-      opacity 200ms ease,
-      transform 200ms ease;
-  }
+	.header-normal {
+		width: 100%;
+		height: 100%;
+		padding: 0 12px 0 24px;
+		display: flex;
+		justify-content: space-between;
+		align-items: center;
+		box-sizing: border-box;
+		gap: 8px;
+		transition:
+			opacity 200ms ease,
+			transform 200ms ease;
+	}
 
-  .header-normal.header-hidden {
-    opacity: 0;
-    pointer-events: none;
-    transform: scale(0.96);
-  }
+	.header-normal.header-hidden {
+		opacity: 0;
+		pointer-events: none;
+		transform: scale(0.96);
+	}
 
-  .header-card-title {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    min-width: 0;
-    font-size: 15px;
-    font-weight: 500;
-    letter-spacing: -0.2px;
-  }
+	.header-card-title {
+		display: flex;
+		align-items: center;
+		gap: 10px;
+		min-width: 0;
+		font-size: 15px;
+		font-weight: 500;
+		letter-spacing: -0.2px;
+	}
 
-  .title-text {
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-  }
+	.title-text {
+		white-space: nowrap;
+		overflow: hidden;
+		text-overflow: ellipsis;
+	}
 
-  .header-card-actions {
-    display: flex;
-    align-items: center;
-    gap: 4px;
-    flex-shrink: 0;
-  }
+	.header-card-actions {
+		display: flex;
+		align-items: center;
+		gap: 4px;
+		flex-shrink: 0;
+	}
 
-  /* Header Search Bar */
-  .header-search {
-    position: absolute;
-    left: 0;
-    top: 0;
-    width: 100%;
-    height: 100%;
-    padding: 0 8px 0 20px;
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    box-sizing: border-box;
-    opacity: 0;
-    pointer-events: none;
-    transform: scale(0.96);
-    transition:
-      opacity 220ms ease,
-      transform 220ms cubic-bezier(0.22, 1, 0.36, 1);
-  }
+	/* Header Search Bar */
+	.header-search {
+		position: absolute;
+		left: 0;
+		top: 0;
+		width: 100%;
+		height: 100%;
+		padding: 0 8px 0 20px;
+		display: flex;
+		align-items: center;
+		gap: 12px;
+		box-sizing: border-box;
+		opacity: 0;
+		pointer-events: none;
+		transform: scale(0.96);
+		transition:
+			opacity 220ms ease,
+			transform 220ms cubic-bezier(0.22, 1, 0.36, 1);
+	}
 
-  .header-search.search-open {
-    opacity: 1;
-    pointer-events: auto;
-    transform: scale(1);
-  }
+	.header-search.search-open {
+		opacity: 1;
+		pointer-events: auto;
+		transform: scale(1);
+	}
 
-  .header-search.search-closing {
-    opacity: 0;
-    pointer-events: none;
-    transform: scale(0.96);
-  }
+	.header-search.search-closing {
+		opacity: 0;
+		pointer-events: none;
+		transform: scale(0.96);
+	}
 
-  .search-header-icon {
-    width: 18px;
-    height: 18px;
-    object-fit: contain;
-    filter: brightness(0) invert(1);
-    opacity: 0.6;
-    flex-shrink: 0;
-  }
+	.search-header-icon {
+		width: 18px;
+		height: 18px;
+		object-fit: contain;
+		filter: brightness(0) invert(1);
+		opacity: 0.6;
+		flex-shrink: 0;
+	}
 
-  .search-header-input {
-    flex: 1;
-    height: 100%;
-    background: transparent !important;
-    border: none !important;
-    outline: none !important;
-    box-shadow: none !important;
-    border-radius: 0 !important;
-    color: #ffffff;
-    font-size: 14px;
-    font-family: inherit;
-    padding: 0 !important;
-    -webkit-appearance: none;
-    appearance: none;
-  }
+	.search-header-input {
+		flex: 1;
+		height: 100%;
+		background: transparent !important;
+		border: none !important;
+		outline: none !important;
+		box-shadow: none !important;
+		border-radius: 0 !important;
+		color: #ffffff;
+		font-size: 14px;
+		font-family: inherit;
+		padding: 0 !important;
+		-webkit-appearance: none;
+		appearance: none;
+	}
 
-  .search-header-input::placeholder {
-    color: rgba(255, 255, 255, 0.4);
-  }
+	.search-header-input::placeholder {
+		color: rgba(255, 255, 255, 0.4);
+	}
 
-  .close-search-btn {
-    width: 36px;
-    height: 36px;
-    border-radius: 50%;
-    background: #ffffff;
-    border: none !important;
-    cursor: pointer;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    padding: 0;
-    flex-shrink: 0;
-    transition: transform 160ms var(--ease-spring);
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
-  }
+	.close-search-btn {
+		width: 36px;
+		height: 36px;
+		border-radius: 50%;
+		background: #ffffff;
+		border: none !important;
+		cursor: pointer;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		padding: 0;
+		flex-shrink: 0;
+		transition: transform 160ms var(--ease-spring);
+		box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+	}
 
-  .close-search-btn:hover {
-    transform: scale(1.06);
-  }
+	.close-search-btn:hover {
+		transform: scale(1.06);
+	}
 
-  .close-search-btn:active {
-    transform: scale(0.94);
-  }
+	.close-search-btn:active {
+		transform: scale(0.94);
+	}
 
-  .close-icon {
-    width: 14px;
-    height: 14px;
-    object-fit: contain;
-    filter: brightness(0);
-  }
+	.close-icon {
+		width: 14px;
+		height: 14px;
+		object-fit: contain;
+		filter: brightness(0);
+	}
 
-  .ping-spinner {
-    width: 14px;
-    height: 14px;
-    border: 2px solid rgba(255, 255, 255, 0.2);
-    border-top-color: #ffffff;
-    border-radius: 50%;
-    animation: ping-spin 0.75s linear infinite;
-    display: inline-block;
-  }
+	.ping-spinner {
+		width: 14px;
+		height: 14px;
+		border: 2px solid rgba(255, 255, 255, 0.2);
+		border-top-color: #ffffff;
+		border-radius: 50%;
+		animation: ping-spin 0.75s linear infinite;
+		display: inline-block;
+	}
 
-  @keyframes ping-spin {
-    to {
-      transform: rotate(360deg);
-    }
-  }
-  .servers-list {
-    overflow-y: auto;
-    min-height: 0;
-    flex: 1;
-    padding-bottom: 96px;
-    scrollbar-width: none;
-    -ms-overflow-style: none;
-  }
-  .servers-list::-webkit-scrollbar {
-    display: none;
-  }
-  .server-row {
-    width: 100%;
-    min-height: 62px;
-    display: flex;
-    gap: 12px;
-    align-items: center;
-    border: none;
-    border-radius: 30px;
-    background: transparent;
-    padding: 10px 12px;
-    text-align: left;
-    transition:
-      background-color 180ms ease,
-      transform 180ms var(--ease-spring);
-  }
-  .server-row:hover,
-  .active-server {
-    background: #00000026;
-    border-color: transparent;
-  }
-  .server-row:active {
-    transform: scale(0.985);
-  }
-  .server-text {
-    display: flex;
-    flex-direction: column;
-    gap: 1px;
-    min-width: 0;
-    flex: 1;
-    overflow-wrap: anywhere;
-    font-size: 14px;
-  }
-  .protocol {
-    font-size: 10px;
-    line-height: 1;
-    color: #ffffff70;
-    text-transform: uppercase;
-  }
-  .ping {
-    font-size: 13px;
-    white-space: nowrap;
-    color: #ffffffe6;
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-  }
-  .hint {
-    font-size: 12px;
-    color: #d0c4dc;
-    margin: 4px 0;
-  }
+	@keyframes ping-spin {
+		to {
+			transform: rotate(360deg);
+		}
+	}
+	.servers-list {
+		overflow-y: auto;
+		min-height: 0;
+		flex: 1;
+		padding-bottom: 96px;
+		scrollbar-width: none;
+		-ms-overflow-style: none;
+		display: flex;
+		flex-direction: column;
+		gap: 6px;
+	}
+	.servers-list::-webkit-scrollbar {
+		display: none;
+	}
+	.server-row {
+		width: 100%;
+		min-height: 62px;
+		display: flex;
+		gap: 12px;
+		align-items: center;
+		border: none;
+		border-radius: 30px;
+		background: transparent;
+		padding: 10px 12px;
+		text-align: left;
+		transition:
+			background-color 180ms ease,
+			transform 180ms var(--ease-spring);
+	}
+	.server-row:hover,
+	.active-server {
+		background: #00000026;
+		border-color: transparent;
+	}
+	.server-row:active {
+		transform: scale(0.985);
+	}
+	.server-text {
+		display: flex;
+		flex-direction: column;
+		gap: 1px;
+		min-width: 0;
+		flex: 1;
+		overflow-wrap: anywhere;
+		font-size: 14px;
+	}
+	.protocol {
+		font-size: 10px;
+		line-height: 1;
+		color: #ffffff70;
+		text-transform: uppercase;
+	}
+	.ping {
+		font-size: 13px;
+		white-space: nowrap;
+		color: #ffffffe6;
+		display: inline-flex;
+		align-items: center;
+		gap: 6px;
+	}
+	.hint {
+		font-size: 12px;
+		color: #d0c4dc;
+		margin: 4px 0;
+	}
 </style>
