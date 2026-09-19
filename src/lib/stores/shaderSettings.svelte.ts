@@ -48,6 +48,7 @@ const STORAGE_KEY = 'lumen_shader_settings';
 
 class ShaderSettingsManager {
   enabled = $state(true);
+  tooltipsEnabled = $state(true);
   idleColor = $state<string>('#363048');
   colorA = $state<string>('#6841ee');
   colorB = $state<string>('#8d68fa');
@@ -64,6 +65,8 @@ class ShaderSettingsManager {
           const parsed = JSON.parse(saved);
           if (typeof parsed.enabled === 'boolean')
             this.enabled = parsed.enabled;
+          if (typeof parsed.tooltipsEnabled === 'boolean')
+            this.tooltipsEnabled = parsed.tooltipsEnabled;
           if (
             typeof parsed.idleColor === 'string' &&
             /^#[0-9a-f]{6}$/i.test(parsed.idleColor)
@@ -105,6 +108,7 @@ class ShaderSettingsManager {
           STORAGE_KEY,
           JSON.stringify({
             enabled: this.enabled,
+            tooltipsEnabled: this.tooltipsEnabled,
             idleColor: this.idleColor,
             colorA: this.colorA,
             colorB: this.colorB,
@@ -120,6 +124,11 @@ class ShaderSettingsManager {
 
   setEnabled(value: boolean) {
     this.enabled = value;
+    this.persist();
+  }
+
+  setTooltipsEnabled(value: boolean) {
+    this.tooltipsEnabled = value;
     this.persist();
   }
 

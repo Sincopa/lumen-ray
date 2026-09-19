@@ -5,11 +5,14 @@
   import addIcon from '../../assets/add.svg';
   import globalIcon from '../../assets/mode-global.svg';
   import rulesIcon from '../../assets/mode-rules.svg';
+  import IconButton from './IconButton.svelte';
+  import { tooltip } from '../actions/tooltip';
   import { t } from '../i18n';
 
   interface Props {
     currentTab: 'home' | 'subscriptions' | 'servers' | 'settings' | 'rules';
     routingMode?: 'global' | 'rules';
+    hasSubscriptions?: boolean;
     onTabChange: (
       tab: 'home' | 'subscriptions' | 'servers' | 'settings' | 'rules',
     ) => void;
@@ -20,6 +23,7 @@
   let {
     currentTab = 'home',
     routingMode = 'global',
+    hasSubscriptions = true,
     onTabChange,
     onModeChange,
     onActionClick,
@@ -42,7 +46,7 @@
       class:active={currentTab === 'home'}
       onclick={() => handleTabChange('home')}
       aria-label={t('nav.home')}
-      title={t('nav.home')}
+      use:tooltip={t('nav.home')}
     >
       <span class="btn-surface" class:active-surface={currentTab === 'home'}>
         <img
@@ -61,7 +65,7 @@
       class:active={currentTab === 'subscriptions'}
       onclick={() => handleTabChange('subscriptions')}
       aria-label={t('nav.subscriptions')}
-      title={t('nav.subscriptions')}
+      use:tooltip={t('nav.subscriptions')}
     >
       <span
         class="btn-surface"
@@ -83,7 +87,7 @@
       class:active={currentTab === 'servers'}
       onclick={() => handleTabChange('servers')}
       aria-label={t('nav.servers')}
-      title={t('nav.servers')}
+      use:tooltip={t('nav.servers')}
     >
       <span class="btn-surface" class:active-surface={currentTab === 'servers'}>
         <img
@@ -94,32 +98,20 @@
         />
       </span>
     </button>
-
-    <!-- Slot 4: Add (add.svg) -->
-    <button
-      class="pill-btn plus-slot"
-      onclick={() => onActionClick?.()}
-      aria-label={t('common.add')}
-      title={t('common.add')}
-    >
-      <span class="btn-surface plus-btn-surface">
-        <img src={addIcon} alt="" class="tab-icon add-icon" />
-      </span>
-    </button>
   </div>
 
-  <div class="right-slot">
-    {#if currentTab === 'subscriptions'}
-      <!-- Round plus button for subscriptions tab -->
-      <button
-        class="round-action-btn"
-        aria-label={t('common.add')}
-        title={t('common.add')}
+  {#if currentTab === 'subscriptions'}
+    <div class="right-slot">
+      <IconButton
+        icon={addIcon}
+        ariaLabel={t('subscriptions.addProfile') || t('common.add')}
+        size="lg"
+        variant="surface"
         onclick={() => onActionClick?.()}
-      >
-        <img src={addIcon} alt="" class="round-plus-img" />
-      </button>
-    {:else}
+      />
+    </div>
+  {:else if hasSubscriptions}
+    <div class="right-slot">
       <!-- Mode switcher pill (global/rules) — original SVG icons -->
       <div class="action-pill">
         <button
@@ -127,7 +119,7 @@
           class:action-active={routingMode === 'global'}
           aria-pressed={routingMode === 'global'}
           aria-label={t('home.modeGlobal')}
-          title={t('home.modeGlobal')}
+          use:tooltip={t('home.modeGlobal')}
           onclick={() => onModeChange?.('global')}
         >
           <img
@@ -142,7 +134,7 @@
           class:action-active={routingMode === 'rules'}
           aria-pressed={routingMode === 'rules'}
           aria-label={t('home.modeRules')}
-          title={t('home.modeRules')}
+          use:tooltip={t('home.modeRules')}
           onclick={() => onModeChange?.('rules')}
         >
           <img
@@ -153,39 +145,42 @@
           />
         </button>
       </div>
-    {/if}
-  </div>
+    </div>
+  {/if}
 </nav>
 
 <style>
   .bottom-nav {
+    position: absolute;
+    bottom: 33px;
+    left: 16px;
+    right: 16px;
     display: flex;
     justify-content: space-between;
     align-items: center;
-    width: 100%;
+    width: auto;
     max-width: 326px;
     gap: 8px;
     flex-shrink: 0;
-    margin-top: auto;
+    margin: 0 auto;
     padding-top: 0;
-    align-self: center;
     z-index: 20;
+    pointer-events: auto;
   }
 
   .nav-pill {
-    width: 192px;
+    width: 142px;
     height: 50px;
     border-radius: 124px;
     background: rgba(0, 0, 0, 0.28);
-    border: 1px solid rgba(255, 255, 255, 0.08);
-    backdrop-filter: blur(16px);
     -webkit-backdrop-filter: blur(16px);
+    backdrop-filter: blur(16px);
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: 5px 7px;
-    gap: 6px;
+    padding: 5px 6px;
     box-sizing: border-box;
+    border: none;
   }
 
   .pill-btn {
@@ -215,7 +210,8 @@
     min-height: 0;
     aspect-ratio: 1 / 1;
     border-radius: 50%;
-    background: rgba(255, 255, 255, 0.06);
+    /* background: rgba(255, 255, 255, 0.06); */
+    background: none;
     display: flex;
     align-items: center;
     justify-content: center;
@@ -268,21 +264,6 @@
     width: 17px;
     height: 17px;
   }
-  .add-icon {
-    width: 15px;
-    height: 15px;
-    opacity: 0.7;
-  }
-
-  .plus-btn-surface {
-    background: rgba(255, 255, 255, 0.05);
-  }
-  .plus-slot:hover .plus-btn-surface {
-    background: rgba(255, 255, 255, 0.13);
-  }
-  .plus-slot:hover .add-icon {
-    opacity: 1;
-  }
 
   /* Right slot */
   .right-slot {
@@ -291,59 +272,17 @@
     justify-content: center;
   }
 
-  /* Round plus button for subscriptions tab */
-  .round-action-btn {
-    width: 48px;
-    height: 48px;
-    min-width: 48px;
-    min-height: 0;
-    max-width: 48px;
-    max-height: 48px;
-    aspect-ratio: 1 / 1;
-    border-radius: 50%;
-    background: rgba(0, 0, 0, 0.28);
-    border: 1px solid rgba(255, 255, 255, 0.08);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    cursor: pointer;
-    backdrop-filter: blur(16px);
-    -webkit-backdrop-filter: blur(16px);
-    padding: 0;
-    box-sizing: border-box;
-    flex-shrink: 0;
-    transition:
-      background 0.2s ease,
-      transform 0.25s cubic-bezier(0.34, 1.56, 0.64, 1),
-      border-color 0.2s ease;
-  }
-
-  .round-action-btn:hover {
-    background: rgba(255, 255, 255, 0.14);
-    border-color: rgba(255, 255, 255, 0.18);
-    transform: scale(1.06);
-  }
-
-  .round-action-btn:active {
-    transform: scale(0.93);
-  }
-
-  .round-plus-img {
-    width: 20px;
-    height: 20px;
-    filter: brightness(0) invert(1);
-    opacity: 0.9;
-  }
-
   /* Mode switcher pill (global/rules) */
   .action-pill {
     width: 90px;
     height: 50px;
     border-radius: 124px;
     background: rgba(0, 0, 0, 0.28);
-    border: 1px solid rgba(255, 255, 255, 0.08);
-    backdrop-filter: blur(16px);
+    border: none;
+    outline: none;
+    box-shadow: none;
     -webkit-backdrop-filter: blur(16px);
+    backdrop-filter: blur(16px);
     display: flex;
     align-items: center;
     justify-content: space-between;
@@ -361,7 +300,7 @@
     max-height: 36px;
     aspect-ratio: 1 / 1;
     border-radius: 50%;
-    background: rgba(255, 255, 255, 0.07);
+    background: none;
     border: none;
     display: flex;
     align-items: center;
@@ -413,8 +352,7 @@
 
   @media (prefers-reduced-motion: reduce) {
     .btn-surface,
-    .action-pill-btn,
-    .round-action-btn {
+    .action-pill-btn {
       transition-duration: 0ms;
     }
   }

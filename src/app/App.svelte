@@ -6,11 +6,12 @@
   import WindowHeader from '../lib/components/WindowHeader.svelte';
   import BottomNav from '../lib/components/BottomNav.svelte';
   import ConnectionView from '../lib/features/connection/ConnectionView.svelte';
+  import EmptyHomeView from '../lib/features/connection/EmptyHomeView.svelte';
   import SubscriptionsView from '../lib/features/subscriptions/SubscriptionsView.svelte';
   import ServersView from '../lib/features/servers/ServersView.svelte';
   import SettingsView from '../lib/features/settings/SettingsView.svelte';
   import RulesView from '../lib/features/rules/RulesView.svelte';
-  import ImportSubscription from '../lib/features/subscriptions/ImportSubscription.svelte';
+  import AddProfileView from '../lib/features/subscriptions/AddProfileView.svelte';
   import { catalog, connection } from '../lib/services';
   import { errorCode } from '../lib/services/errors';
   import { t } from '../lib/i18n';
@@ -39,6 +40,7 @@
   // Derived state
   let connectionState = $derived($connectionStore.status);
   let info = $derived($connectionStore.info);
+  let hasSubscriptions = $derived($catalogStore.subscriptions.length > 0);
   let routingMode = $derived($catalogStore.routingMode);
   let selectedServer = $derived(
     $catalogStore.servers.find(
@@ -60,6 +62,9 @@
     try {
       await catalog.selectServer(server.id);
       currentTab = 'home';
+      if (connectionState === 'connected' || connectionState === 'connecting') {
+        void connection.switchServer(server.id);
+      }
     } catch (e) {
       actionError = t('errors.' + errorCode(e));
     }
@@ -96,11 +101,14 @@
   <!-- Native WebGL2 Background Fluid Light Shader -->
   <BackgroundShader active={connectionState !== 'disconnected'} />
 
-  <div class="app-ui" class:dim-backdrop={currentTab !== 'home'}>
+  <div
+    class="app-ui"
+    class:dim-backdrop={currentTab !== 'home' || !hasSubscriptions || importing}
+  >
     <!-- Top Desktop Window Bar -->
     <WindowHeader
       title="lumen"
-      darkSurface={currentTab !== 'home'}
+      darkSurface={currentTab !== 'home' || !hasSubscriptions || importing}
       onOpenSettings={() => {
         currentTab = currentTab === 'settings' ? 'home' : 'settings';
       }}
@@ -118,7 +126,15 @@
 
     <!-- Tab Views with directional fly transitions -->
     <div class="view-content">
-      {#if currentTab === 'rules'}
+      {#if importing}
+        <AddProfileView
+          onClose={() => (importing = false)}
+          onSuccess={() => {
+            importing = false;
+            currentTab = 'home';
+          }}
+        />
+      {:else if currentTab === 'rules'}
         <RulesView onChromeChange={(mode) => (ruleChrome = mode)} />
       {:else}
         {#key currentTab}
@@ -132,24 +148,27 @@
             }}
           >
             {#if currentTab === 'home'}
-              <ConnectionView
-                {connectionState}
-                {info}
-                {selectedCountry}
-                server={selectedServer}
-                busy={$connectionStore.busy}
-                error={$connectionStore.error}
-                onRetry={() => connection.initialize()}
-                onToggle={toggleConnection}
-                onSelectServer={() => (currentTab = 'servers')}
-              />
+              {#if !hasSubscriptions}
+                <EmptyHomeView onAddProfile={() => (importing = true)} />
+              {:else}
+                <ConnectionView
+                  {connectionState}
+                  {info}
+                  {selectedCountry}
+                  server={selectedServer}
+                  busy={$connectionStore.busy}
+                  error={$connectionStore.error}
+                  onRetry={() => connection.initialize()}
+                  onToggle={toggleConnection}
+                  onSelectServer={() => (currentTab = 'servers')}
+                />
+              {/if}
             {:else if currentTab === 'subscriptions'}
               <SubscriptionsView />
             {:else if currentTab === 'servers'}
               <ServersView
                 selectedId={$catalogStore.selectedServerId ?? ''}
-                disabled={$connectionStore.busy ||
-                  connectionState === 'connected'}
+                disabled={$connectionStore.busy}
                 onSelect={chooseServer}
                 onManageSubscription={() => handleTabChange('subscriptions')}
               />
@@ -162,20 +181,17 @@
     </div>
 
     <!-- Bottom Navigation Bar -->
-    {#if currentTab !== 'rules' || ruleChrome === 'default'}
+    {#if !importing && (currentTab !== 'rules' || ruleChrome === 'default')}
       <BottomNav
         {currentTab}
         {routingMode}
+        {hasSubscriptions}
         onTabChange={handleTabChange}
         onModeChange={changeMode}
         onActionClick={() => (importing = true)}
       />
     {/if}
   </div>
-
-  {#if importing}
-    <ImportSubscription onClose={() => (importing = false)} />
-  {/if}
 </main>
 
 <style>
@@ -195,7 +211,6 @@
     overflow: hidden;
     background-color: #08080b;
     border-radius: var(--radius-window);
-    clip-path: inset(0 round var(--radius-window));
   }
 
   .app-ui {
@@ -208,7 +223,7 @@
     min-width: 0;
     height: 100%;
     min-height: 0;
-    padding: 16px 16px 33px;
+    padding: 16px 16px 0;
     box-sizing: border-box;
     border-radius: var(--radius-window);
     transition: background-color 0.3s ease;
@@ -218,12 +233,17 @@
     content: '';
     position: absolute;
     inset: 0;
-    background: rgba(0, 0, 0, 0.55);
+    background-color: #363636;
+    background-image: linear-gradient(
+      to top,
+      rgba(0, 0, 0, 0.25) 0px,
+      rgba(0, 0, 0, 0) 260px
+    );
+    background-repeat: no-repeat;
+    background-position: bottom;
     border-radius: var(--radius-window);
     pointer-events: none;
     z-index: -1;
-    backdrop-filter: blur(8px);
-    -webkit-backdrop-filter: blur(8px);
     opacity: 0;
     transition: opacity 0.35s cubic-bezier(0.4, 0, 0.2, 1);
   }

@@ -2,6 +2,7 @@
   import { getCurrentWindow } from '@tauri-apps/api/window';
   import { runtime } from '../runtime';
   import { t } from '../i18n';
+  import { tooltip } from '../actions/tooltip';
   import minimizeIcon from '../../assets/minimaze.svg';
   import maximizeIcon from '../../assets/maximaze.svg';
   import crossIcon from '../../assets/cross.svg';
@@ -40,7 +41,7 @@
   <button
     class="logo-link-btn"
     onclick={onOpenSettings}
-    title={t('settings.title')}
+    use:tooltip={t('settings.title')}
     aria-label={t('settings.title')}
   >
     <div class="logo">{title}</div>
@@ -52,7 +53,7 @@
         class="control-btn"
         onclick={() => control('minimize')}
         aria-label={t('common.minimize')}
-        title={t('common.minimize')}
+        use:tooltip={t('common.minimize')}
       >
         <img src={minimizeIcon} alt="" width="14" height="14" />
       </button>
@@ -61,7 +62,7 @@
         class="control-btn"
         onclick={() => control('toggleMaximize')}
         aria-label={t('common.maximize')}
-        title={t('common.maximize')}
+        use:tooltip={t('common.maximize')}
       >
         <img src={maximizeIcon} alt="" width="14" height="14" />
       </button>
@@ -70,7 +71,7 @@
         class="control-btn close"
         onclick={() => control('close')}
         aria-label={t('common.close')}
-        title={t('common.close')}
+        use:tooltip={t('common.close')}
       >
         <img src={crossIcon} alt="" width="14" height="14" />
       </button>
@@ -125,7 +126,7 @@
     display: flex;
     align-items: center;
     background: rgba(0, 0, 0, 0.2);
-    border: 1px solid rgba(255, 255, 255, 0.05);
+    border: none;
     border-radius: 123px;
     width: 112px;
     height: 40px;

@@ -90,4 +90,55 @@ export class ConnectionController {
       this.update({ busy: false });
     }
   }
+
+  async switchServer(serverId: string) {
+    if (this.current.busy) {
+      return;
+    }
+    if (!serverId) {
+      this.update({ error: 'invalidServer' });
+      return;
+    }
+
+    const wasActive =
+      this.current.status === 'connected' ||
+      this.current.status === 'connecting';
+
+    this.update({
+      busy: true,
+      error: null,
+      status: 'connecting',
+    });
+
+    try {
+      if (wasActive) {
+        try {
+          await withTimeout(this.vpn.disconnect(), this.timeoutMs);
+        } catch {
+          // Ignore disconnect error during seamless switch
+        }
+      }
+
+      await withTimeout(this.vpn.connect(serverId), this.timeoutMs);
+
+      const [status, info] = await withTimeout(
+        Promise.all([this.vpn.getStatus(), this.vpn.getConnectionInfo()]),
+        this.timeoutMs,
+      );
+
+      this.update({ status, info });
+    } catch (e) {
+      try {
+        const [status, info] = await withTimeout(
+          Promise.all([this.vpn.getStatus(), this.vpn.getConnectionInfo()]),
+          this.timeoutMs,
+        );
+        this.update({ status, info, error: errorCode(e) });
+      } catch {
+        this.update({ status: 'error', info: null, error: errorCode(e) });
+      }
+    } finally {
+      this.update({ busy: false });
+    }
+  }
 }

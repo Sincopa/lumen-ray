@@ -6,9 +6,15 @@
   import Dialog from '../../components/Dialog.svelte';
   import CountryFlag from '../../components/CountryFlag.svelte';
   import MaterialIcon from '../../components/MaterialIcon.svelte';
-  import SearchField from '../../components/SearchField.svelte';
-  import Dropdown from '../../components/Dropdown.svelte';
+  import IconButton from '../../components/IconButton.svelte';
+  import PopupMenu from '../../components/PopupMenu.svelte';
+  import MenuItem from '../../components/MenuItem.svelte';
+  import StatusDot from '../../components/StatusDot.svelte';
+  import RoundCheckbox from '../../components/RoundCheckbox.svelte';
+  import ToggleSwitch from '../../components/ToggleSwitch.svelte';
   import ServersView from '../servers/ServersView.svelte';
+  import RuleEditorView from './RuleEditorView.svelte';
+  import ProcessPickerView from './ProcessPickerView.svelte';
   import searchIcon from '../../../assets/search.svg';
   import reloadIcon from '../../../assets/reload.svg';
   import menuIcon from '../../../assets/menu.svg';
@@ -17,6 +23,7 @@
   import trashIcon from '../../../assets/trash.svg';
   import shareIcon from '../../../assets/share.svg';
   import checkIcon from '../../../assets/check.svg';
+  import crossIcon from '../../../assets/cross.svg';
   import chevronIcon from '../../../assets/chevron.svg';
   import discordIcon from '../../../assets/discord.png';
   import yandexIcon from '../../../assets/yandex.png';
@@ -32,11 +39,33 @@
   // Local state
   let query = $state('');
   let searching = $state(false);
+  let searchClosing = $state(false);
+  let searchInputEl = $state<HTMLInputElement | null>(null);
+
+  function handleOpenSearch() {
+    searching = true;
+    searchClosing = false;
+    setTimeout(() => {
+      searchInputEl?.focus();
+    }, 180);
+  }
+
+  function handleCloseSearch() {
+    searchClosing = true;
+    setTimeout(() => {
+      searching = false;
+      searchClosing = false;
+      query = '';
+    }, 240);
+  }
+
   let menu = $state(false);
   let selectMode = $state(false);
   let selectingRule = $state<Rule | null>(null);
   let pendingServerId = $state('');
   let editing = $state<Rule | null>(null);
+  let choosingProcess = $state(false);
+  let choosingServer = $state(false);
   let deleting = $state(false);
   let selected = $state<string[]>([]);
   let error = $state('');
@@ -59,20 +88,13 @@
     ),
   );
 
-  let serverOptions = $derived(
-    $catalogStore.servers.map((server) => ({
-      value: server.id,
-      label: `${t('servers.countries.' + server.countryCode)} · ${
-        $catalogStore.subscriptions.find(
-          (subscription) => subscription.id === server.subscriptionId,
-        )?.name ?? ''
-      }`,
-    })),
-  );
-
   $effect(() => {
     onChromeChange?.(
-      selectingRule ? 'picker' : selectMode ? 'selection' : 'default',
+      selectingRule || editing
+        ? 'picker'
+        : selectMode
+          ? 'selection'
+          : 'default',
     );
   });
 
@@ -117,25 +139,6 @@
     };
   }
 
-  function setRuleType(isDomain: boolean) {
-    if (editing && editing.isDomain !== isDomain) {
-      editing = { ...editing, isDomain, name: '' };
-      error = '';
-    }
-  }
-
-  function save(e: SubmitEvent) {
-    e.preventDefault();
-    if (!editing) return;
-    try {
-      catalog.saveRule(editing);
-      editing = null;
-      error = '';
-    } catch (e) {
-      error = t('errors.' + errorCode(e));
-    }
-  }
-
   function toggle(rule: Rule) {
     try {
       catalog.saveRule({ ...rule, enabled: !rule.enabled });
@@ -156,36 +159,126 @@
   }
 </script>
 
-<section class="rules-view" aria-label={t('rules.title')}>
-  {#if selectingRule}
+<svelte:window
+  onclick={(e) => {
+    if (menu) {
+      const target = e.target as HTMLElement | null;
+      if (!target?.closest('.popup-menu') && !target?.closest('.icon-btn')) {
+        menu = false;
+      }
+    }
+  }}
+/>
+
+{#if editing}
+  {#if choosingProcess}
+    <ProcessPickerView
+      selectedProcess={editing.name}
+      onSelect={(proc: string) => {
+        if (editing) {
+          editing.name = proc;
+          editing.isDomain = false;
+        }
+        choosingProcess = false;
+      }}
+      onCancel={() => {
+        choosingProcess = false;
+      }}
+    />
+  {:else if choosingServer}
     <div class="server-picker-view">
-      <ServersView selectedId={pendingServerId} onSelect={pickServer} compact />
+      <ServersView
+        selectedId={editing.serverId}
+        onSelect={(server) => {
+          if (editing) editing.serverId = server.id;
+          choosingServer = false;
+        }}
+        compact
+      />
       <div class="picker-bar">
-        <button
-          class="select-bar-btn back-round"
-          aria-label={t('common.close')}
+        <IconButton
+          icon={chevronIcon}
+          ariaLabel={t('common.close')}
+          size="lg"
+          variant="surface"
+          class="back-round"
           onclick={() => {
-            selectingRule = null;
-            pendingServerId = '';
+            choosingServer = false;
           }}
-        >
-          <img src={chevronIcon} alt="" />
-        </button>
-        <button
-          class="select-bar-btn confirm-btn"
-          aria-label={t('common.save')}
-          onclick={confirmServer}
-        >
-          <img src={checkIcon} alt="" />
-        </button>
+        />
+        <IconButton
+          icon={checkIcon}
+          ariaLabel={t('common.save')}
+          size="lg"
+          variant="primary"
+          onclick={() => {
+            choosingServer = false;
+          }}
+        />
       </div>
     </div>
   {:else}
+    {@const currentServer = $catalogStore.servers.find(
+      (s) => s.id === editing?.serverId,
+    )}
+    <RuleEditorView
+      rule={editing}
+      server={currentServer}
+      onSave={(updated: Rule) => {
+        try {
+          catalog.saveRule(updated);
+          editing = null;
+          choosingProcess = false;
+          choosingServer = false;
+          error = '';
+        } catch (e) {
+          error = t('errors.' + errorCode(e));
+        }
+      }}
+      onCancel={() => {
+        editing = null;
+        choosingProcess = false;
+        choosingServer = false;
+      }}
+      onSelectProcess={() => {
+        choosingProcess = true;
+      }}
+      onSelectServer={() => {
+        choosingServer = true;
+      }}
+    />
+  {/if}
+{:else if selectingRule}
+  <div class="server-picker-view">
+    <ServersView selectedId={pendingServerId} onSelect={pickServer} compact />
+    <div class="picker-bar">
+      <IconButton
+        icon={chevronIcon}
+        ariaLabel={t('common.close')}
+        size="lg"
+        variant="surface"
+        class="back-round"
+        onclick={() => {
+          selectingRule = null;
+          pendingServerId = '';
+        }}
+      />
+      <IconButton
+        icon={checkIcon}
+        ariaLabel={t('common.save')}
+        size="lg"
+        variant="primary"
+        onclick={confirmServer}
+      />
+    </div>
+  </div>
+{:else}
+  <section class="rules-view" aria-label={t('rules.title')}>
     {#if selectMode}
       <div class="selection-header">
         <div class="sub-info">
           <span class="sub-title">{activeSub?.name ?? t('rules.title')}</span>
-          <span class="status-dot" aria-hidden="true"></span>
+          <StatusDot />
         </div>
         <button
           class="select-all"
@@ -199,102 +292,108 @@
                 : filtered.map((rule) => rule.id))}
         >
           <span>{t('rules.selectAll')}</span>
-          <span
-            class="select-checkbox"
-            class:checked={selected.length === filtered.length &&
-              filtered.length > 0}
-          >
-            {#if selected.length === filtered.length && filtered.length > 0}<img
-                src={checkIcon}
-                alt=""
-              />{/if}
-          </span>
+          <RoundCheckbox
+            checked={selected.length === filtered.length && filtered.length > 0}
+            asSpan
+          />
         </button>
       </div>
     {:else}
       <div class="header-card-wrapper">
         <div class="header-row">
-          <div class="active-sub-card">
-            <div class="sub-info">
-              <span class="sub-title">
-                {activeSub?.name ?? t('rules.title')}
-              </span>
-              <span class="status-dot" aria-hidden="true"></span>
+          <div class="header-pill">
+            <!-- Normal header content -->
+            <div class="header-normal" class:header-hidden={searching}>
+              <div class="header-card-title">
+                <span class="title-text">
+                  {activeSub?.name ?? t('rules.title')}
+                </span>
+                <StatusDot variant="active" />
+              </div>
+              <div class="header-card-actions">
+                <IconButton
+                  icon={searchIcon}
+                  ariaLabel={t('common.search')}
+                  onclick={handleOpenSearch}
+                />
+                <IconButton
+                  icon={reloadIcon}
+                  ariaLabel={t('common.reload')}
+                  onclick={refresh}
+                />
+                <IconButton
+                  icon={menuIcon}
+                  ariaLabel={t('common.menu')}
+                  active={menu}
+                  expanded={menu}
+                  onclick={() => (menu = !menu)}
+                />
+                <IconButton
+                  icon={pencilIcon}
+                  ariaLabel={t('rules.selectMode')}
+                  onclick={() => (selectMode = true)}
+                />
+              </div>
             </div>
-            <div class="card-actions">
+
+            <!-- Search bar inside header pill (identical to ServersView) -->
+            <div
+              class="header-search"
+              class:search-open={searching && !searchClosing}
+              class:search-closing={searchClosing}
+            >
+              <img src={searchIcon} alt="" class="search-header-icon" />
+              <input
+                bind:this={searchInputEl}
+                type="text"
+                class="search-header-input"
+                placeholder={t('rules.searchPlaceholder') || 'Поиск правил...'}
+                bind:value={query}
+                autocomplete="off"
+                spellcheck="false"
+              />
               <button
-                class="action-btn"
-                aria-label={t('common.search')}
-                aria-expanded={searching}
-                onclick={() => {
-                  searching = !searching;
-                  if (!searching) query = '';
-                }}
+                type="button"
+                class="close-search-btn"
+                onclick={handleCloseSearch}
+                aria-label={t('common.close')}
               >
-                <img src={searchIcon} alt="" />
-              </button>
-              <button
-                class="action-btn"
-                aria-label={t('common.reload')}
-                onclick={refresh}
-              >
-                <img src={reloadIcon} alt="" />
-              </button>
-              <button
-                class="action-btn"
-                class:active-action={menu}
-                aria-label={t('common.menu')}
-                aria-expanded={menu}
-                onclick={() => (menu = !menu)}
-              >
-                <img src={menuIcon} alt="" />
-              </button>
-              <button
-                class="action-btn"
-                aria-label={t('rules.selectMode')}
-                onclick={() => (selectMode = true)}
-              >
-                <img src={pencilIcon} alt="" />
+                <img src={crossIcon} alt="" class="close-icon" />
               </button>
             </div>
           </div>
-          <button
-            class="separate-add-btn"
-            aria-label={t('common.add')}
+
+          <IconButton
+            icon={addIcon}
+            ariaLabel={t('common.add')}
+            size="lg"
+            variant="surface"
+            class="add-rule-btn"
             disabled={!$catalogStore.servers.length}
             onclick={add}
-          >
-            <img src={addIcon} alt="" />
-          </button>
+          />
         </div>
-        {#if menu}
-          <div class="popup-menu">
-            <button
-              class="menu-item"
+        {#if menu && !searching}
+          <PopupMenu top="68px" right="58px">
+            <MenuItem
+              icon={pencilIcon}
+              label={t('common.edit')}
               onclick={() => {
                 selectMode = true;
                 menu = false;
               }}
-            >
-              <span class="menu-item-icon-circle">
-                <img src={pencilIcon} alt="" />
-              </span>
-              <span>{t('common.edit')}</span>
-            </button>
-            <button
-              class="menu-item"
+            />
+            <MenuItem
+              icon={reloadIcon}
+              label={t('common.reload')}
               onclick={() => {
                 menu = false;
                 void refresh();
               }}
-            >
-              <span class="menu-item-icon-circle">
-                <img src={reloadIcon} alt="" />
-              </span>
-              <span>{t('common.reload')}</span>
-            </button>
-            <button
-              class="menu-item"
+            />
+            <MenuItem
+              icon={shareIcon}
+              label={t('common.export')}
               disabled={!$catalogStore.rules.length}
               onclick={() => {
                 exported = JSON.stringify(
@@ -304,33 +403,20 @@
                 );
                 menu = false;
               }}
-            >
-              <span class="menu-item-icon-circle">
-                <img src={shareIcon} alt="" />
-              </span>
-              <span>{t('common.export')}</span>
-            </button>
-            <button
-              class="menu-item danger"
+            />
+            <MenuItem
+              icon={trashIcon}
+              label={t('common.delete')}
+              variant="danger"
               onclick={() => {
                 selectMode = true;
                 menu = false;
               }}
-            >
-              <span class="menu-item-icon-circle">
-                <img src={trashIcon} alt="" />
-              </span>
-              <span>{t('common.delete')}</span>
-            </button>
-          </div>
+            />
+          </PopupMenu>
         {/if}
       </div>
     {/if}
-    {#if searching}<SearchField
-        bind:value={query}
-        placeholder={t('rules.searchPlaceholder')}
-        onClose={() => (searching = false)}
-      />{/if}
     {#if error}<p role="alert">{error}</p>{/if}
     <div class="rules-list">
       {#each filtered as rule (rule.id)}
@@ -384,33 +470,21 @@
               <span class="server-pill-name">{country}</span>
             </button>
             {#if selectMode}
-              <button
-                class="select-checkbox"
-                class:checked={selected.includes(rule.id)}
-                role="checkbox"
-                aria-checked={selected.includes(rule.id)}
-                aria-label={t('rules.select', { name: rule.name })}
+              <RoundCheckbox
+                checked={selected.includes(rule.id)}
+                ariaLabel={t('rules.select', { name: rule.name })}
                 onclick={() =>
                   (selected = selected.includes(rule.id)
                     ? selected.filter((id) => id !== rule.id)
                     : [...selected, rule.id])}
-              >
-                {#if selected.includes(rule.id)}<img
-                    src={checkIcon}
-                    alt=""
-                  />{/if}
-              </button>
+              />
             {:else}
-              <button
-                class="toggle-switch"
-                class:enabled={rule.enabled}
-                role="switch"
-                aria-checked={rule.enabled}
-                aria-label={t('rules.toggle', { name: rule.name })}
-                onclick={() => toggle(rule)}
-              >
-                <span class="toggle-thumb"></span>
-              </button>
+              <ToggleSwitch
+                checked={rule.enabled}
+                mode="switch"
+                ariaLabel={t('rules.toggle', { name: rule.name })}
+                onchange={() => toggle(rule)}
+              />
             {/if}
           </div>
         </article>
@@ -418,86 +492,27 @@
     </div>
     {#if selectMode}
       <div class="select-bar">
-        <button
-          class="select-bar-btn delete-btn"
-          aria-label={t('rules.deleteSelected')}
+        <IconButton
+          icon={trashIcon}
+          ariaLabel={t('rules.deleteSelected')}
+          size="lg"
+          variant="danger"
           disabled={!selected.length}
           onclick={() => (deleting = true)}
-        >
-          <img src={trashIcon} alt="" />
-        </button>
-        <button
-          class="select-bar-btn confirm-btn"
-          aria-label={t('common.close')}
+        />
+        <IconButton
+          icon={checkIcon}
+          ariaLabel={t('common.close')}
+          size="lg"
+          variant="primary"
           onclick={() => {
             selectMode = false;
             selected = [];
           }}
-        >
-          <img src={checkIcon} alt="" />
-        </button>
+        />
       </div>
     {/if}
-  {/if}
-</section>
-{#if editing}
-  <Dialog title={t('rules.editTitle')} onClose={() => (editing = null)}>
-    <form class="panel-form rule-form" onsubmit={save}>
-      <p class="form-intro">{t('rules.addHint')}</p>
-      <div class="type-field">
-        <span class="field-label">{t('rules.kind')}</span>
-        <div class="type-options" role="group" aria-label={t('rules.kind')}>
-          <button
-            type="button"
-            class:chosen={editing.isDomain}
-            aria-pressed={editing.isDomain}
-            onclick={() => setRuleType(true)}
-          >
-            {t('rules.domain')}
-          </button>
-          <button
-            type="button"
-            class:chosen={!editing.isDomain}
-            aria-pressed={!editing.isDomain}
-            onclick={() => setRuleType(false)}
-          >
-            {t('rules.application')}
-          </button>
-        </div>
-      </div>
-      <label>
-        {t('common.name')}
-        <input
-          bind:value={editing.name}
-          aria-label={t('common.name')}
-          placeholder={editing.isDomain ? 'example.com' : 'Discord.exe'}
-          maxlength="253"
-          autocomplete="off"
-          spellcheck="false"
-          required
-        />
-        <span class="field-hint">
-          {editing.isDomain
-            ? t('rules.domainHint')
-            : t('rules.applicationHint')}
-        </span>
-      </label>
-      <div class="server-field">
-        <span class="field-label">{t('servers.title')}</span>
-        <Dropdown
-          label={t('servers.title')}
-          options={serverOptions}
-          bind:value={editing.serverId}
-        />
-      </div>
-      {#if error}<p class="form-error" role="alert">{error}</p>{/if}
-      <button class="form-submit" type="submit">
-        {$catalogStore.rules.some((rule) => rule.id === editing?.id)
-          ? t('common.save')
-          : t('rules.addRule')}
-      </button>
-    </form>
-  </Dialog>
+  </section>
 {/if}
 
 {#if deleting}
@@ -522,46 +537,12 @@
 {/if}
 
 <style>
-  .server-field {
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
-  }
-  .type-field {
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-  }
-  .type-options {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 4px;
-    padding: 4px;
-    border: 1px solid #ffffff1f;
-    border-radius: 16px;
-    background: #ffffff0a;
-  }
-  .type-options button {
-    min-height: 42px;
-    padding: 6px 8px;
-    border: 0;
-    border-radius: 12px;
-    background: transparent;
-    color: #ffffffa8;
-    font-size: 12px;
-  }
-  .type-options button.chosen {
-    background: #ffffff20;
-    color: #fff;
-    box-shadow: 0 1px 5px #0004;
-  }
   .rules-view {
     display: flex;
     flex-direction: column;
     width: 100%;
     flex: 1;
     gap: 10px;
-    overflow: hidden;
     padding-top: 0;
     position: relative;
     min-height: 0;
@@ -582,39 +563,181 @@
     align-items: center;
     flex-shrink: 0;
     padding: 0 4px;
+    margin-bottom: 33px;
   }
-  .back-round {
-    background: #ffffff14;
-  }
-  .back-round img {
-    width: 18px !important;
-    height: 18px !important;
-    transform: rotate(90deg);
-    filter: brightness(0) invert(1);
+  :global(.back-round .btn-icon) {
+    transform: rotate(90deg) !important;
   }
   .header-card-wrapper {
     position: relative;
     width: 100%;
     flex-shrink: 0;
   }
-  .active-sub-card {
-    flex: 1;
-    background: #00000038;
-    border: 1px solid #ffffff14;
-    border-radius: 124px;
-    height: 62px;
-    padding: 0 10px 0 24px;
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    backdrop-filter: blur(14px);
-    gap: 8px;
-  }
   .header-row {
     display: flex;
     align-items: center;
     gap: 8px;
     width: 100%;
+    box-sizing: border-box;
+    padding: 2px 2px 0 0;
+  }
+  .header-pill {
+    position: relative;
+    height: 62px;
+    background: #00000038;
+    border-radius: 124px;
+    -webkit-backdrop-filter: blur(14px);
+    backdrop-filter: blur(14px);
+    box-sizing: border-box;
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    border: 1px solid transparent;
+    transition: border-color 180ms ease;
+  }
+
+  .header-pill:focus-within {
+    border-color: rgba(255, 255, 255, 0.35);
+  }
+
+  .header-normal {
+    width: 100%;
+    height: 100%;
+    padding: 0 12px 0 24px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    box-sizing: border-box;
+    gap: 8px;
+    transition:
+      opacity 200ms ease,
+      transform 200ms ease;
+  }
+
+  .header-normal.header-hidden {
+    opacity: 0;
+    pointer-events: none;
+    transform: scale(0.96);
+  }
+
+  .header-card-title {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-width: 0;
+    font-size: 15px;
+    font-weight: 500;
+    letter-spacing: -0.2px;
+  }
+
+  .title-text {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .header-card-actions {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    flex-shrink: 0;
+  }
+
+  /* Header Search Bar */
+  .header-search {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 100%;
+    height: 100%;
+    padding: 0 8px 0 20px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    box-sizing: border-box;
+    opacity: 0;
+    pointer-events: none;
+    transform: scale(0.96);
+    transition:
+      opacity 220ms ease,
+      transform 220ms cubic-bezier(0.22, 1, 0.36, 1);
+  }
+
+  .header-search.search-open {
+    opacity: 1;
+    pointer-events: auto;
+    transform: scale(1);
+  }
+
+  .header-search.search-closing {
+    opacity: 0;
+    pointer-events: none;
+    transform: scale(0.96);
+  }
+
+  .search-header-icon {
+    width: 18px;
+    height: 18px;
+    object-fit: contain;
+    filter: brightness(0) invert(1);
+    opacity: 0.6;
+    flex-shrink: 0;
+  }
+
+  .search-header-input {
+    flex: 1;
+    height: 100%;
+    background: transparent !important;
+    border: none !important;
+    outline: none !important;
+    box-shadow: none !important;
+    border-radius: 0 !important;
+    color: #ffffff;
+    font-size: 14px;
+    font-family: inherit;
+    padding: 0 !important;
+    -webkit-appearance: none;
+    appearance: none;
+    min-width: 0;
+  }
+
+  .search-header-input::placeholder {
+    color: rgba(255, 255, 255, 0.4);
+  }
+
+  .close-search-btn {
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    background: #ffffff;
+    border: none;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    transition: transform 160ms var(--ease-spring);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+  }
+
+  .close-search-btn:hover {
+    transform: scale(1.06);
+  }
+
+  .close-search-btn:active {
+    transform: scale(0.94);
+  }
+
+  .close-icon {
+    width: 14px;
+    height: 14px;
+    object-fit: contain;
+    filter: brightness(0);
+  }
+
+  :global(.add-rule-btn) {
+    flex-shrink: 0;
+    transform-origin: 80% 50% !important;
   }
   .selection-header {
     height: 40px;
@@ -651,114 +774,6 @@
     overflow: hidden;
     text-overflow: ellipsis;
   }
-  .status-dot {
-    width: 8px;
-    height: 8px;
-    border-radius: 50%;
-    flex-shrink: 0;
-    background: #3aee29;
-    box-shadow: 0 0 8px #3aee29a6;
-  }
-  .card-actions {
-    display: flex;
-    gap: 4px;
-  }
-  .action-btn {
-    width: 30px;
-    height: 30px;
-    min-height: 0;
-    border-radius: 50%;
-    background: none;
-    border: 0;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    padding: 0;
-  }
-  .action-btn:hover,
-  .active-action {
-    background: #ffffff20;
-  }
-  .action-btn img {
-    width: 18px;
-    height: 18px;
-    opacity: 0.75;
-    filter: brightness(0) invert(1);
-  }
-  .separate-add-btn {
-    width: 50px;
-    height: 50px;
-    min-height: 0;
-    border-radius: 50%;
-    background: #00000038;
-    border: 1px solid #ffffff14;
-    padding: 0;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    flex-shrink: 0;
-  }
-  .separate-add-btn img {
-    width: 20px;
-    height: 20px;
-    filter: brightness(0) invert(1);
-  }
-  .popup-menu {
-    position: absolute;
-    top: 68px;
-    right: 8px;
-    width: 197px;
-    background: #18181a;
-    border: 1px solid rgba(255, 255, 255, 0.12);
-    border-radius: 24px;
-    padding: 10px;
-    backdrop-filter: blur(28px);
-    -webkit-backdrop-filter: blur(28px);
-    box-shadow: 0 16px 48px rgba(0, 0, 0, 0.5);
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-    z-index: 50;
-    transform-origin: top right;
-    animation: menu-in 180ms var(--ease-spring) both;
-  }
-  .menu-item {
-    height: 40px;
-    min-height: 0;
-    border-radius: 14px;
-    background: rgba(255, 255, 255, 0.04);
-    border: 0;
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    padding: 0 12px 0 8px;
-    font-size: 13.5px;
-    font-weight: 500;
-    transition: background 0.18s ease;
-  }
-  .menu-item:hover {
-    background: rgba(255, 255, 255, 0.12);
-  }
-  .menu-item.danger:hover {
-    background: rgba(243, 57, 57, 0.2);
-    color: #ff8080;
-  }
-  .menu-item-icon-circle {
-    width: 24px;
-    height: 24px;
-    border-radius: 50%;
-    background: rgba(255, 255, 255, 0.1);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    flex-shrink: 0;
-    color: #ffffff;
-  }
-  .menu-item-icon-circle img {
-    width: 15px;
-    height: 15px;
-    filter: brightness(0) invert(1);
-  }
   .rules-list {
     display: flex;
     flex-direction: column;
@@ -767,6 +782,12 @@
     overflow-y: auto;
     flex: 1;
     min-height: 0;
+    padding-bottom: 96px;
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+  }
+  .rules-list::-webkit-scrollbar {
+    display: none;
   }
   .rule-row {
     min-height: 60px;
@@ -777,13 +798,6 @@
     align-items: center;
     width: 100%;
     gap: 8px;
-    animation: row-in 320ms var(--ease-spring) both;
-  }
-  .rule-row:nth-child(2) {
-    animation-delay: 35ms;
-  }
-  .rule-row:nth-child(3) {
-    animation-delay: 70ms;
   }
   .rule-row:hover {
     background: #ffffff0a;
@@ -853,13 +867,14 @@
     height: 32px;
     min-height: 0;
     background: #00000047;
-    border: 1px solid #ffffff1a;
+    border: none;
+    outline: none;
+    box-shadow: none;
     border-radius: 124px;
     padding: 4px 12px 4px 6px;
   }
   .server-pill:hover {
     background: #00000073;
-    border-color: #ffffff38;
   }
   .flag-sm {
     width: 20px;
@@ -880,102 +895,13 @@
     overflow: hidden;
     text-overflow: ellipsis;
   }
-  .toggle-switch {
-    width: 44px;
-    height: 26px;
-    min-height: 0;
-    border-radius: 13px;
-    background: #ffffff26;
-    border: 0;
-    padding: 0;
-    position: relative;
-    flex-shrink: 0;
-  }
-  .toggle-switch.enabled {
-    background: #ffffffd9;
-  }
-  .toggle-thumb {
-    position: absolute;
-    top: 3px;
-    left: 3px;
-    width: 20px;
-    height: 20px;
-    border-radius: 50%;
-    background: rgba(90, 90, 105, 0.95);
-    box-shadow: 0 1px 3px #0003;
-    transition:
-      transform 220ms var(--ease-spring),
-      background-color 180ms ease;
-  }
-  .enabled .toggle-thumb {
-    transform: translateX(18px);
-    background: #2a2a35;
-  }
-  .select-checkbox {
-    width: 26px;
-    height: 26px;
-    min-height: 0;
-    border-radius: 50%;
-    background: transparent;
-    border: 2px solid #ffffff40;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    padding: 0;
-    flex-shrink: 0;
-  }
-  .select-checkbox.checked {
-    background: white;
-    border-color: white;
-  }
-  .select-checkbox img {
-    width: 16px;
-    height: 16px;
-  }
   .select-bar {
     display: flex;
     justify-content: space-between;
     align-items: center;
     width: 100%;
     padding: 4px 0 0;
+    margin-bottom: 33px;
     flex-shrink: 0;
-  }
-  .select-bar-btn {
-    width: 50px;
-    height: 50px;
-    border-radius: 50%;
-    border: 0;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    padding: 0;
-  }
-  .select-bar-btn img {
-    width: 22px;
-    height: 22px;
-  }
-  .delete-btn {
-    background: #d42a2a;
-  }
-  .delete-btn img {
-    filter: brightness(0) invert(1);
-  }
-  .confirm-btn {
-    background: white;
-  }
-  .confirm-btn img {
-    filter: brightness(0);
-  }
-  @keyframes row-in {
-    from {
-      opacity: 0;
-      transform: translateY(8px);
-    }
-  }
-  @keyframes menu-in {
-    from {
-      opacity: 0;
-      transform: translateY(-4px) scale(0.96);
-    }
   }
 </style>

@@ -1,8 +1,10 @@
 <script lang="ts">
   import { onMount } from 'svelte';
+  import { fade } from 'svelte/transition';
   import NumberFlow from '@number-flow/svelte';
   import CountryFlag from '../../components/CountryFlag.svelte';
   import { t } from '../../i18n';
+  import { tooltip } from '../../actions/tooltip';
   import type {
     VpnConnectionState,
     VpnConnectionInfo,
@@ -71,46 +73,56 @@
       aria-label={isConnected
         ? t('home.clickToDisconnect')
         : t('home.clickToConnect')}
-      title={isConnected
+      use:tooltip={isConnected
         ? t('home.clickToDisconnect')
         : t('home.clickToConnect')}
     >
       <img src={logoIcon} alt="Lumen" class="giant-logo-img" />
     </button>
 
-    <p
-      class="connection-status"
-      class:visually-hidden={connectionState === 'disconnected' || isConnected}
-      role="status"
-    >
-      {t('home.' + connectionState)}
-    </p>
+    <!-- Accessible live status for assistive tech -->
+    <span class="sr-only" role="status">{t('home.' + connectionState)}</span>
 
-    {#if error}
-      <div class="connection-error" role="alert">
-        {t('errors.' + error)}
-        <button onclick={onRetry} disabled={busy}>{t('common.retry')}</button>
-      </div>
-    {/if}
-    <!-- Animated Timer with NumberFlow -->
-    {#if isConnected}
-      <div class="timer">
-        <span class="time-segment">
-          <NumberFlow value={hours} format={{ minimumIntegerDigits: 1 }} />
-          <span class="time-label">{t('home.hoursUnit')}</span>
-        </span>
-        <span class="time-separator"></span>
-        <span class="time-segment">
-          <NumberFlow value={minutes} format={{ minimumIntegerDigits: 2 }} />
-          <span class="time-label">{t('home.minutesUnit')}</span>
-        </span>
-        <span class="time-separator"></span>
-        <span class="time-segment">
-          <NumberFlow value={seconds} format={{ minimumIntegerDigits: 2 }} />
-          <span class="time-label">{t('home.secondsUnit')}</span>
-        </span>
-      </div>
-    {/if}
+    <!-- Status and Timer in an absolute slot below button to prevent button displacement -->
+    <div class="status-slot">
+      {#if isConnecting || connectionState === 'disconnecting'}
+        <p
+          class="connection-status"
+          aria-hidden="true"
+          transition:fade={{ duration: 240 }}
+        >
+          {t('home.' + connectionState)}
+        </p>
+      {:else if isConnected}
+        <div class="timer" transition:fade={{ duration: 240 }}>
+          <span class="time-segment">
+            <NumberFlow value={hours} format={{ minimumIntegerDigits: 1 }} />
+            <span class="time-label">{t('home.hoursUnit')}</span>
+          </span>
+          <span class="time-separator"></span>
+          <span class="time-segment">
+            <NumberFlow value={minutes} format={{ minimumIntegerDigits: 2 }} />
+            <span class="time-label">{t('home.minutesUnit')}</span>
+          </span>
+          <span class="time-separator"></span>
+          <span class="time-segment">
+            <NumberFlow value={seconds} format={{ minimumIntegerDigits: 2 }} />
+            <span class="time-label">{t('home.secondsUnit')}</span>
+          </span>
+        </div>
+      {/if}
+
+      {#if error}
+        <div
+          class="connection-error"
+          role="alert"
+          transition:fade={{ duration: 200 }}
+        >
+          {t('errors.' + error)}
+          <button onclick={onRetry} disabled={busy}>{t('common.retry')}</button>
+        </div>
+      {/if}
+    </div>
   </div>
 
   <!-- Server Selector Card -->
@@ -142,8 +154,8 @@
       <img
         src={chevronIcon}
         alt=""
-        width="14"
-        height="14"
+        width="24"
+        height="24"
         class="chevron-icon"
       />
     </div>
@@ -151,26 +163,35 @@
 </div>
 
 <style>
+  .status-slot {
+    position: absolute;
+    top: calc(50% + 94px);
+    left: 0;
+    right: 0;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    pointer-events: none;
+    height: 32px;
+  }
+  .status-slot :global(button) {
+    pointer-events: auto;
+  }
   .connection-status {
+    position: absolute;
     color: rgba(24, 22, 21, 0.72);
     font-size: 16px;
-    margin: 48px 0 0;
+    margin: 0;
     min-height: 22px;
-    transition: opacity 180ms ease;
-  }
-  .connection-status.visually-hidden {
-    position: absolute;
-    width: 1px;
-    height: 1px;
-    min-height: 0;
-    overflow: hidden;
-    clip-path: inset(50%);
+    text-align: center;
     white-space: nowrap;
   }
   .connection-error {
+    position: absolute;
     color: #ffb9b9;
     text-align: center;
     font-size: 13px;
+    white-space: nowrap;
   }
   .connection-view {
     display: flex;
@@ -271,7 +292,8 @@
 
   /* Timer with NumberFlow */
   .timer {
-    margin-top: 48px;
+    position: absolute;
+    margin-top: 0;
     display: flex;
     justify-content: center;
     align-items: baseline;
@@ -281,6 +303,7 @@
     font-weight: 500;
     color: rgba(24, 22, 21, 0.84);
     letter-spacing: -0.2px;
+    white-space: nowrap;
   }
 
   .time-segment {
@@ -306,7 +329,9 @@
     max-width: 326px;
     height: 64px;
     background: rgba(0, 0, 0, 0.2);
-    border: 1px solid rgba(255, 255, 255, 0.08);
+    border: none;
+    outline: none;
+    box-shadow: none;
     border-radius: 124px;
     padding: 0 20px 0 12px;
     display: flex;
@@ -320,13 +345,12 @@
       border-color 0.22s ease,
       transform 0.25s cubic-bezier(0.34, 1.56, 0.64, 1);
     margin-top: auto;
-    margin-bottom: 41px;
+    margin-bottom: 124px;
   }
 
   .server-selector:hover {
     background: rgba(255, 255, 255, 0.09);
-    border-color: rgba(255, 255, 255, 0.18);
-    transform: translateY(-2px) scale(1.005);
+    transform: scale(1.005);
   }
 
   .server-selector:active {

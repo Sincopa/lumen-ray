@@ -154,7 +154,7 @@
     justify-content: space-between;
     gap: 12px;
     padding: 0 16px;
-    border: 1px solid #ffffff29;
+    border: 1px solid transparent;
     border-radius: 16px;
     background: #ffffff0b;
     color: #fff;
@@ -165,11 +165,9 @@
   .dropdown-trigger:hover:not(:disabled),
   .dropdown-trigger[aria-expanded='true'] {
     background: #ffffff15;
-    border-color: #ffffff55;
   }
   .dropdown-trigger:focus-visible {
     outline: none !important;
-    border-color: #e0baff;
   }
   .dropdown-trigger.compact {
     min-height: 36px;
@@ -203,7 +201,7 @@
     margin: 0;
     padding: 6px;
     overflow-y: auto;
-    border: 1px solid #ffffff30;
+    border: none;
     border-radius: 16px;
     background: #1d1d20;
     color: #fff;

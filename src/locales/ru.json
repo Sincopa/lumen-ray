@@ -46,6 +46,9 @@
   "subscriptions": {
     "title": "Мои подписки",
     "addSubscription": "Добавить подписку",
+    "addProfile": "Добавьте профиль",
+    "domainLink": "Ссылка на домен",
+    "domainLinkPlaceholder": "Добавьте ссылку на подписку",
     "addHint": "Дайте подписке понятное имя и вставьте ссылку или ключ.",
     "namePlaceholder": "Например, Личная подписка",
     "sourcePlaceholder": "https://example.com/subscription или vless://…",
@@ -110,7 +113,9 @@
     "shaderExposure": "Яркость и экспозиция",
     "shaderExposureDesc": "Интенсивность световых волокон и сияния",
     "shaderReset": "Сбросить по умолчанию",
-    "animation": "Анимированный фон"
+    "animation": "Анимированный фон",
+    "tooltips": "Тултипы (подсказки)",
+    "tooltipsDesc": "Показывать подсказки при наведении на кнопки"
   },
   "demo": {
     "notice": "Демо-режим · трафик не защищён",
@@ -147,6 +152,13 @@
     "kind": "Тип правила",
     "domain": "Домен",
     "application": "Приложение (.exe)",
+    "applicationTab": "Приложения",
+    "domainTab": "Домен",
+    "applicationField": "Приложение",
+    "selectProcess": "Выбрать процесс",
+    "selectServer": "Выбрать сервер",
+    "server": "Сервер",
+    "chooseProcessError": "Выберите процесс",
     "deleteSelected": "Удалить выбранные",
     "deleteConfirm": "Удалить выбранные правила ({count})?"
   }

@@ -39,14 +39,15 @@
     flex-shrink: 0;
     height: 48px;
     padding: 0 7px 0 16px;
-    border: 1px solid #ffffff24;
+    border: 1px solid transparent;
     border-radius: 24px;
     background: #00000038;
     backdrop-filter: blur(14px);
+    transition: border-color 180ms ease;
   }
 
   .search-field:focus-within {
-    border-color: #e0baff;
+    border-color: rgba(255, 255, 255, 0.35);
   }
 
   img {

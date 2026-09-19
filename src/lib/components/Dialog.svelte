@@ -44,7 +44,7 @@
     width: min(360px, calc(100vw - 32px));
     max-height: calc(100dvh - 32px);
     overflow: auto;
-    border: 1px solid #ffffff29;
+    border: none;
     border-radius: 30px;
     padding: 22px;
     background: #151516;
@@ -77,7 +77,7 @@
     height: 36px;
     min-height: 0;
     flex-shrink: 0;
-    border: 1px solid #ffffff1b;
+    border: none;
     border-radius: 50%;
     background: #ffffff10;
     padding: 0;

@@ -1,6 +1,9 @@
 <script lang="ts">
   import CountryFlag from '../../components/CountryFlag.svelte';
-  import SearchField from '../../components/SearchField.svelte';
+  import IconButton from '../../components/IconButton.svelte';
+  import PopupMenu from '../../components/PopupMenu.svelte';
+  import MenuItem from '../../components/MenuItem.svelte';
+  import StatusDot from '../../components/StatusDot.svelte';
   import NumberFlow from '@number-flow/svelte';
   import { catalog } from '../../services';
   import { errorCode } from '../../services/errors';
@@ -8,6 +11,7 @@
   import type { Server } from '../../services/catalog';
   import reloadIcon from '../../../assets/reload.svg';
   import searchIcon from '../../../assets/search.svg';
+  import crossIcon from '../../../assets/cross.svg';
   import menuIcon from '../../../assets/menu.svg';
   import pencilIcon from '../../../assets/pencil.svg';
   import trashIcon from '../../../assets/trash.svg';
@@ -34,10 +38,11 @@
 
   let query = $state('');
   let searching = $state(false);
+  let searchClosing = $state(false);
+  let searchInputEl = $state<HTMLInputElement | null>(null);
   let menu = $state(false);
   let busy = $state(false);
   let error = $state('');
-  let checked = $state(false);
   let filtered = $derived(
     $catalogStore.servers.filter((server) =>
       (
@@ -57,10 +62,11 @@
     $catalogStore.subscriptions.find(
       (sub) =>
         sub.id ===
-        $catalogStore.servers.find(
-          (server) =>
-            server.id === (selectedId || $catalogStore.selectedServerId),
-        )?.subscriptionId,
+        ($catalogStore.selectedSubscriptionId ??
+          $catalogStore.servers.find(
+            (server) =>
+              server.id === (selectedId || $catalogStore.selectedServerId),
+          )?.subscriptionId),
     ) ?? $catalogStore.subscriptions[0],
   );
 
@@ -72,12 +78,28 @@
       await Promise.all(
         $catalogStore.servers.map((server) => catalog.pingServer(server.id)),
       );
-      checked = true;
     } catch (e) {
       error = t('errors.' + errorCode(e));
     } finally {
       busy = false;
     }
+  }
+
+  function handleOpenSearch() {
+    searching = true;
+    searchClosing = false;
+    setTimeout(() => {
+      searchInputEl?.focus();
+    }, 180);
+  }
+
+  function handleCloseSearch() {
+    searchClosing = true;
+    setTimeout(() => {
+      searching = false;
+      searchClosing = false;
+      query = '';
+    }, 240);
   }
 
   function select(server: Server) {
@@ -89,96 +111,108 @@
   }
 </script>
 
+<svelte:window
+  onclick={(e) => {
+    if (menu) {
+      const target = e.target as HTMLElement | null;
+      if (!target?.closest('.popup-menu') && !target?.closest('.icon-btn')) {
+        menu = false;
+      }
+    }
+  }}
+/>
+
 <section class="servers-view" class:compact aria-label={t('servers.title')}>
   <div class="header-wrapper">
-    <header class="active-sub-card">
-      <div class="subscription-title">
-        <span>{activeSubscription?.name ?? t('servers.title')}</span>
-        <span class="status-dot" aria-hidden="true"></span>
+    <div class="header-pill">
+      <!-- Standard header content -->
+      <div class="header-normal" class:header-hidden={searching}>
+        <div class="header-card-title">
+          <span class="title-text">
+            {activeSubscription?.name ?? t('servers.title')}
+          </span>
+          <StatusDot variant="active" />
+        </div>
+        <div class="header-card-actions">
+          <IconButton
+            icon={searchIcon}
+            ariaLabel={t('common.search')}
+            onclick={handleOpenSearch}
+          />
+          <IconButton
+            icon={reloadIcon}
+            ariaLabel={t('servers.reloadServers')}
+            disabled={busy || !$catalogStore.servers.length}
+            onclick={refresh}
+          />
+          {#if !compact}
+            <IconButton
+              icon={menuIcon}
+              ariaLabel={t('common.menu')}
+              active={menu}
+              expanded={menu}
+              onclick={() => (menu = !menu)}
+            />
+          {/if}
+        </div>
       </div>
-      <div class="header-actions">
+
+      <!-- Search bar inside header pill -->
+      <div
+        class="header-search"
+        class:search-open={searching && !searchClosing}
+        class:search-closing={searchClosing}
+      >
+        <img src={searchIcon} alt="" class="search-header-icon" />
+        <input
+          bind:this={searchInputEl}
+          type="text"
+          class="search-header-input"
+          placeholder={t('servers.searchPlaceholder') || 'Поиск серверов...'}
+          bind:value={query}
+          autocomplete="off"
+          spellcheck="false"
+        />
         <button
-          class="header-action"
-          aria-label={t('common.search')}
-          aria-expanded={searching}
-          onclick={() => {
-            searching = !searching;
-            if (!searching) query = '';
-          }}
+          type="button"
+          class="close-search-btn"
+          onclick={handleCloseSearch}
+          aria-label={t('common.close')}
         >
-          <img src={searchIcon} alt="" />
+          <img src={crossIcon} alt="" class="close-icon" />
         </button>
-        <button
-          class="header-action"
-          onclick={refresh}
-          disabled={busy || !$catalogStore.servers.length}
-          aria-label={t('servers.reloadServers')}
-        >
-          <img src={reloadIcon} alt="" />
-        </button>
-        {#if !compact}<button
-            class="header-action"
-            class:active={menu}
-            aria-label={t('common.menu')}
-            aria-expanded={menu}
-            onclick={() => (menu = !menu)}
-          >
-            <img src={menuIcon} alt="" />
-          </button>{/if}
       </div>
-    </header>
-    {#if menu}
-      <div class="popup-menu">
-        <button
+    </div>
+
+    {#if menu && !searching}
+      <PopupMenu top="68px" right="8px">
+        <MenuItem
+          icon={pencilIcon}
+          label={t('common.edit')}
           onclick={() => {
             menu = false;
             onManageSubscription?.();
           }}
-        >
-          <span class="menu-item-icon-circle">
-            <img src={pencilIcon} alt="" />
-          </span>
-          <span>{t('common.edit')}</span>
-        </button>
-        <button
+        />
+        <MenuItem
+          icon={reloadIcon}
+          label={t('common.reload')}
           onclick={() => {
             menu = false;
             void refresh();
           }}
-        >
-          <span class="menu-item-icon-circle">
-            <img src={reloadIcon} alt="" />
-          </span>
-          <span>{t('common.reload')}</span>
-        </button>
-        <button disabled>
-          <span class="menu-item-icon-circle">
-            <img src={shareIcon} alt="" />
-          </span>
-          <span>{t('common.share')}</span>
-        </button>
-        <button class="danger" disabled>
-          <span class="menu-item-icon-circle">
-            <img src={trashIcon} alt="" />
-          </span>
-          <span>{t('common.delete')}</span>
-        </button>
-      </div>
+        />
+        <MenuItem icon={shareIcon} label={t('common.share')} disabled />
+        <MenuItem
+          icon={trashIcon}
+          label={t('common.delete')}
+          variant="danger"
+          disabled
+        />
+      </PopupMenu>
     {/if}
   </div>
 
-  {#if searching}<SearchField
-      bind:value={query}
-      placeholder={t('servers.searchPlaceholder')}
-      onClose={() => (searching = false)}
-    />{/if}
-  {#if disabled}<p class="hint">{t('servers.disconnectFirst')}</p>{/if}
-  {#if busy}<p role="status">{t('common.loading')}</p>{:else if checked}<p
-      role="status"
-      class="hint"
-    >
-      {t('demo.ping')}
-    </p>{/if}
   {#if error}<p role="alert">{error}</p>{/if}
 
   <div class="servers-list">
@@ -196,10 +230,12 @@
           <span>{t('servers.countries.' + server.countryCode)}</span>
         </span>
         <span class="ping">
-          {#if server.id === selectedId}
-            <span class="ping-dot" aria-hidden="true"></span>
+          {#if server.id === selectedId && !busy}
+            <StatusDot size={8} />
           {/if}
-          {#if typeof server.latency === 'number'}
+          {#if busy}
+            <span class="ping-spinner" aria-label="Loading ping"></span>
+          {:else if typeof server.latency === 'number'}
             <NumberFlow value={server.latency} /> ms
           {:else if server.latency === 'timeout'}
             {t('servers.timeout')}
@@ -225,118 +261,184 @@
     position: relative;
     flex-shrink: 0;
   }
-  .active-sub-card {
+  .header-pill {
+    position: relative;
     height: 62px;
+    background: #00000038;
+    border-radius: 124px;
+    -webkit-backdrop-filter: blur(14px);
+    backdrop-filter: blur(14px);
+    box-sizing: border-box;
+    width: 100%;
+    overflow: hidden;
+    border: 1px solid transparent;
+    transition: border-color 180ms ease;
+  }
+
+  .header-pill:focus-within {
+    border-color: rgba(255, 255, 255, 0.35);
+  }
+
+  .header-normal {
+    width: 100%;
+    height: 100%;
     padding: 0 12px 0 24px;
     display: flex;
     justify-content: space-between;
     align-items: center;
-    background: #00000038;
-    border: 1px solid #ffffff14;
-    border-radius: 124px;
-    backdrop-filter: blur(14px);
+    box-sizing: border-box;
+    gap: 8px;
+    transition:
+      opacity 200ms ease,
+      transform 200ms ease;
   }
-  .subscription-title {
+
+  .header-normal.header-hidden {
+    opacity: 0;
+    pointer-events: none;
+    transform: scale(0.96);
+  }
+
+  .header-card-title {
     display: flex;
     align-items: center;
     gap: 10px;
     min-width: 0;
     font-size: 15px;
     font-weight: 500;
+    letter-spacing: -0.2px;
   }
-  .status-dot {
-    width: 8px;
-    height: 8px;
-    border-radius: 50%;
-    background: #3aee29;
-    box-shadow: 0 0 8px #3aee29a6;
-    flex-shrink: 0;
+
+  .title-text {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
-  .header-actions {
+
+  .header-card-actions {
     display: flex;
     align-items: center;
     gap: 4px;
+    flex-shrink: 0;
   }
-  .header-action {
-    width: 30px;
-    height: 30px;
-    min-height: 0;
-    border: 0;
-    border-radius: 50%;
-    padding: 0;
-    background: transparent;
+
+  /* Header Search Bar */
+  .header-search {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 100%;
+    height: 100%;
+    padding: 0 8px 0 20px;
     display: flex;
     align-items: center;
-    justify-content: center;
+    gap: 12px;
+    box-sizing: border-box;
+    opacity: 0;
+    pointer-events: none;
+    transform: scale(0.96);
+    transition:
+      opacity 220ms ease,
+      transform 220ms cubic-bezier(0.22, 1, 0.36, 1);
   }
-  .header-action:hover,
-  .header-action.active {
-    background: #ffffff18;
+
+  .header-search.search-open {
+    opacity: 1;
+    pointer-events: auto;
+    transform: scale(1);
   }
-  .header-action img {
+
+  .header-search.search-closing {
+    opacity: 0;
+    pointer-events: none;
+    transform: scale(0.96);
+  }
+
+  .search-header-icon {
     width: 18px;
     height: 18px;
+    object-fit: contain;
     filter: brightness(0) invert(1);
-    opacity: 0.72;
+    opacity: 0.6;
+    flex-shrink: 0;
   }
-  .popup-menu {
-    position: absolute;
-    top: 68px;
-    right: 8px;
-    width: 197px;
-    padding: 10px;
-    border: 1px solid rgba(255, 255, 255, 0.12);
-    border-radius: 24px;
-    background: #18181a;
-    box-shadow: 0 16px 48px rgba(0, 0, 0, 0.5);
-    backdrop-filter: blur(28px);
-    -webkit-backdrop-filter: blur(28px);
-    z-index: 30;
-    transform-origin: top right;
-    animation: menu-in 180ms var(--ease-spring) both;
+
+  .search-header-input {
+    flex: 1;
+    height: 100%;
+    background: transparent !important;
+    border: none !important;
+    outline: none !important;
+    box-shadow: none !important;
+    border-radius: 0 !important;
+    color: #ffffff;
+    font-size: 14px;
+    font-family: inherit;
+    padding: 0 !important;
+    -webkit-appearance: none;
+    appearance: none;
   }
-  .popup-menu button {
-    width: 100%;
-    height: 40px;
-    min-height: 0;
-    padding: 0 10px 0 8px;
-    border: 0;
-    border-radius: 14px;
-    background: rgba(255, 255, 255, 0.04);
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    font-size: 13px;
-    text-align: left;
-    transition: background 0.18s ease;
+
+  .search-header-input::placeholder {
+    color: rgba(255, 255, 255, 0.4);
   }
-  .popup-menu button:hover {
-    background: rgba(255, 255, 255, 0.12);
-  }
-  .popup-menu button.danger:hover {
-    background: rgba(243, 57, 57, 0.2);
-    color: #ff8080;
-  }
-  .popup-menu button .menu-item-icon-circle {
-    width: 24px;
-    height: 24px;
+
+  .close-search-btn {
+    width: 36px;
+    height: 36px;
     border-radius: 50%;
-    background: rgba(255, 255, 255, 0.1);
+    background: #ffffff;
+    border: none !important;
+    cursor: pointer;
     display: flex;
     align-items: center;
     justify-content: center;
+    padding: 0;
     flex-shrink: 0;
-    color: #ffffff;
+    transition: transform 160ms var(--ease-spring);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
   }
-  .menu-item-icon-circle img {
-    width: 15px;
-    height: 15px;
-    filter: brightness(0) invert(1);
+
+  .close-search-btn:hover {
+    transform: scale(1.06);
+  }
+
+  .close-search-btn:active {
+    transform: scale(0.94);
+  }
+
+  .close-icon {
+    width: 14px;
+    height: 14px;
+    object-fit: contain;
+    filter: brightness(0);
+  }
+
+  .ping-spinner {
+    width: 14px;
+    height: 14px;
+    border: 2px solid rgba(255, 255, 255, 0.2);
+    border-top-color: #ffffff;
+    border-radius: 50%;
+    animation: ping-spin 0.75s linear infinite;
+    display: inline-block;
+  }
+
+  @keyframes ping-spin {
+    to {
+      transform: rotate(360deg);
+    }
   }
   .servers-list {
-    overflow: auto;
+    overflow-y: auto;
     min-height: 0;
-    scrollbar-gutter: stable;
+    flex: 1;
+    padding-bottom: 96px;
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+  }
+  .servers-list::-webkit-scrollbar {
+    display: none;
   }
   .server-row {
     width: 100%;
@@ -344,7 +446,7 @@
     display: flex;
     gap: 12px;
     align-items: center;
-    border: 1px solid transparent;
+    border: none;
     border-radius: 30px;
     background: transparent;
     padding: 10px 12px;
@@ -352,19 +454,6 @@
     transition:
       background-color 180ms ease,
       transform 180ms var(--ease-spring);
-    animation: row-in 320ms var(--ease-spring) both;
-  }
-  .server-row:nth-child(2) {
-    animation-delay: 28ms;
-  }
-  .server-row:nth-child(3) {
-    animation-delay: 56ms;
-  }
-  .server-row:nth-child(4) {
-    animation-delay: 84ms;
-  }
-  .server-row:nth-child(n + 5) {
-    animation-delay: 112ms;
   }
   .server-row:hover,
   .active-server {
@@ -397,28 +486,9 @@
     align-items: center;
     gap: 6px;
   }
-  .ping-dot {
-    width: 8px;
-    height: 8px;
-    border-radius: 50%;
-    background: #3aee29;
-    box-shadow: 0 0 8px #3aee29a6;
-  }
   .hint {
     font-size: 12px;
     color: #d0c4dc;
     margin: 4px 0;
-  }
-  @keyframes row-in {
-    from {
-      opacity: 0;
-      transform: translateY(8px);
-    }
-  }
-  @keyframes menu-in {
-    from {
-      opacity: 0;
-      transform: translateY(-4px) scale(0.96);
-    }
   }
 </style>

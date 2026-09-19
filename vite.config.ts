@@ -5,4 +5,8 @@ import { defineConfig } from 'vite';
 export default defineConfig({
   plugins: [svelte()],
   server: { host: '127.0.0.1', port: 5173, strictPort: true },
+  build: {
+    target: ['chrome105', 'edge105', 'safari16'],
+    cssTarget: ['chrome105', 'edge105', 'safari16'],
+  },
 });

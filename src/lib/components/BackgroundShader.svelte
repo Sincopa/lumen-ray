@@ -48,7 +48,7 @@ vec3 sourceColor(int i){
 // All membrane and scattering coordinates pass through the same flowing medium.
 // Curl-like cross derivatives keep the folds coherent over several seconds.
 vec2 warp(vec2 p){
-    vec2 x=(p-vec2(0,.58))*uDistortionScale;
+    vec2 x=(p-vec2(0,.88))*uDistortionScale;
     float t=uTime;
     vec2 w=vec2(sin(x.y*5.1+t*.18)+.48*cos(x.x*3.7+x.y*2.4-t*.11),
                 cos(x.x*4.8-t*.14)-.48*cos(x.x*3.7+x.y*2.4-t*.11));
@@ -86,7 +86,6 @@ void main(){
     float px=1.0/uResolution.x;
     vec2 p=vec2(gl_FragCoord.x/uResolution.x-.5,(uResolution.y-gl_FragCoord.y)/uResolution.x);
     float frameHeight=uResolution.y/uResolution.x;
-    if(uDebug==0 && p.y>=min(1.62,frameHeight*.97)){fragColor=vec4(0,0,0,1);return;}
     vec2 q=warp(p);
     float ds[6],aa[6],field=4.0;
     vec3 cs[6];
@@ -159,9 +158,15 @@ void main(){
         glow+=c*(gauss(across,width*2.3)*.18+gauss(across,width*4.5)*.025)*energy*uRayGlow;
     }
     float h=uResolution.y/uResolution.x;
-    float lowerFade=1.0-smoothstep(min(.97,h*.55),min(1.62,h*.97),p.y);
-    vec2 air=(p-center)*vec2(.65,1.12);
-    vec3 atmosphere=pigment*exp(-dot(air,air)*1.6)*(.025+uAmbientGlow*uPlaying)*(.35+.65*smoothstep(-.48,.33,p.x));
+    float lowerFade=1.0;
+    vec2 air=(p-center)*vec2(.65,0.42);
+    float falloff=exp(-dot(air,air)*0.65);
+    float activeFill=uPlaying*0.35;
+    // Wide screen-fill: a very soft base tint that covers the full canvas
+    // so the bottom doesn't appear dead black.
+    vec2 airWide=(p-vec2(0.0,h*0.5))*vec2(0.30,0.18);
+    float wideFill=exp(-dot(airWide,airWide)*0.45)*0.55;
+    vec3 atmosphere=pigment*(falloff*0.75+wideFill+activeFill)*(.025+uAmbientGlow*uPlaying)*(.35+.65*smoothstep(-.48,.33,p.x));
     vec3 color=(rays+(glow+volume+atmosphere)*uGlobalGlow)*lowerFade;
     if(uDebug==1)color=vec3(1.0-smoothstep(-.025,.025,field))*vec3(.55,.36,.95);
     if(uDebug==2)color=contours;
@@ -176,7 +181,7 @@ void main(){
     color=radiance*((1.0-exp(-peak))/max(peak,.0001));
     if(uDebug==0)color=1.0-(1.0-color)*exp(-contours*uExposure*lowerFade);
     color=pow(max(color,vec3(0)),vec3(uContrast));
-    color=max(vec3(0),color-vec3(uDarkLevel*.025));
+    color=max(vec3(0),color-vec3(uDarkLevel*.025*max(1.0-uPlaying*0.75,0.0)));
     float dither=fract(52.9829189*fract(dot(gl_FragCoord.xy,vec2(.06711056,.00583715))))-.5;
     fragColor=vec4(clamp(color+dither/255.0,0.0,1.0),1.0);
 }`;
@@ -191,8 +196,8 @@ void main(){
     contourContrast: 1.25,
     arcCoverage: 0.51,
     rayCount: 24,
-    rayMinLength: 0.22,
-    rayMaxLength: 1.05,
+    rayMinLength: 0.3,
+    rayMaxLength: 1.55,
     rayThickness: 1.0,
     rayCurvature: 0.55,
     raySharpness: 1.1,
@@ -479,7 +484,7 @@ void main(){
       rt = rayTime,
       ft = fadeTime;
     const cx = 0.025 * Math.sin(t * 0.17) + 0.02 * Math.sin(t * 0.083),
-      cy = 0.57 + 0.045 * Math.sin(t * 0.14 + 0.3);
+      cy = 0.88 + 0.045 * Math.sin(t * 0.14 + 0.3);
     const turn = 0.24 * Math.sin(t * 0.12),
       cs = Math.cos(turn),
       sn = Math.sin(turn);

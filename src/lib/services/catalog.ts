@@ -34,6 +34,7 @@ export interface Catalog {
   subscriptions: Subscription[];
   rules: Rule[];
   selectedServerId: string | null;
+  selectedSubscriptionId?: string | null;
   routingMode: 'global' | 'rules';
 }
 
@@ -52,7 +53,6 @@ export function initialCatalog(): Catalog {
         id: 'demo',
         name: 'BlessedVPN',
         updatedAt: 0,
-        status: 'expired',
       },
     ],
     servers: ['fi', 'nl', 'de', 'se', 'us', 'gb', 'jp'].map(
@@ -67,6 +67,7 @@ export function initialCatalog(): Catalog {
     ),
     rules: [],
     selectedServerId: 'demo-fi',
+    selectedSubscriptionId: 'demo',
     routingMode: 'global',
   };
 }
@@ -225,10 +226,31 @@ export class CatalogService {
   }
 
   async selectServer(id: string) {
-    if (!this.current.servers.some((s) => s.id === id)) {
+    const server = this.current.servers.find((s) => s.id === id);
+    if (!server) {
       throw new ServiceError('invalidServer');
     }
-    this.commit({ ...this.current, selectedServerId: id });
+    this.commit({
+      ...this.current,
+      selectedServerId: id,
+      selectedSubscriptionId: server.subscriptionId,
+    });
+  }
+
+  selectSubscription(id: string) {
+    if (!this.current.subscriptions.some((s) => s.id === id)) {
+      throw new ServiceError('invalidSubscription');
+    }
+    const matchingServer = this.current.servers.find(
+      (s) => s.subscriptionId === id,
+    );
+    this.commit({
+      ...this.current,
+      selectedSubscriptionId: id,
+      selectedServerId: matchingServer
+        ? matchingServer.id
+        : this.current.selectedServerId,
+    });
   }
 
   async pingServer(id: string) {
@@ -236,7 +258,7 @@ export class CatalogService {
     if (!server) {
       throw new ServiceError('invalidServer');
     }
-    await new Promise((resolve) => setTimeout(resolve, 200));
+    await new Promise((resolve) => setTimeout(resolve, 500));
     return server.latency;
   }
 
@@ -264,7 +286,8 @@ export class CatalogService {
         { id, name: name.trim(), updatedAt: Date.now() },
       ],
       servers: [...this.current.servers, server],
-      selectedServerId: this.current.selectedServerId ?? server.id,
+      selectedSubscriptionId: id,
+      selectedServerId: server.id,
     });
   }
 
@@ -295,13 +318,18 @@ export class CatalogService {
 
   removeSubscription(id: string) {
     const servers = this.current.servers.filter((s) => s.subscriptionId !== id);
+    const remainingSubs = this.current.subscriptions.filter((s) => s.id !== id);
     this.commit({
       ...this.current,
-      subscriptions: this.current.subscriptions.filter((s) => s.id !== id),
+      subscriptions: remainingSubs,
       servers,
       rules: this.current.rules.filter((r) =>
         servers.some((s) => s.id === r.serverId),
       ),
+      selectedSubscriptionId:
+        this.current.selectedSubscriptionId === id
+          ? (remainingSubs[0]?.id ?? null)
+          : this.current.selectedSubscriptionId,
       selectedServerId: servers.some(
         (s) => s.id === this.current.selectedServerId,
       )
@@ -318,7 +346,7 @@ export class CatalogService {
     const name = rule.name.trim();
     const valid = rule.isDomain
       ? /^(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+[a-z]{2,63}$/i.test(name)
-      : /^[^<>:"/\\|?*\r\n]+\.exe$/i.test(name);
+      : /^[^<>:"\\|?*\r\n]+$/i.test(name) && name.length > 0;
 
     if (
       !valid ||

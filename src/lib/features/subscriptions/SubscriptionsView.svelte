@@ -2,21 +2,26 @@
   import { slide } from 'svelte/transition';
   import { catalog, connection } from '../../services';
   import { errorCode } from '../../services/errors';
-  import { t } from '../../i18n';
+  import { t, i18n } from '../../i18n';
   import type { Subscription } from '../../services/catalog';
   import Dialog from '../../components/Dialog.svelte';
+  import StatusDot from '../../components/StatusDot.svelte';
+  import IconButton from '../../components/IconButton.svelte';
+  import PopupMenu from '../../components/PopupMenu.svelte';
+  import MenuItem from '../../components/MenuItem.svelte';
   import reloadIcon from '../../../assets/reload.svg';
   import menuIcon from '../../../assets/menu.svg';
   import pencilIcon from '../../../assets/pencil.svg';
   import trashIcon from '../../../assets/trash.svg';
   import shareIcon from '../../../assets/share.svg';
   import chevronIcon from '../../../assets/chevron.svg';
+  import { formatSubscriptionUpdatedAgo } from '../../utils/time';
 
   const catalogStore = catalog.state;
   const connectionStore = connection.state;
 
   // Local state
-  let expanded = $state<string | null>('grbnk');
+  let expanded = $state<string | null>(null);
   let editing = $state<Subscription | null>(null);
   let deleting = $state<Subscription | null>(null);
   let menu = $state<string | null>(null);
@@ -24,6 +29,42 @@
   let busy = $state<string | null>(null);
   let error = $state('');
   let exported = $state('');
+
+  let activeSubId = $derived(
+    $catalogStore.selectedSubscriptionId ??
+      $catalogStore.servers.find((s) => s.id === $catalogStore.selectedServerId)
+        ?.subscriptionId ??
+      $catalogStore.subscriptions[0]?.id,
+  );
+
+  let menuTop = $state(68);
+  let viewEl = $state<HTMLElement | null>(null);
+
+  let activeMenuSub = $derived(
+    $catalogStore.subscriptions.find((s) => s.id === menu),
+  );
+
+  function formatUpdatedAgo(sub: Subscription): string {
+    return formatSubscriptionUpdatedAgo(
+      sub.updatedAt,
+      sub.updatedMinutesAgo,
+      i18n.currentLanguage,
+    );
+  }
+
+  function toggleMenu(subId: string, e: MouseEvent) {
+    if (menu === subId) {
+      menu = null;
+      return;
+    }
+    const btn = e.currentTarget as HTMLElement | null;
+    if (btn && viewEl) {
+      const btnRect = btn.getBoundingClientRect();
+      const viewRect = viewEl.getBoundingClientRect();
+      menuTop = Math.round(btnRect.bottom - viewRect.top + 8);
+    }
+    menu = subId;
+  }
 
   // Action handlers
   async function refresh(id: string) {
@@ -79,52 +120,65 @@
   }
 </script>
 
-<section class="subscriptions-view" aria-label={t('subscriptions.title')}>
+<svelte:window
+  onclick={(e) => {
+    if (menu) {
+      const target = e.target as HTMLElement | null;
+      if (!target?.closest('.popup-menu') && !target?.closest('.icon-btn')) {
+        menu = null;
+      }
+    }
+  }}
+/>
+
+<section
+  class="subscriptions-view"
+  bind:this={viewEl}
+  aria-label={t('subscriptions.title')}
+>
   {#if error}<p role="alert">{error}</p>{/if}
-  <div class="cards-list">
+  <div class="cards-list" onscroll={() => (menu = null)}>
     {#each $catalogStore.subscriptions as sub (sub.id)}
-      <div class="sub-card-wrapper">
+      <div class="sub-card-wrapper" class:has-open-menu={menu === sub.id}>
         <article class="sub-card" class:expanded={expanded === sub.id}>
           <div class="card-header">
             <button
               class="title-group"
               aria-expanded={expanded === sub.id}
-              onclick={() => (expanded = expanded === sub.id ? null : sub.id)}
+              onclick={() => {
+                catalog.selectSubscription(sub.id);
+                expanded = expanded === sub.id ? null : sub.id;
+              }}
             >
               <span class="sub-name">{sub.name}</span>
-              <span
-                class="status-indicator"
-                class:expired={sub.status === 'expired'}
-                aria-hidden="true"
-              ></span>
+              {#if activeSubId === sub.id}
+                <StatusDot variant="active" />
+              {/if}
             </button>
             <div class="actions-group">
-              <button
-                class="action-icon-btn"
-                aria-label={t('common.reload')}
+              <IconButton
+                icon={reloadIcon}
+                ariaLabel={t('common.reload')}
                 disabled={busy !== null}
                 onclick={() => refresh(sub.id)}
-              >
-                <img src={reloadIcon} class="btn-icon" alt="" />
-              </button>
-              <button
-                class="action-icon-btn"
-                class:active-menu-btn={menu === sub.id}
-                aria-label={t('common.menu')}
-                aria-expanded={menu === sub.id}
-                onclick={() => (menu = menu === sub.id ? null : sub.id)}
-              >
-                <img src={menuIcon} class="btn-icon" alt="" />
-              </button>
-              <button
-                class="action-icon-btn card-chevron"
-                class:expanded={expanded === sub.id}
-                aria-label={sub.name}
-                aria-expanded={expanded === sub.id}
-                onclick={() => (expanded = expanded === sub.id ? null : sub.id)}
-              >
-                <img src={chevronIcon} class="btn-icon" alt="" />
-              </button>
+              />
+              <IconButton
+                icon={menuIcon}
+                ariaLabel={t('common.menu')}
+                active={menu === sub.id}
+                expanded={menu === sub.id}
+                onclick={(e) => toggleMenu(sub.id, e)}
+              />
+              <IconButton
+                icon={chevronIcon}
+                ariaLabel={sub.name}
+                expanded={expanded === sub.id}
+                class="card-chevron"
+                onclick={() => {
+                  catalog.selectSubscription(sub.id);
+                  expanded = expanded === sub.id ? null : sub.id;
+                }}
+              />
             </div>
           </div>
           {#if expanded === sub.id}
@@ -144,72 +198,56 @@
                 </div>
               </div>
               <div class="updated-time">
-                {sub.updatedMinutesAgo !== undefined
-                  ? t('subscriptions.updatedMinutesAgo', {
-                      count: sub.updatedMinutesAgo,
-                    })
-                  : sub.updatedAt
-                    ? t('subscriptions.updatedAt', {
-                        time: new Date(sub.updatedAt).toLocaleString(),
-                      })
-                    : t('demo.sample')}
+                {formatUpdatedAgo(sub)}
               </div>
             </div>
           {/if}
         </article>
-        {#if menu === sub.id}
-          <div class="popup-menu">
-            <button
-              class="menu-item"
-              onclick={() => {
-                editing = sub;
-                name = sub.name;
-                menu = null;
-              }}
-            >
-              <span class="menu-item-icon-circle">
-                <img src={pencilIcon} alt="" />
-              </span>
-              <span>{t('common.edit')}</span>
-            </button>
-            <button
-              class="menu-item"
-              disabled={busy !== null}
-              onclick={() => {
-                menu = null;
-                void refresh(sub.id);
-              }}
-            >
-              <span class="menu-item-icon-circle">
-                <img src={reloadIcon} alt="" />
-              </span>
-              <span>{t('common.reload')}</span>
-            </button>
-            <button class="menu-item" onclick={() => exportSub(sub)}>
-              <span class="menu-item-icon-circle">
-                <img src={shareIcon} alt="" />
-              </span>
-              <span>{t('common.export')}</span>
-            </button>
-            <button
-              class="menu-item danger"
-              disabled={$connectionStore.busy ||
-                $connectionStore.status === 'connected'}
-              onclick={() => {
-                deleting = sub;
-                menu = null;
-              }}
-            >
-              <span class="menu-item-icon-circle">
-                <img src={trashIcon} alt="" />
-              </span>
-              <span>{t('common.delete')}</span>
-            </button>
-          </div>
-        {/if}
       </div>
     {:else}<p>{t('subscriptions.empty')}</p>{/each}
   </div>
+
+  {#if menu && activeMenuSub}
+    <PopupMenu top="{menuTop}px" right="20px">
+      <MenuItem
+        icon={pencilIcon}
+        label={t('common.edit')}
+        onclick={() => {
+          editing = activeMenuSub;
+          name = activeMenuSub?.name ?? '';
+          menu = null;
+        }}
+      />
+      <MenuItem
+        icon={reloadIcon}
+        label={t('common.reload')}
+        disabled={busy !== null}
+        onclick={() => {
+          const id = activeMenuSub?.id;
+          menu = null;
+          if (id) void refresh(id);
+        }}
+      />
+      <MenuItem
+        icon={shareIcon}
+        label={t('common.export')}
+        onclick={() => {
+          if (activeMenuSub) exportSub(activeMenuSub);
+        }}
+      />
+      <MenuItem
+        icon={trashIcon}
+        label={t('common.delete')}
+        variant="danger"
+        disabled={$connectionStore.busy ||
+          $connectionStore.status === 'connected'}
+        onclick={() => {
+          deleting = activeMenuSub;
+          menu = null;
+        }}
+      />
+    </PopupMenu>
+  {/if}
 </section>
 {#if editing}
   <Dialog title={t('common.edit')} onClose={() => (editing = null)}>
@@ -256,6 +294,7 @@
     min-height: 0;
     gap: 12px;
     padding-top: 0;
+    position: relative;
   }
   .cards-list {
     display: flex;
@@ -264,32 +303,33 @@
     width: 100%;
     overflow-y: auto;
     min-height: 0;
-    padding-bottom: 220px;
+    flex: 1;
+    padding-bottom: 96px;
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+  }
+  .cards-list::-webkit-scrollbar {
+    display: none;
   }
   .sub-card-wrapper {
     position: relative;
     width: 100%;
-    animation: surface-in 360ms var(--ease-spring) both;
   }
-  .sub-card-wrapper:nth-child(2) {
-    animation-delay: 45ms;
-  }
-  .sub-card-wrapper:nth-child(3) {
-    animation-delay: 90ms;
+  .sub-card-wrapper.has-open-menu {
+    z-index: 50;
   }
   .sub-card {
     background: rgba(0, 0, 0, 0.22);
-    border: 1px solid #ffffff14;
+    border: none;
     border-radius: 32px;
     padding: 18px 22px;
     display: flex;
     flex-direction: column;
-    backdrop-filter: blur(14px);
   }
   .sub-card:hover,
   .sub-card.expanded {
     background: rgba(0, 0, 0, 0.3);
-    border-color: #ffffff24;
+    border: none;
   }
   .card-header {
     display: flex;
@@ -318,55 +358,21 @@
     text-overflow: ellipsis;
     white-space: nowrap;
   }
-  .status-indicator {
-    width: 8px;
-    height: 8px;
-    border-radius: 50%;
-    background: #3aee29;
-    box-shadow: 0 0 8px #3aee29a6;
-    flex-shrink: 0;
-  }
-  .status-indicator.expired {
-    background: #ef3340;
-    box-shadow: 0 0 8px #ef334099;
-  }
   .actions-group {
     display: flex;
     align-items: center;
     gap: 6px;
   }
-  .action-icon-btn {
-    width: 28px;
-    height: 28px;
-    min-height: 0;
-    border-radius: 50%;
-    background: none;
-    border: 0;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    padding: 0;
-  }
-  .action-icon-btn:hover,
-  .active-menu-btn {
-    background: #ffffff20;
-  }
-  .btn-icon {
-    width: 18px;
-    height: 18px;
-    filter: brightness(0) invert(1);
-    opacity: 0.75;
-  }
-  .card-chevron {
+  :global(.card-chevron) {
     transition: transform 0.28s;
   }
-  .card-chevron.expanded {
+  :global(.card-chevron.expanded) {
     transform: rotate(180deg);
   }
   .card-body {
     margin-top: 12px;
     padding-top: 11px;
-    border-top: 1px solid #ffffff0f;
+    border-top: none;
     display: flex;
     justify-content: space-between;
     align-items: flex-end;
@@ -395,78 +401,8 @@
     max-width: 50%;
     text-align: right;
   }
-  .popup-menu {
-    position: absolute;
-    top: 52px;
-    right: 12px;
-    width: 197px;
-    background: #18181a;
-    border: 1px solid rgba(255, 255, 255, 0.12);
-    border-radius: 24px;
-    padding: 10px;
-    backdrop-filter: blur(28px);
-    -webkit-backdrop-filter: blur(28px);
-    box-shadow: 0 16px 48px rgba(0, 0, 0, 0.5);
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-    z-index: 50;
-    transform-origin: top right;
-    animation: menu-in 180ms var(--ease-spring) both;
-  }
-  .menu-item {
-    width: 100%;
-    height: 40px;
-    min-height: 0;
-    border-radius: 14px;
-    background: rgba(255, 255, 255, 0.04);
-    border: 0;
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    padding: 0 12px 0 8px;
-    text-align: left;
-    font-size: 13px;
-    font-weight: 500;
-    transition: background 0.18s ease;
-  }
-  .menu-item:hover {
-    background: rgba(255, 255, 255, 0.12);
-  }
-  .menu-item.danger:hover {
-    background: rgba(243, 57, 57, 0.2);
-    color: #ff8080;
-  }
-  .menu-item-icon-circle {
-    width: 24px;
-    height: 24px;
-    border-radius: 50%;
-    background: rgba(255, 255, 255, 0.1);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    flex-shrink: 0;
-    color: #ffffff;
-  }
-  .menu-item-icon-circle img {
-    width: 15px;
-    height: 15px;
-    filter: brightness(0) invert(1);
-  }
-  @keyframes surface-in {
-    from {
-      opacity: 0;
-      transform: translateY(10px) scale(0.985);
-    }
-  }
-  @keyframes menu-in {
-    from {
-      opacity: 0;
-      transform: translateY(-4px) scale(0.96);
-    }
-  }
   @media (prefers-reduced-motion: reduce) {
-    .card-chevron {
+    :global(.card-chevron) {
       transition: none;
     }
   }

@@ -101,4 +101,19 @@ describe('connection lifecycle', () => {
     expect(await vpn.getStatus()).toBe('disconnected');
     expect(await vpn.getConnectionInfo()).toBeNull();
   });
+
+  it('switches server seamlessly when already connected', async () => {
+    const vpn = new BrowserVpnService(0);
+    const controller = new ConnectionController(vpn);
+
+    await controller.initialize();
+    await controller.toggle('demo-fi');
+    expect(get(controller.state).status).toBe('connected');
+    expect(get(controller.state).info?.serverId).toBe('demo-fi');
+
+    await controller.switchServer('demo-nl');
+    expect(get(controller.state).status).toBe('connected');
+    expect(get(controller.state).info?.serverId).toBe('demo-nl');
+    expect(get(controller.state).busy).toBe(false);
+  });
 });

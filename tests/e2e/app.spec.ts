@@ -46,17 +46,18 @@ test('server choice survives navigation, connecting and reload', async ({
     .click();
   await expect(page.getByRole('status')).toHaveText('Подключен');
   await page.getByRole('button', { name: 'Сервера', exact: true }).click();
-  await expect(
-    page
-      .getByRole('region', { name: 'Сервера', exact: true })
-      .getByRole('button', { name: /Нидерланды/ }),
-  ).toBeDisabled();
+  await page.getByRole('button', { name: /Финляндия/ }).click();
+  await expect(page.getByRole('status')).toHaveText('Подключен');
+  await expect(page.locator('.server-selector')).toHaveAttribute(
+    'aria-label',
+    'Финляндия',
+  );
   await page.getByRole('button', { name: 'Главная', exact: true }).click();
   await expect(page.getByRole('status')).toHaveText('Подключен');
   await page.reload();
   await expect(page.locator('.server-selector')).toHaveAttribute(
     'aria-label',
-    'Нидерланды',
+    'Финляндия',
   );
 });
 
@@ -64,6 +65,7 @@ test('subscription import, rename, refresh and delete work', async ({
   page,
 }) => {
   await page.goto('/');
+  await page.getByRole('button', { name: 'Подписки', exact: true }).click();
   await page.getByRole('button', { name: 'Добавить', exact: true }).click();
   const dialog = page.getByRole('dialog');
   await dialog.getByLabel('Название', { exact: true }).fill('Тест');
@@ -103,6 +105,7 @@ test('add panels and searches stay usable in the compact window', async ({
   page,
 }) => {
   await page.goto('/');
+  await page.getByRole('button', { name: 'Подписки', exact: true }).click();
   await page.getByRole('button', { name: 'Добавить', exact: true }).click();
   await expect(page.getByRole('dialog')).toBeVisible();
   await page.screenshot({

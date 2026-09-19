@@ -46,6 +46,9 @@
   "subscriptions": {
     "title": "My Subscriptions",
     "addSubscription": "Add Subscription",
+    "addProfile": "Add profile",
+    "domainLink": "Domain link",
+    "domainLinkPlaceholder": "Add subscription link",
     "addHint": "Give this subscription a clear name, then paste its link or key.",
     "namePlaceholder": "For example, Personal subscription",
     "sourcePlaceholder": "https://example.com/subscription or vless://…",
@@ -110,7 +113,9 @@
     "shaderExposure": "Brightness & Exposure",
     "shaderExposureDesc": "Intensity of light filaments and radiance",
     "shaderReset": "Reset to Default",
-    "animation": "Animated background"
+    "animation": "Animated background",
+    "tooltips": "Tooltips",
+    "tooltipsDesc": "Show tooltips when hovering over buttons"
   },
   "demo": {
     "notice": "Demo mode · traffic is not protected",
@@ -147,6 +152,13 @@
     "kind": "Rule type",
     "domain": "Domain",
     "application": "Application (.exe)",
+    "applicationTab": "Applications",
+    "domainTab": "Domain",
+    "applicationField": "Application",
+    "selectProcess": "Select process",
+    "selectServer": "Select server",
+    "server": "Server",
+    "chooseProcessError": "Select a process",
     "deleteSelected": "Delete selected",
     "deleteConfirm": "Delete selected rules ({count})?"
   }

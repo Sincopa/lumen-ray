@@ -3,6 +3,8 @@
   import reloadIcon from '../../../assets/reload.svg';
   import CountryFlag from '../../components/CountryFlag.svelte';
   import Dropdown from '../../components/Dropdown.svelte';
+  import SettingRow from '../../components/SettingRow.svelte';
+  import ToggleSwitch from '../../components/ToggleSwitch.svelte';
   import {
     i18n,
     t,
@@ -45,11 +47,11 @@
 
   <div class="settings-group">
     <!-- Language Switcher -->
-    <div class="setting-item language-item">
-      <div class="item-text">
-        <span class="label">{t('settings.language')}</span>
-        <span class="desc">{t('settings.languageDesc')}</span>
-      </div>
+    <SettingRow
+      label={t('settings.language')}
+      description={t('settings.languageDesc')}
+      class="language-item"
+    >
       <div class="lang-select-wrapper">
         <CountryFlag
           countryCode={i18n.currentLanguage === 'ru' ? 'ru' : 'us'}
@@ -63,14 +65,13 @@
           compact
         />
       </div>
-    </div>
+    </SettingRow>
 
     <!-- Routing Mode -->
-    <div class="setting-item">
-      <div class="item-text">
-        <span class="label">{t('settings.routingMode')}</span>
-        <span class="desc">{t('settings.routingDesc')}</span>
-      </div>
+    <SettingRow
+      label={t('settings.routingMode')}
+      description={t('settings.routingDesc')}
+    >
       <Dropdown
         label={t('settings.routingMode')}
         options={routingOptions}
@@ -78,50 +79,41 @@
         disabled
         compact
       />
-    </div>
+    </SettingRow>
 
     <!-- Kill Switch -->
-    <div class="setting-item">
-      <div class="item-text">
-        <span class="label">{t('settings.killSwitch')}</span>
-        <span class="desc">{t('settings.killSwitchDesc')}</span>
-      </div>
-      <label class="switch">
-        <input
-          type="checkbox"
-          disabled
-          aria-label={t('settings.killSwitch')}
-          bind:checked={killSwitch}
-        />
-        <span class="slider"></span>
-      </label>
-    </div>
+    <SettingRow
+      label={t('settings.killSwitch')}
+      description={t('settings.killSwitchDesc')}
+    >
+      <ToggleSwitch
+        mode="checkbox"
+        disabled
+        ariaLabel={t('settings.killSwitch')}
+        bind:checked={killSwitch}
+      />
+    </SettingRow>
 
     <!-- Auto Connect -->
-    <div class="setting-item">
-      <div class="item-text">
-        <span class="label">{t('settings.autoConnect')}</span>
-        <span class="desc">{t('settings.autoConnectDesc')}</span>
-      </div>
-      <label class="switch">
-        <input
-          type="checkbox"
-          disabled
-          aria-label={t('settings.autoConnect')}
-          bind:checked={autoConnect}
-        />
-        <span class="slider"></span>
-      </label>
-    </div>
+    <SettingRow
+      label={t('settings.autoConnect')}
+      description={t('settings.autoConnectDesc')}
+    >
+      <ToggleSwitch
+        mode="checkbox"
+        disabled
+        ariaLabel={t('settings.autoConnect')}
+        bind:checked={autoConnect}
+      />
+    </SettingRow>
 
     <!-- Xray Core Status -->
-    <div class="setting-item">
-      <div class="item-text">
-        <span class="label">{t('settings.xrayCore')}</span>
-        <span class="desc">{t('settings.xrayDesc')}</span>
-      </div>
+    <SettingRow
+      label={t('settings.xrayCore')}
+      description={t('settings.xrayDesc')}
+    >
       <span class="badge">{t('settings.mockReady')}</span>
-    </div>
+    </SettingRow>
 
     <p class="availability">{t('demo.unavailable')}</p>
     <label class="animation-setting">
@@ -132,6 +124,20 @@
       />
       {t('settings.animation')}
     </label>
+
+    <!-- Tooltips toggle -->
+    <SettingRow
+      label={t('settings.tooltips')}
+      description={t('settings.tooltipsDesc')}
+    >
+      <ToggleSwitch
+        mode="checkbox"
+        ariaLabel={t('settings.tooltips')}
+        checked={shaderSettings.tooltipsEnabled}
+        onchange={(val) => shaderSettings.setTooltipsEnabled(val)}
+      />
+    </SettingRow>
+
     <!-- Section: Background Shader -->
     <div class="section-header">
       <span class="section-title">{t('settings.shaderTitle')}</span>
@@ -139,11 +145,10 @@
     </div>
 
     <!-- Shader Preset -->
-    <div class="setting-item">
-      <div class="item-text">
-        <span class="label">{t('settings.shaderPreset')}</span>
-        <span class="desc">{t('settings.shaderPresetDesc')}</span>
-      </div>
+    <SettingRow
+      label={t('settings.shaderPreset')}
+      description={t('settings.shaderPresetDesc')}
+    >
       <Dropdown
         label={t('settings.shaderPreset')}
         options={presetOptions}
@@ -151,14 +156,13 @@
         onChange={(value) => shaderSettings.applyPreset(value)}
         compact
       />
-    </div>
+    </SettingRow>
 
     <!-- Idle Color (Dark) -->
-    <div class="setting-item">
-      <div class="item-text">
-        <span class="label">{t('settings.shaderIdleColor')}</span>
-        <span class="desc">{t('settings.shaderIdleDesc')}</span>
-      </div>
+    <SettingRow
+      label={t('settings.shaderIdleColor')}
+      description={t('settings.shaderIdleDesc')}
+    >
       <div class="color-picker-control">
         <label
           class="color-swatch"
@@ -174,14 +178,13 @@
         </label>
         <span class="color-hex">{shaderSettings.idleColor.toUpperCase()}</span>
       </div>
-    </div>
+    </SettingRow>
 
     <!-- Active Color A -->
-    <div class="setting-item">
-      <div class="item-text">
-        <span class="label">{t('settings.shaderColorA')}</span>
-        <span class="desc">{t('settings.shaderColorADesc')}</span>
-      </div>
+    <SettingRow
+      label={t('settings.shaderColorA')}
+      description={t('settings.shaderColorADesc')}
+    >
       <div class="color-picker-control">
         <label
           class="color-swatch"
@@ -197,14 +200,13 @@
         </label>
         <span class="color-hex">{shaderSettings.colorA.toUpperCase()}</span>
       </div>
-    </div>
+    </SettingRow>
 
     <!-- Active Color B -->
-    <div class="setting-item">
-      <div class="item-text">
-        <span class="label">{t('settings.shaderColorB')}</span>
-        <span class="desc">{t('settings.shaderColorBDesc')}</span>
-      </div>
+    <SettingRow
+      label={t('settings.shaderColorB')}
+      description={t('settings.shaderColorBDesc')}
+    >
       <div class="color-picker-control">
         <label
           class="color-swatch"
@@ -220,14 +222,13 @@
         </label>
         <span class="color-hex">{shaderSettings.colorB.toUpperCase()}</span>
       </div>
-    </div>
+    </SettingRow>
 
     <!-- Exposure Slider -->
-    <div class="setting-item">
-      <div class="item-text">
-        <span class="label">{t('settings.shaderExposure')}</span>
-        <span class="desc">{t('settings.shaderExposureDesc')}</span>
-      </div>
+    <SettingRow
+      label={t('settings.shaderExposure')}
+      description={t('settings.shaderExposureDesc')}
+    >
       <div class="range-control">
         <input
           type="range"
@@ -244,10 +245,10 @@
         />
         <span class="range-val">{shaderSettings.exposure.toFixed(2)}x</span>
       </div>
-    </div>
+    </SettingRow>
 
     <!-- Reset Button -->
-    <div class="setting-item reset-row">
+    <div class="reset-row">
       <button class="reset-btn" onclick={() => shaderSettings.reset()}>
         <img
           src={reloadIcon}
@@ -282,6 +283,12 @@
     flex: 1;
     gap: 16px;
     overflow-y: auto;
+    padding-bottom: 96px;
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+  }
+  .settings-view::-webkit-scrollbar {
+    display: none;
   }
 
   .header {
@@ -310,44 +317,12 @@
     gap: 10px;
   }
 
-  .setting-item {
-    background: rgba(0, 0, 0, 0.25);
-    border: 1px solid rgba(255, 255, 255, 0.06);
-    border-radius: 20px;
-    padding: 16px 20px;
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    flex-wrap: wrap;
-    gap: 12px;
-    backdrop-filter: blur(12px);
-  }
-
-  .item-text {
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-  }
-
-  .label {
-    font-family: var(--font-family-base);
-    font-size: 14px;
-    font-weight: 500;
-    color: #ffffff;
-  }
-
-  .desc {
-    font-family: var(--font-family-base);
-    font-size: 13px;
-    color: #c7bcd0;
-  }
-
   .lang-select-wrapper {
     display: flex;
     align-items: center;
     gap: 8px;
     background: rgba(255, 255, 255, 0.06);
-    border: 1px solid rgba(255, 255, 255, 0.12);
+    border: none;
     border-radius: 12px;
     padding: 4px 8px;
   }
@@ -360,51 +335,6 @@
     padding: 4px 10px;
     border-radius: 20px;
     font-weight: 500;
-  }
-
-  .switch {
-    position: relative;
-    display: inline-block;
-    width: 44px;
-    height: 24px;
-  }
-
-  .switch input {
-    opacity: 0;
-    width: 0;
-    height: 0;
-  }
-
-  .slider {
-    position: absolute;
-    cursor: pointer;
-    top: 0;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    background-color: rgba(255, 255, 255, 0.15);
-    transition: 0.3s;
-    border-radius: 24px;
-  }
-
-  .slider:before {
-    position: absolute;
-    content: '';
-    height: 18px;
-    width: 18px;
-    left: 3px;
-    bottom: 3px;
-    background-color: white;
-    transition: 0.3s;
-    border-radius: 50%;
-  }
-
-  input:checked + .slider {
-    background-color: #6841ee;
-  }
-
-  input:checked + .slider:before {
-    transform: translateX(20px);
   }
 
   .section-header {
@@ -441,20 +371,17 @@
     width: 30px;
     height: 30px;
     border-radius: 10px;
-    border: 2px solid rgba(255, 255, 255, 0.25);
+    border: none;
     position: relative;
     cursor: pointer;
     overflow: hidden;
     box-shadow: 0 2px 10px rgba(0, 0, 0, 0.4);
-    transition:
-      transform 0.15s ease,
-      border-color 0.15s ease;
+    transition: transform 0.15s ease;
     display: block;
   }
 
   .color-swatch:hover {
     transform: scale(1.08);
-    border-color: rgba(255, 255, 255, 0.6);
   }
 
   .color-swatch input[type='color'] {
@@ -505,6 +432,7 @@
   }
 
   .reset-row {
+    display: flex;
     justify-content: flex-end;
     background: transparent;
     border: none;
@@ -516,7 +444,7 @@
     align-items: center;
     gap: 8px;
     background: rgba(255, 255, 255, 0.06);
-    border: 1px solid rgba(255, 255, 255, 0.12);
+    border: none;
     border-radius: 12px;
     padding: 8px 16px;
     color: rgba(255, 255, 255, 0.85);
@@ -530,6 +458,5 @@
   .reset-btn:hover {
     background: rgba(255, 255, 255, 0.12);
     color: #ffffff;
-    border-color: rgba(255, 255, 255, 0.25);
   }
 </style>
