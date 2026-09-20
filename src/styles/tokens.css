@@ -35,7 +35,7 @@
 	--radius-md: 24px;
 	--radius-pill: 124px;
 	--radius-window: 24px;
-	--radius-window-bottom: 48px;
+	--radius-window-bottom: 24px;
 
 	/* Motion */
 	--ease-spring: cubic-bezier(0.22, 1, 0.36, 1);

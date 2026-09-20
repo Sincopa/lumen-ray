@@ -137,7 +137,10 @@ export function validCatalog(value: unknown): value is Catalog {
 			typeof r.name === 'string' &&
 			typeof r.enabled === 'boolean' &&
 			typeof r.isDomain === 'boolean' &&
-			serverIds.has(r.serverId),
+			(r.serverId === 'direct' ||
+				r.serverId === 'subscription' ||
+				subscriptionIds.has(r.serverId) ||
+				serverIds.has(r.serverId)),
 	);
 }
 
@@ -336,7 +339,13 @@ export class CatalogService {
 			...this.current,
 			subscriptions: remainingSubs,
 			servers,
-			rules: this.current.rules.filter((r) => serverIds.has(r.serverId)),
+			rules: this.current.rules.filter(
+				(r) =>
+					r.serverId === 'direct' ||
+					serverIds.has(r.serverId) ||
+					(r.serverId === 'subscription' && remainingSubs.length > 0) ||
+					remainingSubs.some((s) => s.id === r.serverId),
+			),
 			selectedSubscriptionId:
 				this.current.selectedSubscriptionId === id
 					? (remainingSubs[0]?.id ?? null)
@@ -358,7 +367,15 @@ export class CatalogService {
 		const valid = rule.isDomain
 			? /^(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+[a-z]{2,63}$/i.test(name)
 			: /^[^<>:"\\|?*\r\n]+$/i.test(name) && name.length > 0;
-		if (!valid || name.length > 253 || !this.serversById.has(rule.serverId)) {
+		const isSpecial =
+			rule.serverId === 'direct' ||
+			rule.serverId === 'subscription' ||
+			this.current.subscriptions.some((s) => s.id === rule.serverId);
+		if (
+			!valid ||
+			name.length > 253 ||
+			(!isSpecial && !this.serversById.has(rule.serverId))
+		) {
 			throw new ServiceError('invalidRule');
 		}
 		return { ...rule, name };

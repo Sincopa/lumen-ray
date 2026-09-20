@@ -232,6 +232,7 @@
 		<RuleEditorView
 			rule={editing}
 			server={currentServer}
+			subscriptionName={activeSub?.name}
 			onSave={(updated: Rule | Rule[]) => {
 				try {
 					if (Array.isArray(updated)) {
@@ -433,9 +434,17 @@
 		<div class="rules-list">
 			{#each filtered as rule (rule.id)}
 				{@const server = serversById.get(rule.serverId)}
-				{@const country = server
-					? t('servers.countries.' + server.countryCode)
-					: '—'}
+				{@const isDirect = rule.serverId === 'direct'}
+				{@const isSub =
+					rule.serverId === 'subscription' ||
+					(activeSub && rule.serverId === activeSub.id)}
+				{@const serverName = isDirect
+					? t('rules.direct')
+					: isSub
+						? (activeSub?.name ?? t('rules.subscriptionServer'))
+						: server
+							? t('servers.countries.' + server.countryCode)
+							: '—'}
 				<article class="rule-row">
 					<div class="rule-left">
 						<div
@@ -462,7 +471,7 @@
 							aria-label={t('rules.edit', { name: rule.name })}
 						>
 							<span class="rule-name">{rule.name}</span>
-							<span class="rule-details">{country}</span>
+							<span class="rule-details">{serverName}</span>
 						</button>
 					</div>
 					<div class="rule-right">
@@ -474,10 +483,20 @@
 							}}
 							aria-label={rule.name + ': ' + t('servers.title')}
 						>
-							{#if server}<span class="flag-sm">
+							{#if isDirect}
+								<span class="flag-sm">
+									<MaterialIcon name="alt_route" size={16} />
+								</span>
+							{:else if isSub}
+								<span class="flag-sm">
+									<MaterialIcon name="sync_alt" size={16} />
+								</span>
+							{:else if server}
+								<span class="flag-sm">
 									<CountryFlag countryCode={server.countryCode} size={20} />
-								</span>{/if}
-							<span class="server-pill-name">{country}</span>
+								</span>
+							{/if}
+							<span class="server-pill-name">{serverName}</span>
 						</button>
 						{#if selectMode}
 							<RoundCheckbox

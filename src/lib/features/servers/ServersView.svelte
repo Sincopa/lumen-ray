@@ -11,6 +11,7 @@
 	import { errorCode } from '../../services/errors';
 	import { t } from '../../i18n';
 	import type { Server } from '../../services/catalog';
+	import MaterialIcon from '../../components/MaterialIcon.svelte';
 	import reloadIcon from '../../../assets/reload.svg';
 	import searchIcon from '../../../assets/search.svg';
 	import checkIcon from '../../../assets/check.svg';
@@ -159,6 +160,24 @@
 			name: t('servers.countries.' + server.countryCode),
 		});
 	}
+
+	function selectSubscription() {
+		if (disabled) return;
+		onSelect?.({
+			id: 'subscription',
+			countryCode: '',
+			name: activeSubscription?.name ?? t('rules.subscriptionServer'),
+		});
+	}
+
+	function selectDirect() {
+		if (disabled) return;
+		onSelect?.({
+			id: 'direct',
+			countryCode: '',
+			name: t('rules.direct'),
+		});
+	}
 </script>
 
 <svelte:window
@@ -299,6 +318,56 @@
 	{#if error}<p role="alert">{error}</p>{/if}
 
 	<div class="servers-list">
+		{#if compact}
+			<!-- Special Option 1: Active Subscription (Current selected server in this subscription) -->
+			<button
+				class="server-row special-row"
+				class:active-server={selectedId === 'subscription' ||
+					(activeSubscription && selectedId === activeSubscription.id)}
+				{disabled}
+				aria-pressed={selectedId === 'subscription' ||
+					(activeSubscription && selectedId === activeSubscription.id)}
+				onclick={selectSubscription}
+			>
+				<span class="special-icon-badge">
+					<MaterialIcon name="sync_alt" size={20} />
+				</span>
+				<span class="server-text">
+					<span class="protocol">{t('rules.subscriptionServer')}</span>
+					<span class="special-title">
+						{activeSubscription?.name ?? 'Подписка'}
+					</span>
+				</span>
+				<span class="ping">
+					{#if (selectedId === 'subscription' || (activeSubscription && selectedId === activeSubscription.id)) && !busy}
+						<StatusDot size={8} />
+					{/if}
+				</span>
+			</button>
+
+			<!-- Special Option 2: Direct (Bypass VPN) -->
+			<button
+				class="server-row special-row"
+				class:active-server={selectedId === 'direct'}
+				{disabled}
+				aria-pressed={selectedId === 'direct'}
+				onclick={selectDirect}
+			>
+				<span class="special-icon-badge direct-badge">
+					<MaterialIcon name="alt_route" size={20} />
+				</span>
+				<span class="server-text">
+					<span class="protocol">{t('rules.directDesc')}</span>
+					<span class="special-title">{t('rules.direct')}</span>
+				</span>
+				<span class="ping">
+					{#if selectedId === 'direct' && !busy}
+						<StatusDot size={8} />
+					{/if}
+				</span>
+			</button>
+		{/if}
+
 		{#each filtered as server (server.id)}
 			<button
 				class="server-row"
@@ -571,6 +640,26 @@
 		display: inline-flex;
 		align-items: center;
 		gap: 6px;
+	}
+	.special-icon-badge {
+		width: 32px;
+		height: 32px;
+		border-radius: 50%;
+		background: rgba(255, 255, 255, 0.1);
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		color: #ffffff;
+		flex-shrink: 0;
+	}
+	.special-icon-badge.direct-badge {
+		background: rgba(134, 225, 111, 0.15);
+		color: #86e16f;
+	}
+	.special-title {
+		font-size: 14px;
+		font-weight: 500;
+		color: #ffffff;
 	}
 	.hint {
 		font-size: 12px;

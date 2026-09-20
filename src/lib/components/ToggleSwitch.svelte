@@ -27,7 +27,7 @@
 {#if mode === 'switch'}
 	<button
 		type="button"
-		class="toggle-switch {className}"
+		class="switch-btn {className}"
 		class:enabled={checked}
 		role="switch"
 		aria-checked={checked}
@@ -35,7 +35,7 @@
 		{disabled}
 		onclick={toggle}
 	>
-		<span class="toggle-thumb"></span>
+		<span class="slider" class:checked></span>
 	</button>
 {:else}
 	<label class="switch {className}">
@@ -51,52 +51,23 @@
 {/if}
 
 <style>
-	/* Button switch (used in rules) */
-	.toggle-switch {
-		width: 44px;
-		height: 26px;
-		min-width: 44px;
-		min-height: 0;
-		border-radius: 13px;
-		background: #ffffff26;
-		border: 0;
-		padding: 0;
+	.switch-btn {
 		position: relative;
-		flex-shrink: 0;
+		display: inline-block;
+		width: 44px;
+		height: 24px;
+		padding: 0;
+		border: none;
+		background: transparent;
 		cursor: pointer;
-		box-sizing: border-box;
-		transition: background-color 180ms ease;
+		flex-shrink: 0;
 	}
 
-	.toggle-switch.enabled {
-		background: #ffffffd9;
-	}
-
-	.toggle-switch:disabled {
-		opacity: 0.5;
+	.switch-btn:disabled {
+		opacity: 0.6;
 		cursor: not-allowed;
 	}
 
-	.toggle-thumb {
-		position: absolute;
-		top: 3px;
-		left: 3px;
-		width: 20px;
-		height: 20px;
-		border-radius: 50%;
-		background: rgba(90, 90, 105, 0.95);
-		box-shadow: 0 1px 3px #0003;
-		transition:
-			transform 220ms var(--ease-spring),
-			background-color 180ms ease;
-	}
-
-	.enabled .toggle-thumb {
-		transform: translateX(18px);
-		background: #2a2a35;
-	}
-
-	/* Input checkbox slider (used in settings) */
 	.switch {
 		position: relative;
 		display: inline-block;
@@ -106,18 +77,23 @@
 	}
 
 	.switch input {
-		opacity: 0;
-		width: 0;
-		height: 0;
 		position: absolute;
+		inset: 0;
+		width: 100%;
+		height: 100%;
+		margin: 0;
+		padding: 0;
+		opacity: 0.001;
+		cursor: pointer;
+		z-index: 2;
 	}
 
 	.slider {
 		position: absolute;
 		cursor: pointer;
 		inset: 0;
-		background-color: rgba(255, 255, 255, 0.15);
-		transition: 0.3s ease;
+		background-color: rgba(0, 0, 0, 0.35);
+		transition: background-color 0.25s ease;
 		border-radius: 24px;
 	}
 
@@ -128,21 +104,24 @@
 		width: 18px;
 		left: 3px;
 		bottom: 3px;
-		background-color: white;
-		transition: 0.3s ease;
+		background-color: #ffffff;
+		transition: transform 0.25s cubic-bezier(0.22, 1, 0.36, 1);
 		border-radius: 50%;
+		box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
 	}
 
-	input:checked + .slider {
-		background-color: #6841ee;
+	input:checked + .slider,
+	.slider.checked {
+		background-color: rgba(0, 0, 0, 0.35);
 	}
 
-	input:checked + .slider:before {
+	input:checked + .slider:before,
+	.slider.checked:before {
 		transform: translateX(20px);
 	}
 
 	input:disabled + .slider {
-		opacity: 0.5;
+		opacity: 0.6;
 		cursor: not-allowed;
 	}
 </style>

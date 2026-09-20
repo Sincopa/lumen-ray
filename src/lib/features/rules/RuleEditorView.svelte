@@ -2,6 +2,7 @@
 	import type { Rule, Server } from '../../services/catalog';
 	import { t } from '../../i18n';
 	import CountryFlag from '../../components/CountryFlag.svelte';
+	import MaterialIcon from '../../components/MaterialIcon.svelte';
 	import IconButton from '../../components/IconButton.svelte';
 	import chevronIcon from '../../../assets/chevron.svg';
 	import checkIcon from '../../../assets/check.svg';
@@ -9,6 +10,7 @@
 	interface Props {
 		rule: Rule;
 		server?: Server;
+		subscriptionName?: string;
 		onSave: (rule: Rule | Rule[]) => void;
 		onCancel: () => void;
 		onSelectProcess: () => void;
@@ -18,6 +20,7 @@
 	let {
 		rule,
 		server,
+		subscriptionName,
 		onSave,
 		onCancel,
 		onSelectProcess,
@@ -30,8 +33,7 @@
 	let name = $state(
 		rule.isDomain ? rule.name.replace(/^https?:\/\//i, '') : rule.name,
 	);
-	// svelte-ignore state_referenced_locally
-	let serverId = $state(rule.serverId);
+	let serverId = $derived(rule.serverId);
 	let error = $state('');
 
 	function cleanDomain(val: string): string {
@@ -208,7 +210,15 @@
 				aria-label={t('rules.selectServer') || 'Выбрать сервер'}
 			>
 				<div class="server-info">
-					{#if server}
+					{#if serverId === 'direct'}
+						<MaterialIcon name="alt_route" size={20} />
+						<span class="selector-value">{t('rules.direct')}</span>
+					{:else if serverId === 'subscription' || (subscriptionName && serverId === subscriptionName)}
+						<MaterialIcon name="sync_alt" size={20} />
+						<span class="selector-value">
+							{subscriptionName ?? t('rules.subscriptionServer')}
+						</span>
+					{:else if server}
 						<CountryFlag countryCode={server.countryCode} size={20} />
 						<span class="selector-value">
 							{t('servers.countries.' + server.countryCode)}

@@ -5,11 +5,13 @@
 	import minimizeIcon from '../../assets/minimaze.svg';
 	import maximizeIcon from '../../assets/maximaze.svg';
 	import crossIcon from '../../assets/cross.svg';
+	import settingsIcon from '../../assets/settings.svg';
 
 	interface Props {
 		title?: string;
 		showControls?: boolean;
 		darkSurface?: boolean;
+		isSettingsOpen?: boolean;
 		onOpenSettings?: () => void;
 	}
 
@@ -17,6 +19,7 @@
 		title = 'Lumen',
 		showControls = true,
 		darkSurface = false,
+		isSettingsOpen = false,
 		onOpenSettings,
 	}: Props = $props();
 
@@ -37,41 +40,54 @@
 	class:dark-surface={darkSurface}
 	data-tauri-drag-region
 >
-	<button
-		class="logo-link-btn"
-		onclick={onOpenSettings}
-		aria-label={t('settings.title')}
-	>
-		<div class="logo">{title}</div>
-	</button>
+	<div class="logo">{title}</div>
 
-	{#if showControls}
-		<div class="controls-pill">
+	<div class="header-right">
+		{#if onOpenSettings}
 			<button
-				class="control-btn"
-				onclick={() => control('minimize')}
-				aria-label={t('common.minimize')}
+				class="settings-btn"
+				class:active={isSettingsOpen}
+				onclick={onOpenSettings}
+				aria-label={t('settings.title')}
 			>
-				<img src={minimizeIcon} alt="" width="21" height="21" />
+				<img
+					src={settingsIcon}
+					alt=""
+					width="17"
+					height="17"
+					class="settings-icon"
+				/>
 			</button>
+		{/if}
 
-			<button
-				class="control-btn"
-				onclick={() => control('toggleMaximize')}
-				aria-label={t('common.maximize')}
-			>
-				<img src={maximizeIcon} alt="" width="21" height="21" />
-			</button>
+		{#if showControls}
+			<div class="controls-pill">
+				<button
+					class="control-btn"
+					onclick={() => control('minimize')}
+					aria-label={t('common.minimize')}
+				>
+					<img src={minimizeIcon} alt="" width="21" height="21" />
+				</button>
 
-			<button
-				class="control-btn close"
-				onclick={() => control('close')}
-				aria-label={t('common.close')}
-			>
-				<img src={crossIcon} alt="" width="21" height="21" />
-			</button>
-		</div>
-	{/if}
+				<button
+					class="control-btn"
+					onclick={() => control('toggleMaximize')}
+					aria-label={t('common.maximize')}
+				>
+					<img src={maximizeIcon} alt="" width="21" height="21" />
+				</button>
+
+				<button
+					class="control-btn close"
+					onclick={() => control('close')}
+					aria-label={t('common.close')}
+				>
+					<img src={crossIcon} alt="" width="21" height="21" />
+				</button>
+			</div>
+		{/if}
+	</div>
 </header>
 
 {#if failure}
@@ -89,32 +105,68 @@
 		flex-shrink: 0;
 	}
 
-	.logo-link-btn {
-		background: transparent;
-		border: none;
-		padding: 0;
-		cursor: pointer;
-		display: flex;
-		align-items: center;
-		text-align: left;
-		margin-left: 8px;
-	}
-
 	.logo {
 		font-family: var(--font-family-base);
 		font-weight: 700;
 		font-size: 24px;
 		color: #66666a;
 		letter-spacing: -0.5px;
-		transition: opacity 0.2s ease;
+		margin-left: 8px;
+		user-select: none;
 	}
 
 	.dark-surface .logo {
 		color: rgba(255, 255, 255, 0.56);
 	}
 
-	.logo-link-btn:hover .logo {
+	.header-right {
+		display: flex;
+		align-items: center;
+		gap: 8px;
+	}
+
+	.settings-btn {
+		width: 32px;
+		height: 32px;
+		min-width: 32px;
+		min-height: 32px;
+		border-radius: 50%;
+		background: rgba(0, 0, 0, 0.25);
+		border: none;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		cursor: pointer;
+		padding: 0;
+		box-sizing: border-box;
+		backdrop-filter: blur(10px);
+		transition:
+			background 0.2s ease,
+			transform 0.2s cubic-bezier(0.34, 1.56, 0.64, 1);
+	}
+
+	.settings-btn:hover {
+		background: rgba(255, 255, 255, 0.15);
+		transform: scale(1.08);
+	}
+
+	.settings-btn:active {
+		transform: scale(0.92);
+	}
+
+	.settings-btn.active {
+		background: rgba(255, 255, 255, 0.25);
+	}
+
+	.settings-icon {
+		filter: brightness(0) invert(1);
 		opacity: 0.8;
+		transition: opacity 0.2s ease;
+	}
+
+	.settings-btn:hover .settings-icon,
+	.settings-btn.active .settings-icon {
+		opacity: 1;
 	}
 
 	.controls-pill {

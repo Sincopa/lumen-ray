@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { tick } from 'svelte';
+	import chevronIcon from '../../assets/chevron.svg';
 
 	type Option = { value: string; label: string };
 	let {
@@ -22,30 +23,39 @@
 	let trigger: HTMLButtonElement;
 	let list: HTMLDivElement;
 	let open = $state(false);
+	let wasOpenOnPointerDown = false;
 	let selected = $derived(options.find((option) => option.value === value));
 
 	function positionList() {
+		if (!trigger || !list) return;
 		const rect = trigger.getBoundingClientRect();
 		const width = Math.min(
-			Math.max(rect.width, compact && options.length > 2 ? 280 : rect.width),
+			Math.max(rect.width, compact && options.length > 2 ? 280 : Math.max(rect.width, 110)),
 			window.innerWidth - 24,
 		);
-		const preferredHeight = Math.min(248, options.length * 44 + 12);
+		const preferredHeight = Math.min(248, options.length * 40 + 8);
 		const below = window.innerHeight - rect.bottom - 12;
 		const above = rect.top - 12;
 		const placeAbove = below < preferredHeight && above > below;
 		const available = Math.max(80, placeAbove ? above : below);
 		const height = Math.min(preferredHeight, available);
-		list.style.left = `${Math.max(12, Math.min(rect.left, window.innerWidth - width - 12))}px`;
+		const left = Math.max(12, Math.min(rect.right - width, window.innerWidth - width - 12));
+		list.style.left = `${left}px`;
 		list.style.width = `${width}px`;
 		list.style.top = `${placeAbove ? rect.top - height - 6 : rect.bottom + 6}px`;
 		list.style.maxHeight = `${height}px`;
 	}
 
 	async function show(focusIndex?: number) {
-		if (disabled || !options.length) return;
+		if (disabled || !options.length || !list) return;
 		positionList();
-		if (!list.matches(':popover-open')) list.showPopover();
+		if (!list.matches(':popover-open')) {
+			try {
+				list.showPopover();
+			} catch {
+				// ignore if already shown
+			}
+		}
 		if (focusIndex !== undefined) {
 			await tick();
 			const items = list.querySelectorAll<HTMLElement>('[role="option"]');
@@ -56,8 +66,30 @@
 	function choose(option: Option) {
 		value = option.value;
 		onChange?.(option.value);
-		list.hidePopover();
-		trigger.focus({ preventScroll: true });
+		try {
+			list?.hidePopover();
+		} catch {}
+		trigger?.focus({ preventScroll: true });
+	}
+
+	function handleTriggerPointerDown() {
+		if (disabled) return;
+		wasOpenOnPointerDown = open;
+	}
+
+	function handleTriggerClick() {
+		if (disabled) return;
+		if (wasOpenOnPointerDown) {
+			wasOpenOnPointerDown = false;
+			return;
+		}
+		if (open) {
+			try {
+				list?.hidePopover();
+			} catch {}
+		} else {
+			void show();
+		}
 	}
 
 	function onTriggerKeydown(event: KeyboardEvent) {
@@ -92,13 +124,41 @@
 			return;
 		} else if (event.key === 'Escape') {
 			event.preventDefault();
-			list.hidePopover();
-			trigger.focus({ preventScroll: true });
+			try {
+				list?.hidePopover();
+			} catch {}
+			trigger?.focus({ preventScroll: true });
 			return;
 		} else return;
 		event.preventDefault();
 		items[next]?.focus();
 	}
+
+	$effect(() => {
+		if (!open) return;
+
+		function handleScroll(event: Event) {
+			if (event.target !== list && !list?.contains(event.target as Node)) {
+				try {
+					list?.hidePopover();
+				} catch {}
+			}
+		}
+
+		function handleResize() {
+			try {
+				list?.hidePopover();
+			} catch {}
+		}
+
+		window.addEventListener('scroll', handleScroll, { capture: true, passive: true });
+		window.addEventListener('resize', handleResize, { passive: true });
+
+		return () => {
+			window.removeEventListener('scroll', handleScroll, { capture: true });
+			window.removeEventListener('resize', handleResize);
+		};
+	});
 </script>
 
 <button
@@ -112,11 +172,19 @@
 	aria-controls={listId}
 	aria-expanded={open}
 	{disabled}
-	onclick={() => (open ? list.hidePopover() : void show())}
+	onpointerdown={handleTriggerPointerDown}
+	onclick={handleTriggerClick}
 	onkeydown={onTriggerKeydown}
 >
 	<span class="selected-label">{selected?.label ?? label}</span>
-	<span class="chevron" aria-hidden="true"></span>
+	<img
+		src={chevronIcon}
+		alt=""
+		width="13"
+		height="13"
+		class="chevron-icon"
+		aria-hidden="true"
+	/>
 </button>
 
 <div
@@ -156,7 +224,7 @@
 		padding: 0 16px;
 		border: 1px solid transparent;
 		border-radius: 16px;
-		background: #ffffff0b;
+		background: rgba(0, 0, 0, 0.2);
 		color: #fff;
 		text-align: left;
 		font-size: 14px;
@@ -164,18 +232,29 @@
 	}
 	.dropdown-trigger:hover:not(:disabled),
 	.dropdown-trigger[aria-expanded='true'] {
-		background: #ffffff15;
-	}
-	.dropdown-trigger:focus-visible {
-		outline: none !important;
+		background: rgba(255, 255, 255, 0.1);
 	}
 	.dropdown-trigger.compact {
-		min-height: 36px;
+		min-height: 28px;
+		height: 28px;
 		width: auto;
 		max-width: 100%;
-		padding: 0 10px;
+		padding: 4px 10px;
 		border-radius: 12px;
 		font-size: 13px;
+		font-weight: 500;
+		background: rgba(0, 0, 0, 0.2);
+		-webkit-backdrop-filter: blur(8px);
+		backdrop-filter: blur(8px);
+		color: #ffffff;
+		gap: 6px;
+		cursor: pointer;
+		border: none;
+		transition: background 0.15s ease;
+	}
+	.dropdown-trigger.compact:hover:not(:disabled),
+	.dropdown-trigger.compact[aria-expanded='true'] {
+		background: rgba(0, 0, 0, 0.15);
 	}
 	.selected-label {
 		min-width: 0;
@@ -183,53 +262,87 @@
 		white-space: nowrap;
 		text-overflow: ellipsis;
 	}
-	.chevron {
-		width: 8px;
-		height: 8px;
+	.chevron-icon {
+		width: 18px;
+		height: 18px;
 		flex-shrink: 0;
-		margin-right: 2px;
-		border-right: 2px solid currentColor;
-		border-bottom: 2px solid currentColor;
-		transform: translateY(-2px) rotate(45deg);
-		transition: transform 160ms ease;
+		align-self: center;
+		display: block;
+		opacity: 0.75;
+		transition:
+			transform 160ms ease,
+			opacity 160ms ease;
 	}
-	[aria-expanded='true'] .chevron {
-		transform: translateY(2px) rotate(225deg);
+	[aria-expanded='true'] .chevron-icon {
+		transform: rotate(180deg);
+		opacity: 1;
 	}
 	.dropdown-list {
+		display: none;
 		inset: auto;
 		margin: 0;
-		padding: 6px;
+		padding: 4px;
 		overflow-y: auto;
+		scrollbar-width: none;
+		-ms-overflow-style: none;
 		border: none;
-		border-radius: 16px;
-		background: #1d1d20;
+		border-radius: 14px;
+		background: rgba(0, 0, 0, 0.4);
+		-webkit-backdrop-filter: blur(8px);
+		backdrop-filter: blur(8px);
 		color: #fff;
-		box-shadow: 0 16px 40px #0009;
+		box-shadow: 0 12px 32px rgba(0, 0, 0, 0.6);
+	}
+	.dropdown-list:not(:popover-open) {
+		display: none !important;
+	}
+	.dropdown-list:popover-open {
+		display: flex;
+		flex-direction: column;
+		gap: 4px;
+	}
+	.dropdown-list::-webkit-scrollbar {
+		display: none;
+		width: 0;
+		height: 0;
 	}
 	.dropdown-list [role='option'] {
-		min-height: 40px;
+		min-height: 28px;
 		display: flex;
 		align-items: center;
 		justify-content: space-between;
 		gap: 12px;
-		padding: 8px 12px;
-		border-radius: 11px;
+		padding: 6px 8px 6px 12px;
+		border-radius: 10px;
 		font-size: 13px;
 		line-height: 1.3;
 		cursor: pointer;
+		color: rgba(255, 255, 255, 0.85);
+		transition:
+			background 0.15s ease,
+			color 0.15s ease;
 	}
 	.dropdown-list [role='option']:hover,
 	.dropdown-list [role='option']:focus-visible {
 		outline: none;
-		background: #ffffff18;
+		background: rgba(255, 255, 255, 0.08);
+		color: #ffffff;
 	}
 	.dropdown-list [role='option'].selected {
-		color: #f3ff00;
-		background: #ffffff10;
+		color: #ffffff;
+		background: rgba(255, 255, 255, 0.12);
+		font-weight: 500;
 	}
 	.check {
-		font-size: 16px;
-		font-weight: 700;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		align-self: center;
+		font-size: 13px;
+		font-weight: 600;
+		line-height: 1;
+		color: #ffffff;
+		margin-right: 4px;
+		flex-shrink: 0;
 	}
 </style>

@@ -17,7 +17,8 @@
 		"loading": "Проверка…",
 		"name": "Название",
 		"save": "Сохранить",
-		"export": "Экспорт"
+		"export": "Экспорт",
+		"back": "Назад"
 	},
 	"nav": {
 		"home": "Главная",
@@ -82,6 +83,10 @@
 	},
 	"settings": {
 		"title": "Настройки",
+		"generalSection": "Основные",
+		"networkSection": "Сеть",
+		"presets": "Пресеты",
+		"customColors": "Свои цвета",
 		"language": "Язык интерфейса",
 		"languageDesc": "Выберите язык отображения",
 		"routingMode": "Режим маршрутизации",
@@ -171,6 +176,10 @@
 		"server": "Сервер",
 		"chooseProcessError": "Выберите процесс",
 		"deleteSelected": "Удалить выбранные",
-		"deleteConfirm": "Удалить выбранные правила ({count})?"
+		"deleteConfirm": "Удалить выбранные правила ({count})?",
+		"direct": "Напрямую",
+		"directDesc": "Без VPN",
+		"subscriptionServer": "Текущий в подписке",
+		"subscriptionServerDesc": "Текущий выбранный сервер в этой подписке"
 	}
 }

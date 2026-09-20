@@ -97,7 +97,6 @@
 		void connection.initialize();
 	});
 
-
 	// Action handlers
 	const toggleConnection = () => {
 		connection.toggle($catalogStore.selectedServerId);
@@ -151,6 +150,7 @@
 		<WindowHeader
 			title="lumen"
 			darkSurface={currentTab !== 'home' || !hasSubscriptions || importing}
+			isSettingsOpen={currentTab === 'settings'}
 			onOpenSettings={() => {
 				currentTab = currentTab === 'settings' ? 'home' : 'settings';
 			}}
@@ -252,7 +252,8 @@
 		align-items: center;
 		overflow: hidden;
 		background-color: #08080b;
-		border-radius: var(--radius-window) var(--radius-window) var(--radius-window-bottom) var(--radius-window-bottom);
+		border-radius: var(--radius-window) var(--radius-window)
+			var(--radius-window-bottom) var(--radius-window-bottom);
 		/* Scales the entire UI (text, spacing, icons) proportionally.
 		   --app-width/height stay at base 390×845; the native window is resized
 		   separately to accommodate the zoomed content. */
@@ -271,7 +272,8 @@
 		min-height: 0;
 		padding: 16px 16px 0;
 		box-sizing: border-box;
-		border-radius: var(--radius-window) var(--radius-window) var(--radius-window-bottom) var(--radius-window-bottom);
+		border-radius: var(--radius-window) var(--radius-window)
+			var(--radius-window-bottom) var(--radius-window-bottom);
 		transition: background-color 0.3s ease;
 	}
 
@@ -288,7 +290,8 @@
 		backdrop-filter: blur(12px);
 		background-repeat: no-repeat;
 		background-position: bottom;
-		border-radius: var(--radius-window) var(--radius-window) var(--radius-window-bottom) var(--radius-window-bottom);
+		border-radius: var(--radius-window) var(--radius-window)
+			var(--radius-window-bottom) var(--radius-window-bottom);
 		pointer-events: none;
 		z-index: -1;
 		opacity: 0;

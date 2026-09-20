@@ -12,4 +12,3 @@
  */
 export const APP_WIDTH = 400;
 export const APP_HEIGHT = 700;
-

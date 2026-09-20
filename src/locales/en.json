@@ -17,7 +17,8 @@
 		"loading": "Checking…",
 		"name": "Name",
 		"save": "Save",
-		"export": "Export"
+		"export": "Export",
+		"back": "Back"
 	},
 	"nav": {
 		"home": "Home",
@@ -82,6 +83,10 @@
 	},
 	"settings": {
 		"title": "Settings",
+		"generalSection": "General",
+		"networkSection": "Network",
+		"presets": "Presets",
+		"customColors": "Custom colors",
 		"language": "Interface Language",
 		"languageDesc": "Select application display language",
 		"routingMode": "Routing Mode",
@@ -171,6 +176,10 @@
 		"server": "Server",
 		"chooseProcessError": "Select a process",
 		"deleteSelected": "Delete selected",
-		"deleteConfirm": "Delete selected rules ({count})?"
+		"deleteConfirm": "Delete selected rules ({count})?",
+		"direct": "Direct",
+		"directDesc": "Bypass VPN",
+		"subscriptionServer": "Subscription default",
+		"subscriptionServerDesc": "Current server in this subscription"
 	}
 }

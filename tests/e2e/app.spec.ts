@@ -223,16 +223,18 @@ test('settings are honest and language and animation persist', async ({
 }) => {
 	await page.goto('/');
 	await page.getByRole('button', { name: 'Настройки', exact: true }).click();
+	await page.screenshot({
+		path: 'artifacts/verification/settings-main-tuned.png',
+	});
 	await expect(
 		page.getByRole('combobox', { name: 'Режим маршрутизации' }),
 	).toBeDisabled();
-	const presetDropdown = page.getByRole('combobox', {
-		name: 'Цветовой пресет',
-	});
-	await presetDropdown.click();
+	await page
+		.getByRole('button', { name: ru.settings.presets, exact: true })
+		.click();
 	await page.screenshot({ path: 'artifacts/verification/preset-dropdown.png' });
-	await page.getByRole('option', { name: /Cyberpunk/ }).click();
-	await expect(presetDropdown).toContainText('Cyberpunk');
+	await page.getByRole('button', { name: /Cyberpunk/ }).click();
+	await page.getByRole('button', { name: ru.common.back }).click();
 	await expect(
 		page.getByRole('checkbox', { name: 'Kill Switch', exact: true }),
 	).toBeDisabled();
