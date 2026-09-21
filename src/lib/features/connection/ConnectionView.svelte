@@ -18,7 +18,7 @@
 		server?: Server;
 		busy: boolean;
 		error: ErrorCode | null;
-		onRetry: () => void;
+		onRetry?: () => void;
 		connectionState: VpnConnectionState;
 		info: VpnConnectionInfo | null;
 		selectedCountry?: string;
@@ -32,7 +32,6 @@
 		server,
 		busy,
 		error,
-		onRetry,
 		selectedCountry = 'fi',
 		onToggle,
 		onSelectServer,
@@ -127,7 +126,6 @@
 					transition:fade={{ duration: 200 }}
 				>
 					{t('errors.' + error)}
-					<button onclick={onRetry} disabled={busy}>{t('common.retry')}</button>
 				</div>
 			{/if}
 		</div>
@@ -150,10 +148,12 @@
 				<span class="latency">
 					{#if typeof server?.latency === 'number'}
 						<NumberFlow value={server.latency} />
+						<span class="latency-unit">ms</span>
+					{:else if server?.latency === 'timeout'}
+						<span>{t('servers.timeout')}</span>
 					{:else}
-						{server?.latency ?? '—'}
+						<span>{server?.latency ?? '—'}</span>
 					{/if}
-					<span class="latency-unit">ms</span>
 				</span>
 			</div>
 		</div>
@@ -181,9 +181,6 @@
 		align-items: center;
 		pointer-events: none;
 		height: 32px;
-	}
-	.status-slot :global(button) {
-		pointer-events: auto;
 	}
 	.connection-status {
 		position: absolute;

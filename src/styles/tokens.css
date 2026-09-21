@@ -21,7 +21,8 @@
 
 	/* Typography */
 	--font-family-base:
-		'Satoshi Variable', 'Satoshi-Variable', 'Satoshi-Regular', sans-serif;
+		'Finlandica Text', 'Finlandica', -apple-system, BlinkMacSystemFont,
+		'Segoe UI', Roboto, sans-serif;
 
 	/* Spacing */
 	--spacing-xs: 4px;

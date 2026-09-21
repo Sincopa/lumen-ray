@@ -11,6 +11,8 @@ export interface ConnectionSnapshot {
 }
 
 export class ConnectionController {
+	private unsubscribe?: () => void;
+	private eventRevision = 0;
 	private current: ConnectionSnapshot = {
 		status: 'initializing',
 		info: null,
@@ -20,22 +22,37 @@ export class ConnectionController {
 
 	readonly state = writable(this.current);
 
+	private errorTimer?: ReturnType<typeof setTimeout>;
+
 	constructor(
 		private vpn: VpnService,
-		private timeoutMs = 10000,
+		private timeoutMs = 30000,
 	) {}
 
 	private update(patch: Partial<ConnectionSnapshot>) {
 		this.current = { ...this.current, ...patch };
+		if (patch.error) {
+			if (this.errorTimer) clearTimeout(this.errorTimer);
+			this.errorTimer = setTimeout(() => {
+				if (this.current.error) {
+					this.update({ error: null });
+				}
+			}, 5000);
+		} else if (patch.error === null && this.errorTimer) {
+			clearTimeout(this.errorTimer);
+			this.errorTimer = undefined;
+		}
 		this.state.set(this.current);
 	}
 
 	private async readConnection() {
+		if (this.vpn.getSnapshot)
+			return withTimeout(this.vpn.getSnapshot(), this.timeoutMs);
 		const [status, info] = await withTimeout(
 			Promise.all([this.vpn.getStatus(), this.vpn.getConnectionInfo()]),
 			this.timeoutMs,
 		);
-		return { status, info };
+		return { status, info, error: undefined };
 	}
 
 	private async reconcileAfterError(cause: unknown) {
@@ -43,9 +60,10 @@ export class ConnectionController {
 		const error = errorCode(cause);
 		try {
 			const { status, info } = await this.readConnection();
-			this.update({ status, info, error });
+			const finalStatus = status === 'connecting' ? 'error' : status;
+			this.update({ status: finalStatus, info, error, busy: false });
 		} catch {
-			this.update({ status: 'error', info: null, error });
+			this.update({ status: 'error', info: null, error, busy: false });
 		}
 	}
 
@@ -53,12 +71,32 @@ export class ConnectionController {
 		this.update({ status: 'initializing', busy: true, error: null });
 
 		try {
-			const { status, info } = await this.readConnection();
-			this.update({ status, info });
+			this.unsubscribe?.();
+			if (this.vpn.subscribe) {
+				this.unsubscribe = await this.vpn.subscribe((snapshot) => {
+					this.eventRevision++;
+					this.update({
+						status: snapshot.status,
+						info: snapshot.info,
+						busy: ['connecting', 'disconnecting', 'reconnecting'].includes(
+							snapshot.status,
+						),
+						error: snapshot.error ? errorCode(snapshot.error) : null,
+					});
+				});
+			}
+			const revision = this.eventRevision;
+			const { status, info, error } = await this.readConnection();
+			if (revision === this.eventRevision)
+				this.update({ status, info, error: error ? errorCode(error) : null });
 		} catch (e) {
 			this.update({ status: 'error', error: errorCode(e) });
 		} finally {
-			this.update({ busy: false });
+			this.update({
+				busy: ['connecting', 'disconnecting', 'reconnecting'].includes(
+					this.current.status,
+				),
+			});
 		}
 	}
 
@@ -91,7 +129,11 @@ export class ConnectionController {
 		} catch (e) {
 			await this.reconcileAfterError(e);
 		} finally {
-			this.update({ busy: false });
+			this.update({
+				busy: ['connecting', 'disconnecting', 'reconnecting'].includes(
+					this.current.status,
+				),
+			});
 		}
 	}
 
@@ -115,7 +157,7 @@ export class ConnectionController {
 		});
 
 		try {
-			if (wasActive) {
+			if (wasActive && !this.vpn.getSnapshot) {
 				try {
 					await withTimeout(this.vpn.disconnect(), this.timeoutMs);
 				} catch {
@@ -131,7 +173,11 @@ export class ConnectionController {
 		} catch (e) {
 			await this.reconcileAfterError(e);
 		} finally {
-			this.update({ busy: false });
+			this.update({
+				busy: ['connecting', 'disconnecting', 'reconnecting'].includes(
+					this.current.status,
+				),
+			});
 		}
 	}
 }

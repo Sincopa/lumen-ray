@@ -1,5 +1,8 @@
 <script lang="ts">
-	import { onDestroy } from 'svelte';
+	import { onDestroy, onMount } from 'svelte';
+	import { runtime } from '../../runtime';
+	import { getProcesses } from '../../services/processes';
+	import { catalog } from '../../services';
 	import { createDeferredTask } from '../../utils/deferredTask';
 	import discordIcon from '../../../assets/discord.png';
 	import yandexIcon from '../../../assets/yandex.png';
@@ -33,45 +36,61 @@
 		icon?: string;
 	}
 
-	const processes: ProcessItem[] = [
-		{
-			id: 'discord',
-			name: 'Discord',
-			detail: 'C:\\Users\\user\\AppData',
-			icon: discordIcon,
-		},
-		{
-			id: 'yandex',
-			name: 'Yandex',
-			detail: 'C:\\Users\\user\\AppData',
-			icon: yandexIcon,
-		},
-		{
-			id: 'youtube',
-			name: 'youtube.com/',
-			detail: 'C:\\Users\\user\\AppData',
-		},
-		{
-			id: 'chrome',
-			name: 'chrome.exe',
-			detail: 'C:\\Program Files\\Google\\Chrome\\Application',
-		},
-		{
-			id: 'telegram',
-			name: 'Telegram.exe',
-			detail: 'C:\\Users\\user\\AppData\\Roaming\\Telegram Desktop',
-		},
-		{
-			id: 'steam',
-			name: 'steam.exe',
-			detail: 'C:\\Program Files (x86)\\Steam',
-		},
-		{
-			id: 'spotify',
-			name: 'Spotify.exe',
-			detail: 'C:\\Users\\user\\AppData\\Roaming\\Spotify',
-		},
-	];
+	let processes = $state<ProcessItem[]>(
+		runtime.isTauri
+			? []
+			: [
+					{
+						id: 'discord',
+						name: 'Discord',
+						detail: 'C:\\Users\\user\\AppData',
+						icon: discordIcon,
+					},
+					{
+						id: 'yandex',
+						name: 'Yandex',
+						detail: 'C:\\Users\\user\\AppData',
+						icon: yandexIcon,
+					},
+					{
+						id: 'youtube',
+						name: 'youtube.com/',
+						detail: 'C:\\Users\\user\\AppData',
+					},
+					{
+						id: 'chrome',
+						name: 'chrome.exe',
+						detail: 'C:\\Program Files\\Google\\Chrome\\Application',
+					},
+					{
+						id: 'telegram',
+						name: 'Telegram.exe',
+						detail: 'C:\\Users\\user\\AppData\\Roaming\\Telegram Desktop',
+					},
+					{
+						id: 'steam',
+						name: 'steam.exe',
+						detail: 'C:\\Program Files (x86)\\Steam',
+					},
+					{
+						id: 'spotify',
+						name: 'Spotify.exe',
+						detail: 'C:\\Users\\user\\AppData\\Roaming\\Spotify',
+					},
+				],
+	);
+	onMount(() => {
+		let disposed = false;
+		if (runtime.isTauri)
+			void getProcesses()
+				.then((items) => {
+					if (!disposed) processes = items;
+				})
+				.catch(() => catalog.persistenceError.set(true));
+		return () => {
+			disposed = true;
+		};
+	});
 
 	function parseInitial(sel?: string | string[]): string[] {
 		if (Array.isArray(sel)) return [...sel];
@@ -92,6 +111,9 @@
 
 	const normalizedQuery = $derived(searchQuery.toLowerCase());
 	const selectedNames = $derived(new Set(selected));
+	function processKey(process: ProcessItem) {
+		return process.name;
+	}
 	let filteredProcesses = $derived(
 		processes.filter(
 			(p) =>
@@ -102,7 +124,7 @@
 
 	let isAllSelected = $derived(
 		filteredProcesses.length > 0 &&
-			filteredProcesses.every((p) => selectedNames.has(p.name)),
+			filteredProcesses.every((p) => selectedNames.has(processKey(p))),
 	);
 
 	function toggleSelect(name: string) {
@@ -115,13 +137,10 @@
 
 	function toggleSelectAll() {
 		if (isAllSelected) {
-			const filteredNames = new Set(filteredProcesses.map((p) => p.name));
+			const filteredNames = new Set(filteredProcesses.map(processKey));
 			selected = selected.filter((n) => !filteredNames.has(n));
 		} else {
-			const set = new Set([
-				...selected,
-				...filteredProcesses.map((p) => p.name),
-			]);
+			const set = new Set([...selected, ...filteredProcesses.map(processKey)]);
 			selected = Array.from(set);
 		}
 	}
@@ -188,12 +207,12 @@
 	<!-- Processes List -->
 	<div class="process-list" role="list">
 		{#each filteredProcesses as item (item.id)}
-			{@const isChecked = selectedNames.has(item.name)}
+			{@const isChecked = selectedNames.has(processKey(item))}
 			<button
 				type="button"
 				class="process-row"
 				class:selected-row={isChecked}
-				onclick={() => toggleSelect(item.name)}
+				onclick={() => toggleSelect(processKey(item))}
 			>
 				<div class="process-left">
 					<div class="app-icon-box">

@@ -51,6 +51,14 @@
 	let activeMenuSub = $derived(
 		$catalogStore.subscriptions.find((s) => s.id === menu),
 	);
+	async function selectSubscription(id: string) {
+		try {
+			await catalog.selectSubscription(id);
+			expanded = expanded === id ? null : id;
+		} catch (cause) {
+			error = t('errors.' + errorCode(cause));
+		}
+	}
 
 	function formatUpdatedAgo(sub: Subscription): string {
 		return formatSubscriptionUpdatedAgo(
@@ -104,12 +112,12 @@
 		editName = '';
 	}
 
-	function saveEditing(subId: string) {
+	async function saveEditing(subId: string) {
 		focusTask.cancel();
 		const trimmed = editName.trim();
 		if (!trimmed) return;
 		try {
-			catalog.renameSubscription(subId, trimmed);
+			await catalog.renameSubscription(subId, trimmed);
 			editingId = null;
 			error = '';
 		} catch (e) {
@@ -117,10 +125,10 @@
 		}
 	}
 
-	function remove() {
+	async function remove() {
 		if (!deleting) return;
 		try {
-			catalog.removeSubscription(deleting.id);
+			await catalog.removeSubscription(deleting.id);
 			deleting = null;
 			error = '';
 		} catch (e) {
@@ -214,10 +222,7 @@
 							<button
 								class="title-group"
 								aria-expanded={expanded === sub.id}
-								onclick={() => {
-									catalog.selectSubscription(sub.id);
-									expanded = expanded === sub.id ? null : sub.id;
-								}}
+								onclick={() => selectSubscription(sub.id)}
 							>
 								<span class="sub-name">{sub.name}</span>
 								{#if activeSubId === sub.id}
@@ -243,10 +248,7 @@
 									ariaLabel={sub.name}
 									expanded={expanded === sub.id}
 									class="card-chevron"
-									onclick={() => {
-										catalog.selectSubscription(sub.id);
-										expanded = expanded === sub.id ? null : sub.id;
-									}}
+									onclick={() => selectSubscription(sub.id)}
 								/>
 							</div>
 						{/if}

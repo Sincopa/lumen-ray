@@ -37,6 +37,8 @@
 	let error = $state('');
 
 	function cleanDomain(val: string): string {
+		// Preserve IP network prefixes; the native backend validates address and prefix length.
+		if (/^[\da-f:.]+\/\d{1,3}$/i.test(val.trim())) return val.trim();
 		return val
 			.trim()
 			.replace(/^https?:\/\//i, '')
@@ -51,15 +53,12 @@
 				error = t('errors.invalidRule');
 				return;
 			}
-			if (!serverId) {
-				error = t('errors.invalidServer');
-				return;
-			}
+			const targetServer = serverId || 'subscription';
 			onSave({
 				...rule,
 				isDomain: true,
 				name: finalName,
-				serverId,
+				serverId: targetServer,
 			});
 		} else {
 			const procs = name
@@ -70,16 +69,13 @@
 				error = t('rules.chooseProcessError') || 'Выберите процесс';
 				return;
 			}
-			if (!serverId) {
-				error = t('errors.invalidServer');
-				return;
-			}
+			const targetServer = serverId || 'subscription';
 			if (procs.length === 1) {
 				onSave({
 					...rule,
 					isDomain: false,
 					name: procs[0],
-					serverId,
+					serverId: targetServer,
 				});
 			} else {
 				const rules: Rule[] = [
@@ -87,13 +83,13 @@
 						...rule,
 						isDomain: false,
 						name: procs[0],
-						serverId,
+						serverId: targetServer,
 					},
 					...procs.slice(1).map((p) => ({
 						id: crypto.randomUUID(),
 						name: p,
 						isDomain: false,
-						serverId,
+						serverId: targetServer,
 						enabled: true,
 					})),
 				];
@@ -221,7 +217,7 @@
 					{:else if server}
 						<CountryFlag countryCode={server.countryCode} size={20} />
 						<span class="selector-value">
-							{t('servers.countries.' + server.countryCode)}
+							{server.name ?? t('servers.countries.' + server.countryCode)}
 						</span>
 					{:else}
 						<span class="selector-value placeholder-val">

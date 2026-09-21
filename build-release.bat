@@ -45,6 +45,8 @@ if errorlevel 1 (
     echo [ERROR] Failed to copy binary to release\lumen.exe
     goto :error
 )
+if not exist "release\resources\core\" mkdir "release\resources\core"
+copy /Y "src-tauri\resources\core\*.*" "release\resources\core\" >nul
 
 echo.
 echo ============================================================

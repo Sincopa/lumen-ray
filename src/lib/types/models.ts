@@ -16,7 +16,13 @@ export interface VpnConnectionInfo {
 }
 
 export type VpnProtocol =
-	'Vless' | 'VMess' | 'Trojan' | 'Shadowsocks' | 'Reality';
+	| 'Vless'
+	| 'VMess'
+	| 'Trojan'
+	| 'Shadowsocks'
+	| 'Reality'
+	| 'Hysteria'
+	| 'WireGuard';
 
 export interface VpnServer {
 	id: string;
@@ -27,6 +33,10 @@ export interface VpnServer {
 }
 
 export interface TrafficStats {
+	available: boolean;
+	uploadSpeed: number;
+	downloadSpeed: number;
+	durationSeconds: number;
 	upload: number; // bytes
 	download: number; // bytes
 }

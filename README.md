@@ -1,79 +1,162 @@
-# Lumen
+﻿# Lumen
 
-Modern, ultra-lightweight desktop VPN & proxy interface built with Svelte 5, TypeScript, Vite and Tauri 2.
+Desktop VPN client for Windows x86_64, built with Svelte 5, TypeScript, Tauri 2 and
+Xray. The existing interface is preserved. Browser development uses explicit mocks;
+the Tauri runtime uses the Rust backend and never falls back to fake connections.
 
-**This version is a demo. It does not protect or route traffic.** Browser and native
-Tauri modes simulate connections. Xray, system proxy, TUN, Kill Switch and
-auto-connect are not implemented and their controls are disabled.
+**Release validation is not complete.** Real proxy connectivity and native UI wiring
+have been exercised. Global/application TUN traffic verification is currently blocked
+by another active VPN (Meta) installing more-specific routes. Do not interpret the
+working proxy mode or a successful build as proof of full-system VPN protection.
 
-## Development
+## Development and builds
 
-- Node.js 22.12 or newer, npm.
-- Native Windows build: Rust stable, MSVC Build Tools and Windows SDK, WebView2.
-- Install dependencies: `npm ci`.
-- Browser development: `npm run dev` (127.0.0.1:5173).
-- Desktop development: `npm run tauri:dev`.
-- Production frontend: `npm run build`, then `npm run preview`.
-- Desktop bundle: `npm run tauri:build`.
+Requirements: Node.js 22.12+, Rust 1.92+, MSVC Build Tools, Windows SDK and WebView2.
 
-Port 5173 is strict: stop the conflicting server rather than silently opening
-another project in the Tauri window.
+```powershell
+npm ci
+powershell -NoProfile -File scripts/prepare-core.ps1
+npm run dev
+# Native development:
+npm run tauri:dev
+# Windows installer, including verified Xray and Wintun:
+node node_modules/@tauri-apps/cli/tauri.js build --bundles nsis
+```
 
-## Architecture
+The core preparation script downloads the pinned official Xray v26.9.9 archive and
+checks its SHA-256. Binary resources are intentionally excluded from Git; the script
+must run before compiling a fresh checkout. The bundled license and hash manifest
+are in `src-tauri/resources/core`. The installer currently has no Authenticode signature.
+Port 5173 is strict to avoid displaying a different project in the native window.
 
-- `src/app/App.svelte`: navigation and composition.
-- `src/lib/features`: connection, subscription, server, rule and settings screens.
-- `src/lib/stores/connection.ts`: lifecycle controller, timeouts and errors.
-- `src/lib/services/catalog.ts`: validated demo catalog and persistence.
-- `src/lib/services/contracts`: service contracts.
-- `src/lib/platform/browser`: simulated connection adapter.
-- `src/lib/platform/tauri`: typed IPC adapter.
-- `src-tauri/src/vpn.rs`: simulated native commands and connection state.
-- `src/lib/i18n`, `src/locales`: Russian and English.
+## Backend Architecture
 
-The catalog is the shared demo implementation in both environments; native
-connection state lives in Rust. The frontend never starts processes or changes
-system networking. A future Xray integration should implement these contracts,
-add backend events for unexpected disconnects and validate native data.
+- `src/lib/services`: existing service contracts and runtime selection.
+- `src/lib/platform/tauri`: catalog, connection and statistics IPC adapters.
+- `src-tauri/src/commands`: thin IPC handlers; no shell or filesystem access from Svelte.
+- `app/state.rs`: encrypted repository, singleton lock, lifecycle operation gate,
+  state/event channels and active core version.
+- `subscription`: bounded fetching, URI/Base64/Xray JSON/Clash YAML parsers.
+- `domain`: validated nodes and typed protocol/transport/security data.
+- `xray`: deterministic configuration, bundled hash verification and staged updater.
+- `services`: catalog transactions, lifecycle, concurrency-limited HTTPS latency probes,
+  real public IP and Xray traffic counters.
+- `platform`: Windows process enumeration, DPAPI integration, proxy journal, TUN helper
+  and route inspection. Other operating systems are not shipped or runtime-tested.
 
-## Demo behavior and storage
+### Lifecycle and Windows networking
 
-Server selection, routing mode, subscriptions and rules survive navigation and
-restart using versioned local storage. Invalid stored catalogs fall back to a
-sample catalog and display a warning. Failed writes do not publish unsaved changes.
-Language and appearance are stored separately. Browser connection state is
-session-only; native connection state lasts for the application process.
+Each connection is generated and checked by `xray run -test` before replacing a working
+session. Xray receives configuration over stdin. One connection operation owns the
+session; temporary latency probes have separate ports, Job Objects and a four-probe
+limit. The backend emits state/statistics events, detects process exits and rejects
+common competing-VPN routes before reporting TUN Connected.
 
-Subscription import validates an HTTPS URL, supported share link or Base64 list.
-It creates sample metadata and one simulated server; it does not fetch a provider
-or parse an actual server configuration. Input URLs and credentials are not saved
-or included in exports. Do not use this demo as a credential manager.
+TUN elevates a restricted, session-scoped helper through UAC; the GUI remains a normal
+user process. Xray owns the LumenTun adapter, IPv4/IPv6 default routes and automatic
+outbound-interface binding. Global uses the selected proxy; Rules defaults to DIRECT
+and applies enabled process-name/path, domain and IP/CIDR rules. Loopback/private LAN
+and Xray itself bypass the tunnel. Rule order is preserved.
 
-Rules accept a domain without a path or an executable filename. They can be
-edited, toggled and deleted; they do not affect traffic yet. Removing a subscription
-also removes its servers and dependent rules, with confirmation.
+Proxy mode changes the current user's Windows HTTP/HTTPS proxy after verifying the
+selected server. It affects proxy-aware applications only. Process routing requires
+TUN. Original registry/PAC values are DPAPI-journaled and restored on disconnect or
+startup recovery; third-party changes made after activation are preserved.
 
-The background supports reduced motion, a manual off switch, hidden-window
-pausing, WebGL context restoration and a 30 FPS limit. Fonts and icons are local.
+Core shutdown sends a console break signal and waits for graceful exit, with bounded
+forced termination and Job Object cleanup as a fallback. Native proxy crash detection
+and startup proxy recovery passed; the TUN crash/route/DNS recovery matrix remains open.
+Kill Switch is deliberately not implemented. Auto-connect reconnects the saved selected
+node when the application starts; it does not install Windows autorun.
+
+### Subscriptions and storage
+
+HTTPS fetches have a 30-second timeout, five-redirect and 4 MiB body limit. Imports
+accept plain URI lists, one Base64 layer, full Xray configurations/outbound arrays and
+Clash/Mihomo `proxies` YAML. At most 4096 entries are accepted. YAML file includes are
+disabled. Unsupported entries have indexed typed diagnostics and do not invalidate
+other supported entries. Refresh replaces disappeared nodes and preserves stable selections.
+
+Supported protocol families: VLESS (TLS/REALITY/Vision), VMess, Trojan, Shadowsocks,
+Hysteria 2 and typed Xray WireGuard outbounds. Transports include RAW/TCP, WebSocket,
+gRPC, HTTPUpgrade, basic XHTTP and mKCP. Not every provider extension is supported:
+advanced XHTTP `extra`, transport masks, chained proxies, unsafe TLS and unknown
+security-sensitive parameters are rejected instead of silently dropping them.
+
+The versioned native repository is stored under `%LOCALAPPDATA%/app.lumen.desktop/data`
+as user-scoped DPAPI ciphertext, including subscriptions, credentials, selected node,
+rules and network settings. Writes are atomic. Missing optional fields migrate via
+schema defaults; unknown future versions fail explicitly. Browser localStorage catalogs
+are separate and never seed the native runtime. Appearance/language preferences remain
+in the original frontend storage.
+
+The existing interface has no IP/speed panel or updater screen. Real IP/statistics and
+safe updater commands are available through the service/IPC layer; new visual controls
+were not added. Process paths and executable icons come from Windows; inaccessible
+icons use the existing fallback.
+
+### Updates
+
+Core updates use fixed official XTLS GitHub release endpoints, architecture-specific
+assets and mandatory SHA-256 metadata. Downloads are bounded, ZIP paths are checked,
+files are staged and validated, and activation stores current/previous version pointers.
+A failed reconnect restores the previous core. An updated core requires fresh official
+metadata on startup/helper launch; offline startup falls back to the verified bundled core.
+
+Application updates use the standard Tauri signature verifier. **No release channel
+or signing key is configured yet**, as requested. Checks report `configured: false`.
+To prepare a future signed release, create signing keys outside this repository with
+Tauri's signer and run `scripts/build-signed-release.ps1` with an HTTPS endpoint and
+public/private key file paths. Supply `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` separately
+if needed. The script builds signed updater artifacts; it does not publish them.
+See [SECURITY.md](SECURITY.md) for trust boundaries and remaining limitations.
 
 ## Verification
 
-- `npm run check`: Svelte and TypeScript.
-- `npm run lint`: ESLint for TypeScript and Svelte.
-- `npm run format:check` / `npm run format`: Prettier.
-- `npm test`: unit tests for lifecycle, persistence, validation and locales.
-- `npm run benchmark:catalog`: repeatable batch persistence benchmark; see [PERFORMANCE.md](PERFORMANCE.md) for scope and measurements.
-- `npm run build && npm run test:e2e`: production-browser scenarios in local Edge.
-- `cargo test --locked --manifest-path src-tauri/Cargo.toml`: native command tests.
+```powershell
+npm run check
+npm run lint
+npm run format:check
+npm test
+npm run build
+npm run test:e2e
+cargo fmt --manifest-path src-tauri/Cargo.toml --check
+cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets --all-features
+cargo test --locked --manifest-path src-tauri/Cargo.toml
+cargo build --locked --manifest-path src-tauri/Cargo.toml
+```
 
-Browser tests use isolated contexts and port 5187. They do not modify system
-VPN settings. They require Microsoft Edge. The production CSP blocks external
-assets and network endpoints; native IPC is explicitly permitted.
+Network tests are opt-in. Set `LUMEN_TEST_SUBSCRIPTION_FILE` to a local file containing
+a private subscription; never paste credentials into tests or commit the file.
 
-Native compilation and command tests are not proof of real VPN networking.
-Before a public release, implement and test the network backend, secret storage,
-crash recovery and installer behavior, and choose application signing and licensing.
+```powershell
+cargo test --manifest-path src-tauri/Cargo.toml private_ -- --ignored --nocapture --test-threads=1
+# Native WebView2 smoke; uses isolated debug application data:
+cargo build --manifest-path src-tauri/Cargo.toml --features tauri/custom-protocol
+npm run test:smoke
+# Elevated TUN traffic smoke, after disconnecting competing VPNs:
+.\src-tauri\target\debug\app.exe --lumen-smoke-tun
+```
 
-API references: [Tauri commands](https://v2.tauri.app/develop/calling-rust/),
-[window customization](https://v2.tauri.app/learn/window-customization/),
-[CSP](https://v2.tauri.app/security/csp/).
+Verified locally: unit tests; bundled-core validation (including Hysteria/WireGuard/mKCP);
+private subscription fetch and generated-config validation; real HTTPS through a selected
+node with nonzero counters; native empty first-run, import, connect, events, reload,
+disconnect and clean exit; exact restoration of Windows proxy settings; owned-core
+crash detection and proxy journal recovery after forced GUI termination. A local NSIS
+install/launch/uninstall passed; this does not substitute for a clean-machine test.
+
+Still unverified or incomplete: clean-machine installer operation; complete Global and
+selected-application TUN traffic/IPv6 proof; UAC refusal and crash recovery matrix;
+end-to-end core rollback and signed application delivery. There is no production-ready
+claim until these checks pass. Browser UI screenshots are stored in ignored
+`artifacts/backend-before` and `artifacts/backend-after` directories.
+The working tree also contains a separate font replacement; these screenshots are
+therefore not evidence of pixel equality with the original typography. Formatting
+checks currently report existing changes in `src/assets/fonts.css` and two E2E files
+(`capture-rules-with-items.spec.ts`, `dropdown-behavior.spec.ts`).
+
+For frontend performance methodology, see [PERFORMANCE.md](PERFORMANCE.md).
+API references: [Tauri IPC](https://v2.tauri.app/develop/calling-rust/),
+[Xray TUN](https://xtls.github.io/en/config/inbounds/tun.html),
+[Xray routing](https://xtls.github.io/en/config/routing.html),
+[Tauri updater](https://v2.tauri.app/plugin/updater/).

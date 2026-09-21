@@ -22,6 +22,18 @@ dist-ssr/
 test-results/
 playwright-report/
 artifacts/
+src-tauri/resources/core/*.exe
+src-tauri/resources/core/*.dll
+**/runtime-config*.json
+*.key
+*.p12
+*.pfx
+*.dpapi
+*.dump
+*.dmp
+**/private-subscription*
+**/network-state.json
+**/signing-private*
 
 # Local & environment files
 *.local

@@ -30,7 +30,10 @@
 		if (!trigger || !list) return;
 		const rect = trigger.getBoundingClientRect();
 		const width = Math.min(
-			Math.max(rect.width, compact && options.length > 2 ? 280 : Math.max(rect.width, 110)),
+			Math.max(
+				rect.width,
+				compact && options.length > 2 ? 280 : Math.max(rect.width, 110),
+			),
 			window.innerWidth - 24,
 		);
 		const preferredHeight = Math.min(248, options.length * 40 + 8);
@@ -39,7 +42,10 @@
 		const placeAbove = below < preferredHeight && above > below;
 		const available = Math.max(80, placeAbove ? above : below);
 		const height = Math.min(preferredHeight, available);
-		const left = Math.max(12, Math.min(rect.right - width, window.innerWidth - width - 12));
+		const left = Math.max(
+			12,
+			Math.min(rect.right - width, window.innerWidth - width - 12),
+		);
 		list.style.left = `${left}px`;
 		list.style.width = `${width}px`;
 		list.style.top = `${placeAbove ? rect.top - height - 6 : rect.bottom + 6}px`;
@@ -68,7 +74,9 @@
 		onChange?.(option.value);
 		try {
 			list?.hidePopover();
-		} catch {}
+		} catch {
+			/* The popover may already be closed or detached. */
+		}
 		trigger?.focus({ preventScroll: true });
 	}
 
@@ -86,7 +94,9 @@
 		if (open) {
 			try {
 				list?.hidePopover();
-			} catch {}
+			} catch {
+				/* The popover may already be closed or detached. */
+			}
 		} else {
 			void show();
 		}
@@ -126,7 +136,9 @@
 			event.preventDefault();
 			try {
 				list?.hidePopover();
-			} catch {}
+			} catch {
+				/* The popover may already be closed or detached. */
+			}
 			trigger?.focus({ preventScroll: true });
 			return;
 		} else return;
@@ -141,17 +153,24 @@
 			if (event.target !== list && !list?.contains(event.target as Node)) {
 				try {
 					list?.hidePopover();
-				} catch {}
+				} catch {
+					/* The popover may already be closed or detached. */
+				}
 			}
 		}
 
 		function handleResize() {
 			try {
 				list?.hidePopover();
-			} catch {}
+			} catch {
+				/* The popover may already be closed or detached. */
+			}
 		}
 
-		window.addEventListener('scroll', handleScroll, { capture: true, passive: true });
+		window.addEventListener('scroll', handleScroll, {
+			capture: true,
+			passive: true,
+		});
 		window.addEventListener('resize', handleResize, { passive: true });
 
 		return () => {

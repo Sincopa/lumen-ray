@@ -9,6 +9,52 @@ afterEach(() => {
 });
 
 describe('connection lifecycle', () => {
+	it('restores the native backend error after a view reload', async () => {
+		const vpn = Object.assign(new BrowserVpnService(0), {
+			getSnapshot: async () => ({
+				status: 'error' as const,
+				info: null,
+				error: { code: 'ROUTING_CONFLICT' },
+			}),
+		});
+		const controller = new ConnectionController(vpn);
+		await controller.initialize();
+		expect(get(controller.state)).toMatchObject({
+			status: 'error',
+			busy: false,
+			error: 'routingConflict',
+		});
+	});
+
+	it.each(['toggle', 'switchServer'] as const)(
+		'%s keeps native pending operations locked after timeout',
+		async (operation) => {
+			vi.useFakeTimers();
+			const snapshot = vi
+				.fn()
+				.mockResolvedValue({ status: 'disconnected', info: null });
+			const vpn = Object.assign(new BrowserVpnService(0), {
+				getSnapshot: snapshot,
+			});
+			const controller = new ConnectionController(vpn, 20);
+			await controller.initialize();
+			const connect = vi
+				.spyOn(vpn, 'connect')
+				.mockImplementation(() => new Promise(() => {}));
+			snapshot.mockResolvedValue({ status: 'connecting', info: null });
+			const pending = controller[operation]('native-server');
+			await vi.advanceTimersByTimeAsync(21);
+			await pending;
+			expect(get(controller.state)).toMatchObject({
+				status: 'connecting',
+				busy: true,
+				error: 'timeout',
+			});
+			await controller.toggle('native-server');
+			expect(connect).toHaveBeenCalledTimes(1);
+		},
+	);
+
 	it.each(['toggle', 'switchServer'] as const)(
 		'%s reports an unknown state when both connection and reconciliation fail',
 		async (operation) => {

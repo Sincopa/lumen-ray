@@ -1,4 +1,5 @@
 export type ErrorCode =
+	| 'routingConflict'
 	| 'unavailable'
 	| 'timeout'
 	| 'invalidServer'
@@ -15,6 +16,7 @@ export class ServiceError extends Error {
 
 export function errorCode(error: unknown): ErrorCode {
 	const codes: ErrorCode[] = [
+		'routingConflict',
 		'unavailable',
 		'timeout',
 		'invalidServer',
@@ -22,12 +24,29 @@ export function errorCode(error: unknown): ErrorCode {
 		'invalidRule',
 		'storage',
 	];
-	const code =
+	let code =
 		error instanceof ServiceError
 			? error.code
 			: typeof error === 'object' && error !== null && 'code' in error
 				? error.code
 				: error;
+	const nativeCodes: Record<string, ErrorCode> = {
+		ROUTING_CONFLICT: 'routingConflict',
+		INVALID_SERVER: 'invalidServer',
+		INVALID_RULE: 'invalidRule',
+		SUBSCRIPTION_INVALID: 'invalidSubscription',
+		SUBSCRIPTION_FETCH_FAILED: 'invalidSubscription',
+		STORAGE_FAILED: 'storage',
+		STORAGE_VERSION: 'storage',
+		CORE_NOT_FOUND: 'unavailable',
+		CORE_START_FAILED: 'unavailable',
+		CORE_CRASHED: 'unavailable',
+		TUN_FAILED: 'unavailable',
+		PERMISSION_DENIED: 'unavailable',
+		SERVER_UNREACHABLE: 'unavailable',
+		BUSY: 'unavailable',
+	};
+	if (typeof code === 'string') code = nativeCodes[code] ?? code;
 	return codes.includes(code as ErrorCode) ? (code as ErrorCode) : 'unknown';
 }
 

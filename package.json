@@ -11,7 +11,7 @@
 		"format:check": "prettier --check src tests *.ts *.js *.json README.md",
 		"test": "vitest run",
 		"test:e2e": "playwright test",
-		"test:smoke": "node scripts/native-smoke.mjs",
+		"test:smoke": "node scripts/backend-native-smoke.mjs",
 		"benchmark:catalog": "node scripts/benchmark-catalog.mjs",
 		"dev": "vite",
 		"build": "vite build",

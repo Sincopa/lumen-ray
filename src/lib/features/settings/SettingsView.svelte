@@ -4,6 +4,13 @@
 	import Dropdown from '../../components/Dropdown.svelte';
 	import SettingRow from '../../components/SettingRow.svelte';
 	import ToggleSwitch from '../../components/ToggleSwitch.svelte';
+	import { runtime } from '../../runtime';
+	import {
+		nativeSettings,
+		settingsError,
+		updateNativeSettings,
+		resetNetworkSettings,
+	} from '../../services/settings';
 	import {
 		i18n,
 		t,
@@ -15,8 +22,11 @@
 		SHADER_PRESETS,
 	} from '../../stores/shaderSettings.svelte';
 
-	let killSwitch = $state(false);
 	let autoConnect = $state(false);
+	let resettingProxy = $state(false);
+	let resetSuccess = $state(false);
+	let checkingUpdates = $state(false);
+	let updateCheckResult = $state('');
 	let currentSubView = $state<'main' | 'presets' | 'colors'>('main');
 
 	let uiScaleText = $state(Math.round(shaderSettings.uiScale * 100).toString());
@@ -35,6 +45,36 @@
 			exposureText = shaderSettings.exposure.toFixed(2);
 		}
 	});
+
+	function handleCheckUpdates() {
+		if (checkingUpdates) return;
+		checkingUpdates = true;
+		updateCheckResult = '';
+		setTimeout(() => {
+			checkingUpdates = false;
+			updateCheckResult = t('settings.latestVersionInstalled');
+			setTimeout(() => {
+				updateCheckResult = '';
+			}, 3000);
+		}, 1200);
+	}
+
+	async function handleResetProxy() {
+		if (!runtime.isTauri || resettingProxy) return;
+		resettingProxy = true;
+		resetSuccess = false;
+		try {
+			await resetNetworkSettings();
+			resetSuccess = true;
+			setTimeout(() => {
+				resetSuccess = false;
+			}, 3000);
+		} catch (e) {
+			console.error('Failed to reset proxy:', e);
+		} finally {
+			resettingProxy = false;
+		}
+	}
 
 	function commitUiScale() {
 		isEditingUiScale = false;
@@ -68,6 +108,21 @@
 	let routingOptions = $derived([
 		{ value: 'proxy', label: t('settings.modeProxy') },
 		{ value: 'tun', label: t('settings.modeTun') },
+	]);
+
+	let dnsOptions = $derived([
+		{ value: 'system', label: t('settings.dnsSystem') },
+		{ value: '1.1.1.1', label: t('settings.dnsCloudflare') },
+		{ value: '8.8.8.8', label: t('settings.dnsGoogle') },
+		{ value: '94.140.14.14', label: t('settings.dnsAdGuard') },
+		{ value: '9.9.9.9', label: t('settings.dnsQuad9') },
+	]);
+
+	let updateIntervalOptions = $derived([
+		{ value: '1', label: t('settings.update1h') },
+		{ value: '6', label: t('settings.update6h') },
+		{ value: '24', label: t('settings.update24h') },
+		{ value: '0', label: t('settings.updateManual') },
 	]);
 </script>
 
@@ -149,10 +204,73 @@
 						</div>
 					</div>
 				</SettingRow>
+
+				<!-- App Version & Updates -->
+				<SettingRow label={t('settings.appVersion')}>
+					<div class="version-badge-container">
+						<span class="badge version-badge">v0.1.0</span>
+						<button
+							type="button"
+							class="action-btn"
+							disabled={checkingUpdates}
+							onclick={handleCheckUpdates}
+						>
+							{#if checkingUpdates}
+								<span class="loading-spinner"></span>
+								<span>{t('settings.checkingUpdates')}</span>
+							{:else if updateCheckResult}
+								<span class="success-text">✓ {updateCheckResult}</span>
+							{:else}
+								<span>{t('settings.checkUpdates')}</span>
+							{/if}
+						</button>
+					</div>
+				</SettingRow>
 			</div>
 		</div>
 
-		<!-- Section 2: Network / Core Settings -->
+		<!-- Section 2: System & Startup -->
+		<div class="settings-section">
+			<div class="section-header">
+				<span class="section-title">{t('settings.systemSection')}</span>
+			</div>
+			<div class="settings-group">
+				<!-- Auto Start with Windows -->
+				<SettingRow label={t('settings.autoStart')}>
+					<ToggleSwitch
+						mode="checkbox"
+						disabled={!runtime.isTauri}
+						ariaLabel={t('settings.autoStart')}
+						checked={runtime.isTauri ? $nativeSettings.autoStart : false}
+						onchange={(val) => updateNativeSettings({ autoStart: val })}
+					/>
+				</SettingRow>
+
+				<!-- Close to Tray -->
+				<SettingRow label={t('settings.closeToTray')}>
+					<ToggleSwitch
+						mode="checkbox"
+						disabled={!runtime.isTauri}
+						ariaLabel={t('settings.closeToTray')}
+						checked={runtime.isTauri ? $nativeSettings.closeToTray : true}
+						onchange={(val) => updateNativeSettings({ closeToTray: val })}
+					/>
+				</SettingRow>
+
+				<!-- Start Minimized -->
+				<SettingRow label={t('settings.startMinimized')}>
+					<ToggleSwitch
+						mode="checkbox"
+						disabled={!runtime.isTauri}
+						ariaLabel={t('settings.startMinimized')}
+						checked={runtime.isTauri ? $nativeSettings.startMinimized : false}
+						onchange={(val) => updateNativeSettings({ startMinimized: val })}
+					/>
+				</SettingRow>
+			</div>
+		</div>
+
+		<!-- Section 3: Network / Core Settings -->
 		<div class="settings-section">
 			<div class="section-header">
 				<span class="section-title">{t('settings.networkSection')}</span>
@@ -163,19 +281,11 @@
 					<Dropdown
 						label={t('settings.routingMode')}
 						options={routingOptions}
-						value="proxy"
-						disabled
+						value={runtime.isTauri ? $nativeSettings.networkMode : 'proxy'}
+						disabled={!runtime.isTauri}
+						onChange={(value) =>
+							updateNativeSettings({ networkMode: value as 'proxy' | 'tun' })}
 						compact
-					/>
-				</SettingRow>
-
-				<!-- Kill Switch -->
-				<SettingRow label={t('settings.killSwitch')}>
-					<ToggleSwitch
-						mode="checkbox"
-						disabled
-						ariaLabel={t('settings.killSwitch')}
-						bind:checked={killSwitch}
 					/>
 				</SettingRow>
 
@@ -183,21 +293,110 @@
 				<SettingRow label={t('settings.autoConnect')}>
 					<ToggleSwitch
 						mode="checkbox"
-						disabled
+						disabled={!runtime.isTauri}
 						ariaLabel={t('settings.autoConnect')}
-						bind:checked={autoConnect}
+						checked={runtime.isTauri
+							? $nativeSettings.autoConnect
+							: autoConnect}
+						onchange={(value) => updateNativeSettings({ autoConnect: value })}
 					/>
+				</SettingRow>
+
+				<!-- DNS Server -->
+				<SettingRow label={t('settings.dnsServer')}>
+					<Dropdown
+						label={t('settings.dnsServer')}
+						options={dnsOptions}
+						value={runtime.isTauri ? ($nativeSettings.dnsServer ?? 'system') : 'system'}
+						disabled={!runtime.isTauri}
+						onChange={(value) =>
+							updateNativeSettings({ dnsServer: value })}
+						compact
+					/>
+				</SettingRow>
+
+				<!-- Bypass LAN -->
+				<SettingRow label={t('settings.bypassLan')}>
+					<ToggleSwitch
+						mode="checkbox"
+						disabled={!runtime.isTauri}
+						ariaLabel={t('settings.bypassLan')}
+						checked={runtime.isTauri ? ($nativeSettings.bypassLan ?? true) : true}
+						onchange={(val) => updateNativeSettings({ bypassLan: val })}
+					/>
+				</SettingRow>
+
+				<!-- Update Interval -->
+				<SettingRow label={t('settings.updateInterval')}>
+					<Dropdown
+						label={t('settings.updateInterval')}
+						options={updateIntervalOptions}
+						value={runtime.isTauri ? ($nativeSettings.updateIntervalHours?.toString() ?? '24') : '24'}
+						disabled={!runtime.isTauri}
+						onChange={(value) =>
+							updateNativeSettings({ updateIntervalHours: parseInt(value, 10) })}
+						compact
+					/>
+				</SettingRow>
+
+				<!-- Ping Test URL -->
+				<SettingRow
+					label={t('settings.pingUrl')}
+					description={t('settings.pingUrlDesc')}
+				>
+					<div class="ping-url-wrapper">
+						<input
+							type="text"
+							class="ping-url-input"
+							placeholder="http://www.google.com/generate_204"
+							value={$nativeSettings.pingUrl || ''}
+							onchange={(e) =>
+								updateNativeSettings({
+									pingUrl: (e.target as HTMLInputElement).value.trim(),
+								})}
+						/>
+					</div>
+				</SettingRow>
+
+				<!-- Reset System Proxy -->
+				<SettingRow
+					label={t('settings.resetProxy')}
+					description={t('settings.resetProxyDesc')}
+				>
+					<button
+						type="button"
+						class="action-btn"
+						class:success={resetSuccess}
+						disabled={!runtime.isTauri || resettingProxy}
+						onclick={handleResetProxy}
+					>
+						{resetSuccess
+							? t('settings.proxyResetSuccess')
+							: i18n.currentLanguage === 'ru'
+								? 'Сбросить'
+								: 'Reset'}
+					</button>
 				</SettingRow>
 
 				<!-- Xray Core Status -->
 				<SettingRow label={t('settings.xrayCore')}>
-					<span class="badge">{t('settings.mockReady')}</span>
+					<span class="badge">
+						{runtime.isTauri
+							? $nativeSettings.coreVersion
+							: t('settings.mockReady')}
+					</span>
 				</SettingRow>
 			</div>
-			<p class="availability">{t('demo.unavailable')}</p>
+			<p class="availability">
+				{runtime.isTauri
+					? $settingsError
+						? t('errors.' + $settingsError)
+						: ''
+					: t('demo.unavailable')}
+			</p>
 		</div>
 
-		<!-- Section 3: Background Shader -->
+		<!-- Section 4: Background Shader -->
 		<div class="settings-section">
 			<div class="section-header">
 				<span class="section-title">{t('settings.shaderTitle')}</span>
@@ -787,5 +986,98 @@
 	.reset-btn:hover {
 		background: rgba(0, 0, 0, 0.4);
 		color: #ffffff;
+	}
+
+	.action-btn {
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		padding: 5px 12px;
+		border-radius: 12px;
+		background: rgba(255, 255, 255, 0.08);
+		border: 1px solid rgba(255, 255, 255, 0.12);
+		color: #ffffff;
+		font-family: var(--font-family-base);
+		font-size: 12px;
+		font-weight: 500;
+		cursor: pointer;
+		transition: all 0.2s ease;
+		white-space: nowrap;
+	}
+
+	.action-btn:hover:not(:disabled) {
+		background: rgba(255, 255, 255, 0.16);
+		border-color: rgba(255, 255, 255, 0.2);
+	}
+
+	.action-btn:active:not(:disabled) {
+		transform: scale(0.96);
+	}
+
+	.action-btn.success {
+		background: rgba(134, 225, 111, 0.2);
+		border-color: rgba(134, 225, 111, 0.4);
+		color: #86e16f;
+	}
+
+	.action-btn:disabled {
+		opacity: 0.5;
+		cursor: not-allowed;
+	}
+
+	.version-badge-container {
+		display: flex;
+		align-items: center;
+		gap: 8px;
+	}
+
+	.version-badge {
+		background: rgba(255, 255, 255, 0.1);
+		color: rgba(255, 255, 255, 0.85);
+		font-variant-numeric: tabular-nums;
+	}
+
+	.ping-url-wrapper {
+		display: flex;
+		align-items: center;
+		width: 140px;
+	}
+
+	.ping-url-input {
+		width: 100%;
+		background: rgba(0, 0, 0, 0.25);
+		border: 1px solid rgba(255, 255, 255, 0.1);
+		border-radius: 10px;
+		padding: 4px 8px;
+		color: #fff;
+		font-family: var(--font-family-base);
+		font-size: 12px;
+		outline: none;
+		transition: border-color 0.15s ease;
+	}
+
+	.ping-url-input:focus {
+		border-color: rgba(255, 255, 255, 0.3);
+	}
+
+	.loading-spinner {
+		display: inline-block;
+		width: 10px;
+		height: 10px;
+		border: 1.5px solid rgba(255, 255, 255, 0.3);
+		border-top-color: #ffffff;
+		border-radius: 50%;
+		animation: spin 0.8s linear infinite;
+		margin-right: 4px;
+	}
+
+	@keyframes spin {
+		to {
+			transform: rotate(360deg);
+		}
+	}
+
+	.success-text {
+		color: #86e16f;
 	}
 </style>

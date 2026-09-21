@@ -1,5 +1,5 @@
 import { mount } from 'svelte';
-import './assets/satoshi.css';
+import './assets/fonts.css';
 import './styles/tokens.css';
 
 import App from './app/App.svelte';

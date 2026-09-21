@@ -20,6 +20,8 @@
 	import { APP_WIDTH, APP_HEIGHT } from '../lib/constants/app';
 	import { getCurrentWindow } from '@tauri-apps/api/window';
 	import { LogicalSize } from '@tauri-apps/api/dpi';
+	import { listen } from '@tauri-apps/api/event';
+	import { nativeSettings } from '../lib/services/settings';
 
 	type TabName = 'home' | 'subscriptions' | 'servers' | 'settings' | 'rules';
 
@@ -93,8 +95,63 @@
 		void applyScale(shaderSettings.uiScale);
 	});
 
+	async function refreshAndPingSubscriptions() {
+		try {
+			const sub = $catalogStore.subscriptions[0];
+			if (sub) {
+				await catalog.refreshSubscription(sub.id);
+			}
+			const servers = $catalogStore.servers;
+			if (servers.length > 0) {
+				await Promise.allSettled(
+					servers.map((s) => catalog.pingServer(s.id).catch(() => 'timeout')),
+				);
+			}
+		} catch (err) {
+			console.error('[auto-refresh] Failed to refresh subscription or ping:', err);
+		}
+	}
+
 	onMount(() => {
 		void connection.initialize();
+		void refreshAndPingSubscriptions();
+
+		const handleContextMenu = (e: MouseEvent) => {
+			e.preventDefault();
+		};
+		const handleKeyDown = (e: KeyboardEvent) => {
+			if (e.key === 'Tab') {
+				e.preventDefault();
+			}
+		};
+		window.addEventListener('contextmenu', handleContextMenu);
+		window.addEventListener('keydown', handleKeyDown);
+
+		let unlistenNavigate: (() => void) | undefined;
+		if (runtime.isTauri) {
+			listen('navigate:settings', () => {
+				currentTab = 'settings';
+			}).then((unlisten) => {
+				unlistenNavigate = unlisten;
+			});
+		}
+
+		return () => {
+			window.removeEventListener('contextmenu', handleContextMenu);
+			window.removeEventListener('keydown', handleKeyDown);
+			unlistenNavigate?.();
+		};
+	});
+
+	$effect(() => {
+		const hours = $nativeSettings.updateIntervalHours ?? 24;
+		if (hours <= 0) return;
+		const timer = setInterval(() => {
+			void refreshAndPingSubscriptions();
+		}, hours * 3600 * 1000);
+		return () => {
+			clearInterval(timer);
+		};
 	});
 
 	// Action handlers
@@ -114,9 +171,9 @@
 		}
 	}
 
-	function changeMode(mode: 'global' | 'rules') {
+	async function changeMode(mode: 'global' | 'rules') {
 		try {
-			catalog.setRoutingMode(mode);
+			await catalog.setRoutingMode(mode);
 		} catch (e) {
 			actionError = t('errors.' + errorCode(e));
 		}
@@ -140,7 +197,7 @@
 
 <main class="app-viewport">
 	<!-- Native WebGL2 Background Fluid Light Shader -->
-	<BackgroundShader active={connectionState !== 'disconnected'} />
+	<BackgroundShader active={connectionState === 'connected'} />
 
 	<div
 		class="app-ui"
@@ -156,7 +213,7 @@
 			}}
 		/>
 
-		<p class="demo-notice sr-only">{t('demo.notice')}</p>
+		<p class="demo-notice sr-only">{runtime.isTauri ? '' : t('demo.notice')}</p>
 
 		{#if $persistenceError}
 			<p role="alert">{t('errors.storage')}</p>

@@ -1,5 +1,7 @@
 <script lang="ts">
-	import { onDestroy } from 'svelte';
+	import { onDestroy, onMount } from 'svelte';
+	import { runtime } from '../../runtime';
+	import { getProcesses } from '../../services/processes';
 	import { createDeferredTask } from '../../utils/deferredTask';
 	import { catalog } from '../../services';
 	import { errorCode } from '../../services/errors';
@@ -29,6 +31,9 @@
 	import chevronIcon from '../../../assets/chevron.svg';
 	import discordIcon from '../../../assets/discord.png';
 	import yandexIcon from '../../../assets/yandex.png';
+	import chromeIcon from '../../../assets/chrome.svg';
+	import telegramIcon from '../../../assets/telegram.svg';
+	import steamIcon from '../../../assets/steam.svg';
 
 	interface Props {
 		onChromeChange?: (mode: 'default' | 'selection' | 'picker') => void;
@@ -98,6 +103,41 @@
 			: $catalogStore.rules,
 	);
 
+	let processIcons = $state<Record<string, string>>({});
+	onMount(() => {
+		if (runtime.isTauri) {
+			void getProcesses().then((items) => {
+				const map: Record<string, string> = {};
+				for (const item of items) {
+					if (item.icon) {
+						map[item.name.toLowerCase()] = item.icon;
+					}
+				}
+				processIcons = map;
+			});
+		}
+	});
+
+	function formatRuleDisplayName(name: string): string {
+		if (name.includes('\\') || name.includes('/')) {
+			const parts = name.split(/[\\/]/);
+			return parts[parts.length - 1] || name;
+		}
+		return name;
+	}
+
+	function getRuleIcon(rule: Rule): string | null {
+		if (rule.isDomain) return null;
+		const baseName = formatRuleDisplayName(rule.name).toLowerCase();
+		if (baseName.includes('chrome')) return chromeIcon;
+		if (baseName.includes('discord')) return discordIcon;
+		if (baseName.includes('yandex')) return yandexIcon;
+		if (baseName.includes('telegram')) return telegramIcon;
+		if (baseName.includes('steam')) return steamIcon;
+		if (processIcons[baseName]) return processIcons[baseName];
+		return null;
+	}
+
 	$effect(() => {
 		onChromeChange?.(
 			selectingRule || editing
@@ -120,11 +160,11 @@
 		}
 	}
 
-	function pickServer(server: { id: string }) {
+	async function pickServer(server: { id: string }) {
 		if (!selectingRule) return;
 		pendingServerId = server.id;
 		try {
-			catalog.saveRule({ ...selectingRule, serverId: server.id });
+			await catalog.saveRule({ ...selectingRule, serverId: server.id });
 			selectingRule = null;
 			pendingServerId = '';
 			error = '';
@@ -144,22 +184,22 @@
 			id: crypto.randomUUID(),
 			name: '',
 			isDomain: true,
-			serverId: $catalogStore.selectedServerId ?? '',
+			serverId: $catalogStore.selectedServerId || 'subscription',
 			enabled: true,
 		};
 	}
 
-	function toggle(rule: Rule) {
+	async function toggle(rule: Rule) {
 		try {
-			catalog.saveRule({ ...rule, enabled: !rule.enabled });
+			await catalog.saveRule({ ...rule, enabled: !rule.enabled });
 		} catch (e) {
 			error = t('errors.' + errorCode(e));
 		}
 	}
 
-	function remove() {
+	async function remove() {
 		try {
-			catalog.removeRules(new Set(selected));
+			await catalog.removeRules(new Set(selected));
 			selected = [];
 			deleting = false;
 			error = '';
@@ -233,12 +273,12 @@
 			rule={editing}
 			server={currentServer}
 			subscriptionName={activeSub?.name}
-			onSave={(updated: Rule | Rule[]) => {
+			onSave={async (updated: Rule | Rule[]) => {
 				try {
 					if (Array.isArray(updated)) {
-						catalog.saveRules(updated);
+						await catalog.saveRules(updated);
 					} else {
-						catalog.saveRule(updated);
+						await catalog.saveRule(updated);
 					}
 					editing = null;
 					choosingProcess = false;
@@ -445,22 +485,27 @@
 						: server
 							? t('servers.countries.' + server.countryCode)
 							: '—'}
+				{@const ruleIcon = getRuleIcon(rule)}
 				<article class="rule-row">
 					<div class="rule-left">
 						<div
 							class="app-icon-wrapper"
-							class:domain-icon={!/^(discord|yandex)\.exe$/i.test(rule.name)}
+							class:domain-icon={!ruleIcon}
 						>
-							{#if /^(discord|yandex)\.exe$/i.test(rule.name)}<img
+							{#if ruleIcon}
+								<img
 									class="app-icon"
-									src={/^discord/i.test(rule.name) ? discordIcon : yandexIcon}
+									src={ruleIcon}
 									alt=""
-								/>{:else}<span class="globe-text" aria-hidden="true">
+								/>
+							{:else}
+								<span class="globe-text" aria-hidden="true">
 									<MaterialIcon
 										name={rule.isDomain ? 'public' : 'description'}
 										size={20}
 									/>
-								</span>{/if}
+								</span>
+							{/if}
 						</div>
 						<button
 							class="rule-text"
@@ -470,7 +515,7 @@
 							}}
 							aria-label={t('rules.edit', { name: rule.name })}
 						>
-							<span class="rule-name">{rule.name}</span>
+							<span class="rule-name">{formatRuleDisplayName(rule.name)}</span>
 							<span class="rule-details">{serverName}</span>
 						</button>
 					</div>

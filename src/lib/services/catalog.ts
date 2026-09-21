@@ -2,6 +2,7 @@ import { writable } from 'svelte/store';
 import { ServiceError } from './errors';
 
 export interface Server {
+	name?: string;
 	id: string;
 	subscriptionId: string;
 	countryCode: string;
@@ -35,6 +36,7 @@ export interface Catalog {
 	rules: Rule[];
 	selectedServerId: string | null;
 	selectedSubscriptionId?: string | null;
+	selectedServers?: Record<string, string>;
 	routingMode: 'global' | 'rules';
 }
 
@@ -109,8 +111,7 @@ export function validCatalog(value: unknown): value is Catalog {
 			s &&
 			typeof s.id === 'string' &&
 			subscriptionIds.has(s.subscriptionId) &&
-			/^[a-z]{2}$/.test(s.countryCode) &&
-			s.nameKey === s.countryCode &&
+			typeof s.countryCode === 'string' &&
 			typeof s.protocol === 'string' &&
 			(s.latency === 'timeout' || Number.isFinite(s.latency)),
 	);
@@ -245,10 +246,15 @@ export class CatalogService {
 		if (!server) {
 			throw new ServiceError('invalidServer');
 		}
+		const selectedServers = {
+			...(this.current.selectedServers ?? {}),
+			[server.subscriptionId]: id,
+		};
 		this.commit({
 			...this.current,
 			selectedServerId: id,
 			selectedSubscriptionId: server.subscriptionId,
+			selectedServers,
 		});
 	}
 
@@ -256,15 +262,25 @@ export class CatalogService {
 		if (!this.current.subscriptions.some((s) => s.id === id)) {
 			throw new ServiceError('invalidSubscription');
 		}
-		const matchingServer = this.current.servers.find(
-			(s) => s.subscriptionId === id,
-		);
+		const rememberedId = this.current.selectedServers?.[id];
+		const rememberedServer = rememberedId
+			? this.current.servers.find(
+					(s) => s.subscriptionId === id && s.id === rememberedId,
+				)
+			: undefined;
+		const matchingServer =
+			rememberedServer ??
+			this.current.servers.find((s) => s.subscriptionId === id);
+		const selectedServers = matchingServer
+			? { ...(this.current.selectedServers ?? {}), [id]: matchingServer.id }
+			: this.current.selectedServers;
 		this.commit({
 			...this.current,
 			selectedSubscriptionId: id,
 			selectedServerId: matchingServer
 				? matchingServer.id
 				: this.current.selectedServerId,
+			selectedServers,
 		});
 	}
 

@@ -1,10 +1,10 @@
 [package]
 name = "app"
 version = "0.1.0"
-description = "Lumen desktop interface and simulated connection backend"
+description = "Lumen desktop VPN client"
 license = "Apache-2.0"
 edition = "2021"
-rust-version = "1.77.2"
+rust-version = "1.92"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
@@ -21,3 +21,20 @@ serde = { version = "1.0", features = ["derive"] }
 log = "0.4"
 tauri = { version = "2.11.3", features = ["tray-icon"] }
 tauri-plugin-log = "2"
+tokio = { version = "=1.48.0", features = ["process", "io-util", "net", "time", "sync", "fs", "rt-multi-thread", "macros"] }
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json", "socks", "stream"] }
+url = "2"
+base64 = "0.22"
+sha2 = "0.10"
+uuid = { version = "1", features = ["v4", "serde"] }
+percent-encoding = "2"
+serde-saphyr = { version = "1.3", default-features = false, features = ["deserialize"] }
+tempfile = "3"
+fs2 = "0.4"
+zip = { version = "6", default-features = false, features = ["deflate"] }
+tauri-plugin-updater = "2"
+
+[target.'cfg(windows)'.dependencies]
+png = "0.17"
+winreg = "0.55"
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Security_Cryptography", "Win32_System_Memory", "Win32_System_Threading", "Win32_System_JobObjects", "Win32_System_Diagnostics_ToolHelp", "Win32_Security", "Win32_System_Pipes", "Win32_UI_Shell", "Win32_System_Registry", "Win32_System_Com", "Win32_Networking_WinInet", "Win32_NetworkManagement_IpHelper", "Win32_NetworkManagement_Ndis", "Win32_Networking_WinSock", "Win32_Security_Authorization", "Win32_Storage_FileSystem", "Win32_System_SystemInformation", "Win32_System_Console", "Win32_Graphics_Gdi", "Win32_UI_WindowsAndMessaging"] }

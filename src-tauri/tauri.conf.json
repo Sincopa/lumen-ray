@@ -3,6 +3,9 @@
   "productName": "Lumen",
   "version": "0.1.0",
   "identifier": "app.lumen.desktop",
+  "plugins": {
+    "updater": { "pubkey": "", "endpoints": [], "requireSignedVersion": true }
+  },
   "build": {
     "frontendDist": "../dist",
     "devUrl": "http://localhost:5173",
@@ -30,8 +33,9 @@
     }
   },
   "bundle": {
+    "resources": ["resources/core/*"],
     "active": true,
-    "targets": "all",
+    "targets": ["nsis"],
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
@@ -39,6 +43,12 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ],
+    "windows": {
+      "nsis": {
+        "installerIcon": "icons/icon.ico",
+        "uninstallerIcon": "icons/icon.ico"
+      }
+    },
     "android": {
       "debugApplicationIdSuffix": ".debug"
     }

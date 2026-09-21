@@ -64,10 +64,29 @@
 			]),
 		),
 	);
+	const activeSubscriptionId = $derived(
+		$catalogStore.selectedSubscriptionId ??
+			$catalogStore.servers.find(
+				(server) =>
+					server.id === (selectedId || $catalogStore.selectedServerId),
+			)?.subscriptionId ??
+			$catalogStore.subscriptions[0]?.id,
+	);
+	let activeSubscription = $derived(
+		subscriptionsById.get(activeSubscriptionId ?? '') ??
+			$catalogStore.subscriptions[0],
+	);
+	const subscriptionServers = $derived(
+		activeSubscriptionId
+			? $catalogStore.servers.filter(
+					(server) => server.subscriptionId === activeSubscriptionId,
+				)
+			: $catalogStore.servers,
+	);
 	const searchableServers = $derived(
-		$catalogStore.servers.map((server) => ({
+		subscriptionServers.map((server) => ({
 			server,
-			text: `${t('servers.countries.' + server.countryCode)} ${server.protocol} ${subscriptionsById.get(server.subscriptionId)?.name ?? ''}`.toLowerCase(),
+			text: `${server.name ?? t('servers.countries.' + server.countryCode)} ${server.protocol} ${subscriptionsById.get(server.subscriptionId)?.name ?? ''}`.toLowerCase(),
 		})),
 	);
 	const normalizedQuery = $derived(query.toLowerCase());
@@ -76,18 +95,7 @@
 			? searchableServers
 					.filter((entry) => entry.text.includes(normalizedQuery))
 					.map((entry) => entry.server)
-			: $catalogStore.servers,
-	);
-	const activeSubscriptionId = $derived(
-		$catalogStore.selectedSubscriptionId ??
-			$catalogStore.servers.find(
-				(server) =>
-					server.id === (selectedId || $catalogStore.selectedServerId),
-			)?.subscriptionId,
-	);
-	let activeSubscription = $derived(
-		subscriptionsById.get(activeSubscriptionId ?? '') ??
-			$catalogStore.subscriptions[0],
+			: subscriptionServers,
 	);
 
 	async function refresh() {
@@ -95,8 +103,10 @@
 		busy = true;
 		error = '';
 		try {
-			await Promise.all(
-				$catalogStore.servers.map((server) => catalog.pingServer(server.id)),
+			await Promise.allSettled(
+				subscriptionServers.map((server) =>
+					catalog.pingServer(server.id).catch(() => 'timeout'),
+				),
 			);
 		} catch (e) {
 			error = t('errors.' + errorCode(e));
@@ -142,11 +152,11 @@
 		}, 240);
 	}
 
-	function handleSaveRename() {
+	async function handleSaveRename() {
 		const trimmed = editSubName.trim();
 		if (!trimmed || !activeSubscription) return;
 		try {
-			catalog.renameSubscription(activeSubscription.id, trimmed);
+			await catalog.renameSubscription(activeSubscription.id, trimmed);
 			handleCloseRename();
 		} catch (e) {
 			error = t('errors.' + errorCode(e));
@@ -157,7 +167,7 @@
 		onSelect?.({
 			id: server.id,
 			countryCode: server.countryCode,
-			name: t('servers.countries.' + server.countryCode),
+			name: server.name ?? t('servers.countries.' + server.countryCode),
 		});
 	}
 
@@ -379,20 +389,24 @@
 				<CountryFlag countryCode={server.countryCode} size={32} />
 				<span class="server-text">
 					<span class="protocol">{server.protocol}</span>
-					<span>{t('servers.countries.' + server.countryCode)}</span>
+					<span>
+						{server.name ?? t('servers.countries.' + server.countryCode)}
+					</span>
 				</span>
 				<span class="ping">
 					{#if server.id === selectedId && !busy}
 						<StatusDot size={8} />
 					{/if}
-					{#if busy}
+					{#if busy && server.latency === 'timeout'}
 						<span class="ping-spinner" aria-label="Loading ping"></span>
 					{:else if typeof server.latency === 'number'}
 						<NumberFlow value={server.latency} /> ms
 					{:else if server.latency === 'timeout'}
 						{t('servers.timeout')}
-					{:else}
+					{:else if server.latency}
 						{server.latency} ms
+					{:else}
+						—
 					{/if}
 				</span>
 			</button>
