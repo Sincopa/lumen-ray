@@ -1,10 +1,8 @@
-use crate::{
-    app::state::AppState,
-    domain::errors::Result,
-};
+use crate::{app::state::AppState, domain::errors::Result};
 use std::time::{Duration, Instant};
 
 static PROBES: tokio::sync::Semaphore = tokio::sync::Semaphore::const_new(4);
+static PROBE_STARTUP: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
 pub async fn ping(state: &AppState, id: String) -> Result<serde_json::Value> {
     let _permit = match PROBES.acquire().await {
@@ -13,6 +11,10 @@ pub async fn ping(state: &AppState, id: String) -> Result<serde_json::Value> {
     };
 
     let repo = state.repository.read().await.clone();
+    // Port discovery releases its temporary listeners before Xray binds them.
+    // Serialize only that short startup window so concurrent probes cannot be
+    // assigned the same just-released Windows ephemeral ports.
+    let startup = PROBE_STARTUP.lock().await;
     let (proxy, metrics) = match super::vpn_service::ports() {
         Ok(p) => p,
         Err(_) => return Ok(serde_json::json!("timeout")),
@@ -50,6 +52,7 @@ pub async fn ping(state: &AppState, id: String) -> Result<serde_json::Value> {
         }
         tokio::time::sleep(Duration::from_millis(30)).await;
     }
+    drop(startup);
 
     let ping_url = repo.settings.ping_url.trim().to_string();
     let result = if ready {

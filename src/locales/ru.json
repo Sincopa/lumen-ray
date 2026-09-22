@@ -139,7 +139,6 @@
 		"updateAvailable": "Доступно обновление {version}",
 		"downloadUpdate": "Скачать {version}",
 		"downloadingUpdate": "Загрузка...",
-		"updatesUnavailable": "Настройте канал обновлений",
 		"xrayCore": "Ядро Xray",
 		"xrayDesc": "Сетевое ядро не подключено",
 		"mockReady": "Демо",

@@ -99,16 +99,15 @@
 
 	async function refreshAndPingSubscriptions() {
 		try {
+			// Native catalog loading is asynchronous. Waiting for getServers() here
+			// prevents the startup pass from observing the service's empty seed state.
+			const servers = await catalog.getServers();
 			const sub = $catalogStore.subscriptions[0];
-			if (sub) {
-				await catalog.refreshSubscription(sub.id);
-			}
-			const servers = $catalogStore.servers;
-			if (servers.length > 0) {
-				await Promise.allSettled(
-					servers.map((s) => catalog.pingServer(s.id).catch(() => 'timeout')),
-				);
-			}
+			const tasks: Promise<unknown>[] = servers.map((server) =>
+				catalog.pingServer(server.id),
+			);
+			if (sub) tasks.push(catalog.refreshSubscription(sub.id));
+			await Promise.allSettled(tasks);
 		} catch (err) {
 			console.error(
 				'[auto-refresh] Failed to refresh subscription or ping:',

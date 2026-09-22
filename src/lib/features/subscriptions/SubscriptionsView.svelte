@@ -61,12 +61,18 @@
 	let activeMenuSub = $derived(
 		$catalogStore.subscriptions.find((s) => s.id === menu),
 	);
-	async function selectSubscription(id: string) {
+	async function activateSubscription(id: string) {
 		try {
 			await catalog.selectSubscription(id);
-			expanded = expanded === id ? null : id;
 		} catch (cause) {
 			error = t('errors.' + errorCode(cause));
+		}
+	}
+
+	function toggleSubscription(id: string) {
+		expanded = expanded === id ? null : id;
+		if (activeSubId !== id) {
+			void activateSubscription(id);
 		}
 	}
 
@@ -260,7 +266,7 @@
 							<button
 								class="title-group"
 								aria-expanded={expanded === sub.id}
-								onclick={() => selectSubscription(sub.id)}
+								onclick={() => toggleSubscription(sub.id)}
 							>
 								<span class="sub-name">{sub.name}</span>
 								{#if activeSubId === sub.id}
@@ -286,12 +292,17 @@
 									ariaLabel={sub.name}
 									expanded={expanded === sub.id}
 									class="card-chevron"
-									onclick={() => selectSubscription(sub.id)}
+									onclick={() => toggleSubscription(sub.id)}
 								/>
 							</div>
 						{/if}
 					</div>
-					<div class="card-body">
+					<button
+						type="button"
+						class="card-body"
+						aria-expanded={expanded === sub.id}
+						onclick={() => toggleSubscription(sub.id)}
+					>
 						<div class="metrics-row">
 							<div class="metric-item">
 								<span class="metric-label">
@@ -311,7 +322,7 @@
 								{formatUpdatedAgo(sub)}
 							</div>
 						{/if}
-					</div>
+					</button>
 				</article>
 			</div>
 		{:else}<p>{t('subscriptions.empty')}</p>{/each}
@@ -451,6 +462,7 @@
 		transition:
 			background-color 200ms ease,
 			transform 220ms var(--ease-spring);
+		cursor: pointer;
 	}
 	.sub-card:hover,
 	.sub-card.expanded {
@@ -560,6 +572,15 @@
 	.card-body {
 		margin-top: 14px;
 		border-top: none;
+		border-right: 0;
+		border-bottom: 0;
+		border-left: 0;
+		background: transparent;
+		color: inherit;
+		padding: 0;
+		width: 100%;
+		text-align: left;
+		cursor: pointer;
 		display: flex;
 		justify-content: space-between;
 		align-items: flex-end;

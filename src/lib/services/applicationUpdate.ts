@@ -3,16 +3,9 @@ import { writable } from 'svelte/store';
 import { runtime } from '../runtime';
 
 export type ApplicationUpdateStatus =
-	| 'idle'
-	| 'checking'
-	| 'latest'
-	| 'available'
-	| 'downloading'
-	| 'unconfigured'
-	| 'error';
+	'idle' | 'checking' | 'latest' | 'available' | 'downloading' | 'error';
 
 interface NativeApplicationUpdate {
-	configured: boolean;
 	currentVersion: string;
 	version?: string | null;
 }
@@ -48,11 +41,7 @@ function createApplicationUpdateController() {
 		pendingCheck = invoke<NativeApplicationUpdate>('check_application_update')
 			.then((result) => {
 				state.set({
-					status: !result.configured
-						? 'unconfigured'
-						: result.version
-							? 'available'
-							: 'latest',
+					status: result.version ? 'available' : 'latest',
 					currentVersion: result.currentVersion,
 					version: result.version ?? null,
 				});

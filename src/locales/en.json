@@ -139,7 +139,6 @@
 		"updateAvailable": "Update {version} is available",
 		"downloadUpdate": "Download {version}",
 		"downloadingUpdate": "Downloading...",
-		"updatesUnavailable": "Configure the update channel",
 		"xrayCore": "Xray Core",
 		"xrayDesc": "Network backend is not connected",
 		"mockReady": "Demo",

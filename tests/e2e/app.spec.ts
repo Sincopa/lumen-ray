@@ -161,6 +161,13 @@ test('subscription import, sharing, rename, refresh and delete work', async ({
 		.click();
 	const card = page.locator('.sub-card-wrapper').filter({ hasText: 'Test' });
 	await card.locator('.title-group').click();
+	await expect(card.locator('.sub-card')).toHaveClass(/expanded/);
+	await expect(card.locator('.updated-time')).toBeVisible();
+	await card.locator('.card-body').click({ position: { x: 200, y: 20 } });
+	await expect(card.locator('.sub-card')).not.toHaveClass(/expanded/);
+	await expect(card.locator('.updated-time')).toHaveCount(0);
+	await card.locator('.card-chevron').click();
+	await expect(card.locator('.sub-card')).toHaveClass(/expanded/);
 	await card
 		.getByRole('button', { name: ru.common.reload, exact: true })
 		.click();

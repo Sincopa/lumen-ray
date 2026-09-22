@@ -240,8 +240,6 @@
 								<span class="success-text">
 									✓ {t('settings.latestVersionInstalled')}
 								</span>
-							{:else if $applicationUpdateState.status === 'unconfigured'}
-								<span>{t('settings.updatesUnavailable')}</span>
 							{:else if $applicationUpdateState.status === 'error'}
 								<span>{t('common.retry')}</span>
 							{:else}

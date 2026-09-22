@@ -34,13 +34,27 @@ jobs:
         shell: pwsh
         env:
           PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-          PUBLIC_KEY: ${{ vars.TAURI_UPDATER_PUBLIC_KEY }}
+          PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: |
           if ([string]::IsNullOrWhiteSpace($env:PRIVATE_KEY)) {
             throw "Repository secret TAURI_SIGNING_PRIVATE_KEY is missing"
           }
-          if ([string]::IsNullOrWhiteSpace($env:PUBLIC_KEY)) {
-            throw "Repository variable TAURI_UPDATER_PUBLIC_KEY is missing"
+          if ([string]::IsNullOrWhiteSpace($env:PRIVATE_KEY_PASSWORD)) {
+            throw "Repository secret TAURI_SIGNING_PRIVATE_KEY_PASSWORD is missing"
+          }
+
+          $config = Get-Content -Raw src-tauri/tauri.conf.json | ConvertFrom-Json
+          $publicKey = $config.plugins.updater.pubkey
+          if ([string]::IsNullOrWhiteSpace($publicKey)) {
+            throw "plugins.updater.pubkey is missing in src-tauri/tauri.conf.json"
+          }
+          try {
+            $decodedKey = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($publicKey))
+          } catch {
+            throw "plugins.updater.pubkey is not valid base64"
+          }
+          if (-not $decodedKey.StartsWith("untrusted comment: minisign public key:")) {
+            throw "plugins.updater.pubkey does not contain a minisign public key"
           }
 
       - name: Check release version
@@ -73,8 +87,6 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-          LUMEN_UPDATE_PUBLIC_KEY: ${{ vars.TAURI_UPDATER_PUBLIC_KEY }}
-          LUMEN_UPDATE_ENDPOINT: https://github.com/Sincopa/lumen-ray/releases/latest/download/latest.json
         with:
           tagName: v__VERSION__
           releaseName: Lumen v__VERSION__

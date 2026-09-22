@@ -5,20 +5,24 @@ use crate::{
 };
 use std::sync::Arc;
 use tauri_plugin_updater::UpdaterExt;
+
+const DEFAULT_UPDATE_ENDPOINT: &str =
+    "https://github.com/Sincopa/lumen-ray/releases/latest/download/latest.json";
+// Public verification keys are safe to ship with the application. The private signing key
+// remains stored only in GitHub Actions secrets.
+const DEFAULT_UPDATE_PUBLIC_KEY: &str = "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDI4NzdGRUNENEU4QzJBMDgKUldRSUtveE96ZjUzS1BpTnFIR1ozMlNYSDNPcXNlZzFwSXJmeWVjbGh3OEhXcm8xRmMxRlJobEEK";
+
 #[derive(serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ApplicationUpdate {
-    pub configured: bool,
     pub current_version: String,
     pub version: Option<String>,
 }
-fn application_updater(app: &tauri::AppHandle) -> Result<Option<tauri_plugin_updater::Updater>> {
-    let endpoint = option_env!("LUMEN_UPDATE_ENDPOINT")
-        .unwrap_or("https://github.com/Sincopa/lumen-ray/releases/latest/download/latest.json");
-    let Some(key) = option_env!("LUMEN_UPDATE_PUBLIC_KEY").filter(|key| !key.trim().is_empty())
-    else {
-        return Ok(None);
-    };
+fn application_updater(app: &tauri::AppHandle) -> Result<tauri_plugin_updater::Updater> {
+    let endpoint = option_env!("LUMEN_UPDATE_ENDPOINT").unwrap_or(DEFAULT_UPDATE_ENDPOINT);
+    let key = option_env!("LUMEN_UPDATE_PUBLIC_KEY")
+        .filter(|key| !key.trim().is_empty())
+        .unwrap_or(DEFAULT_UPDATE_PUBLIC_KEY);
     let url = url::Url::parse(endpoint)
         .map_err(|_| BackendError::new("UPDATE_FAILED", "Invalid build-time update endpoint"))?;
     if url.scheme() != "https" {
@@ -32,25 +36,17 @@ fn application_updater(app: &tauri::AppHandle) -> Result<Option<tauri_plugin_upd
         .endpoints(vec![url])
         .map_err(|_| BackendError::new("UPDATE_FAILED", "Invalid update endpoint"))?
         .build()
-        .map(Some)
         .map_err(|_| BackendError::new("UPDATE_FAILED", "Could not initialize signed updater"))
 }
 #[tauri::command]
 pub async fn check_application_update(app: tauri::AppHandle) -> Result<ApplicationUpdate> {
     let current_version = app.package_info().version.to_string();
-    let Some(updater) = application_updater(&app)? else {
-        return Ok(ApplicationUpdate {
-            configured: false,
-            current_version,
-            version: None,
-        });
-    };
+    let updater = application_updater(&app)?;
     let update = updater
         .check()
         .await
         .map_err(|_| BackendError::new("UPDATE_FAILED", "Could not check application updates"))?;
     Ok(ApplicationUpdate {
-        configured: true,
         current_version,
         version: update.map(|u| u.version),
     })
@@ -61,12 +57,7 @@ pub async fn install_application_update(
     app: tauri::AppHandle,
 ) -> Result<()> {
     let _guard = state.updates.lock().await;
-    let updater = application_updater(&app)?.ok_or_else(|| {
-        BackendError::new(
-            "UPDATE_NOT_CONFIGURED",
-            "A signed release channel has not been configured",
-        )
-    })?;
+    let updater = application_updater(&app)?;
     if let Some(update) = updater
         .check()
         .await
