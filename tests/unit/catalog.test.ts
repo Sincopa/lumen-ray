@@ -19,6 +19,14 @@ function storage(): StoragePort {
 }
 
 describe('catalog', () => {
+	it('derives a profile name when import name is omitted', async () => {
+		const service = new CatalogService();
+		await service.importSubscription('https://sub.example.com/profile');
+		expect(get(service.state).subscriptions.at(-1)?.name).toBe(
+			'sub.example.com',
+		);
+	});
+
 	it('publishes and persists a batch once, retaining order and the last update per ID', () => {
 		const disk = storage();
 		const write = vi.spyOn(disk, 'setItem');
@@ -171,14 +179,19 @@ describe('catalog', () => {
 		const disk = storage();
 		const service = new CatalogService(disk);
 
-		await service.importSubscription(
-			'https://example.com/private-token',
-			'Test',
-		);
+		const source = 'https://example.com/private-token';
+		await service.importSubscription(source, 'Test');
 
 		expect(JSON.stringify(get(service.state))).not.toContain('private-token');
 		expect(disk.getItem('lumen_catalog_v1')).not.toContain('private-token');
 		expect(get(service.state).subscriptions).toHaveLength(2);
+		const imported = get(service.state).subscriptions.at(-1)!;
+		await expect(service.getSubscriptionSource(imported.id)).resolves.toBe(
+			source,
+		);
+		await expect(
+			new CatalogService(disk).getSubscriptionSource(imported.id),
+		).rejects.toThrow('invalidSubscription');
 	});
 
 	it('removing subscription cleans dangling servers, selection and rules', () => {
@@ -245,5 +258,25 @@ describe('catalog', () => {
 
 		await expect(service.selectServer('demo-de')).rejects.toThrow('storage');
 		expect(get(service.state).selectedServerId).toBe('demo-fi');
+	});
+
+	it('accepts quotes, BOM, hysteria2, multiline keys, and domain links in validateSubscription', () => {
+		expect(() =>
+			validateSubscription('  "https://example.com/sub"  '),
+		).not.toThrow();
+		expect(() =>
+			validateSubscription('\uFEFFhttps://example.com/sub'),
+		).not.toThrow();
+		expect(() =>
+			validateSubscription('sub.example.com/api/token'),
+		).not.toThrow();
+		expect(() =>
+			validateSubscription('hysteria2://pass@example.com:443?sni=example.com'),
+		).not.toThrow();
+		expect(() =>
+			validateSubscription(
+				'vless://00000000-0000-4000-8000-000000000001@1.1.1.1:443?type=tcp\nvless://00000000-0000-4000-8000-000000000002@2.2.2.2:443?type=tcp',
+			),
+		).not.toThrow();
 	});
 });

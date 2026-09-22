@@ -146,12 +146,29 @@ export function validCatalog(value: unknown): value is Catalog {
 }
 
 export function validateSubscription(input: string): void {
-	if (!input.trim() || input.length > 65536) {
+	const sanitized = input
+		.trim()
+		.replace(/^\uFEFF/, '')
+		.replace(/^["'<]|["'>]$/g, '')
+		.trim();
+
+	if (!sanitized || sanitized.length > 65536) {
 		throw new ServiceError('invalidSubscription');
 	}
 
+	const urlCandidate =
+		!sanitized.includes('://') &&
+		!sanitized.startsWith('{') &&
+		!sanitized.startsWith('[') &&
+		!sanitized.includes('proxies:') &&
+		sanitized.includes('.') &&
+		sanitized.includes('/') &&
+		!sanitized.includes(' ')
+			? `https://${sanitized}`
+			: sanitized;
+
 	try {
-		const url = new URL(input.trim());
+		const url = new URL(urlCandidate);
 		if (
 			url.protocol === 'https:' &&
 			url.hostname &&
@@ -161,22 +178,51 @@ export function validateSubscription(input: string): void {
 			return;
 		}
 		if (
-			['vless:', 'vmess:', 'trojan:', 'ss:'].includes(url.protocol) &&
+			['vless:', 'vmess:', 'trojan:', 'ss:', 'hysteria2:', 'hy2:'].includes(
+				url.protocol,
+			) &&
 			url.host
 		) {
 			return;
 		}
 	} catch {
-		/* Try an encoded list of links. */
+		/* Try an encoded list of links or multiline plain keys. */
+	}
+
+	const lines = sanitized
+		.split(/\r?\n/)
+		.map((l) => l.trim())
+		.filter((l) => l.length > 0 && !l.startsWith('#'));
+
+	if (
+		lines.length > 0 &&
+		lines.every((line) =>
+			/^(vless|vmess|trojan|ss|hysteria2|hy2):\/\/\S+$/i.test(line),
+		)
+	) {
+		return;
+	}
+
+	if (sanitized.includes('proxies:')) {
+		return;
 	}
 
 	try {
-		const decoded = atob(input.trim()).trim();
+		const normalized = sanitized.replace(/-/g, '+').replace(/_/g, '/');
+		const padded = normalized.padEnd(
+			normalized.length + ((4 - (normalized.length % 4)) % 4),
+			'=',
+		);
+		const decoded = atob(padded).trim();
 		if (
 			decoded &&
 			decoded
 				.split(/\r?\n/)
-				.every((line) => /^(vless|vmess|trojan|ss):\/\/\S+$/.test(line))
+				.map((l) => l.trim())
+				.filter((l) => l.length > 0 && !l.startsWith('#'))
+				.every((line) =>
+					/^(vless|vmess|trojan|ss|hysteria2|hy2):\/\/\S+$/i.test(line),
+				)
 		) {
 			return;
 		}
@@ -189,6 +235,7 @@ export function validateSubscription(input: string): void {
 
 export class CatalogService {
 	private current: Catalog;
+	private readonly subscriptionSources = new Map<string, string>();
 	private indexedServers: Server[] | undefined;
 	private serverIndex = new Map<string, Server>();
 	readonly state;
@@ -293,9 +340,18 @@ export class CatalogService {
 		return server.latency;
 	}
 
-	async importSubscription(input: string, name: string) {
+	async importSubscription(input: string, name?: string) {
 		validateSubscription(input);
-		if (!name.trim() || name.length > 80) {
+		const resolvedName =
+			name?.trim() ||
+			(() => {
+				try {
+					return new URL(input.trim()).hostname.replace(/^www\./, '');
+				} catch {
+					return 'Subscription';
+				}
+			})();
+		if (!resolvedName || resolvedName.length > 80) {
 			throw new ServiceError('invalidSubscription');
 		}
 
@@ -314,12 +370,13 @@ export class CatalogService {
 			...this.current,
 			subscriptions: [
 				...this.current.subscriptions,
-				{ id, name: name.trim(), updatedAt: Date.now() },
+				{ id, name: resolvedName, updatedAt: Date.now() },
 			],
 			servers: [...this.current.servers, server],
 			selectedSubscriptionId: id,
 			selectedServerId: server.id,
 		});
+		this.subscriptionSources.set(id, input.trim());
 	}
 
 	async refreshSubscription(id: string) {
@@ -333,6 +390,14 @@ export class CatalogService {
 				s.id === id ? { ...s, updatedAt: Date.now() } : s,
 			),
 		});
+	}
+
+	async getSubscriptionSource(id: string) {
+		const source = this.subscriptionSources.get(id);
+		if (!source) {
+			throw new ServiceError('invalidSubscription');
+		}
+		return source;
 	}
 
 	renameSubscription(id: string, name: string) {
@@ -372,6 +437,7 @@ export class CatalogService {
 					? this.current.selectedServerId
 					: (servers[0]?.id ?? null),
 		});
+		this.subscriptionSources.delete(id);
 	}
 
 	setRoutingMode(routingMode: Catalog['routingMode']) {

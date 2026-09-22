@@ -12,13 +12,37 @@ pub fn now() -> u64 {
         .unwrap_or_default()
         .as_millis() as u64
 }
-pub fn snapshot(
-    repo: &Repository,
-    latencies: &std::collections::HashMap<String, Value>,
-) -> Value {
+pub fn snapshot(repo: &Repository, latencies: &std::collections::HashMap<String, Value>) -> Value {
+    let now_seconds = now() / 1000;
     json!({
         "version": 1,
-        "subscriptions": repo.subscriptions,
+        "subscriptions": repo.subscriptions.iter().map(|subscription| {
+            let status = subscription.expire.filter(|expire| *expire > 0).map(|expire| {
+                if expire <= now_seconds { "expired" } else { "active" }
+            });
+            let days_remaining = subscription.expire.filter(|expire| *expire > 0).map(|expire| {
+                expire.saturating_sub(now_seconds) / 86_400
+            });
+            let traffic = subscription.total.map(|total| {
+                if total == 0 {
+                    "∞".to_string()
+                } else {
+                    format_bytes(total.saturating_sub(
+                        subscription.upload.unwrap_or(0).saturating_add(
+                            subscription.download.unwrap_or(0),
+                        ),
+                    ))
+                }
+            });
+            json!({
+                "id": subscription.id,
+                "name": subscription.name,
+                "updatedAt": subscription.updated_at,
+                "status": status,
+                "daysRemaining": days_remaining,
+                "traffic": traffic,
+            })
+        }).collect::<Vec<_>>(),
         "servers": repo.nodes.iter().map(|n| {
             let cc = country(&n.name);
             let lat = latencies.get(&n.id).cloned().unwrap_or(json!("timeout"));
@@ -38,6 +62,23 @@ pub fn snapshot(
         "selectedServers": repo.selected_servers,
         "routingMode": repo.routing_mode
     })
+}
+
+fn format_bytes(bytes: u64) -> String {
+    const UNITS: [&str; 7] = ["B", "KB", "MB", "GB", "TB", "PB", "EB"];
+    let mut value = bytes as f64;
+    let mut unit = 0;
+    while value >= 1024.0 && unit < UNITS.len() - 1 {
+        value /= 1024.0;
+        unit += 1;
+    }
+    if unit == 0 || value >= 100.0 {
+        format!("{value:.0} {}", UNITS[unit])
+    } else if value >= 10.0 {
+        format!("{value:.1} {}", UNITS[unit])
+    } else {
+        format!("{value:.2} {}", UNITS[unit])
+    }
 }
 fn clean_name(name: &str) -> String {
     let s = name.trim();
@@ -64,7 +105,10 @@ fn clean_name(name: &str) -> String {
     let res: String = chars[i..].iter().collect();
     let trimmed = res.trim();
     if trimmed.starts_with("Белые Списки / ") {
-        let without_flags: String = trimmed.chars().filter(|c| !('\u{1f1e6}'..='\u{1f1ff}').contains(c)).collect();
+        let without_flags: String = trimmed
+            .chars()
+            .filter(|c| !('\u{1f1e6}'..='\u{1f1ff}').contains(c))
+            .collect();
         without_flags.trim().to_string()
     } else {
         trimmed.to_string()
@@ -109,7 +153,8 @@ pub async fn mutate(state: &AppState, mutation: Mutation) -> Result<Value> {
                 .ok_or_else(|| BackendError::new("INVALID_SERVER", "Unknown server"))?;
             next.selected_subscription_id = Some(node.subscription_id.clone());
             next.selected_server_id = Some(id.clone());
-            next.selected_servers.insert(node.subscription_id.clone(), id);
+            next.selected_servers
+                .insert(node.subscription_id.clone(), id);
         }
         Mutation::SelectSubscription { id } => {
             if !next.subscriptions.iter().any(|s| s.id == id) {
@@ -117,7 +162,11 @@ pub async fn mutate(state: &AppState, mutation: Mutation) -> Result<Value> {
             }
             next.selected_subscription_id = Some(id.clone());
             let remembered = next.selected_servers.get(&id).and_then(|sid| {
-                if next.nodes.iter().any(|n| n.subscription_id == id && n.id == *sid) {
+                if next
+                    .nodes
+                    .iter()
+                    .any(|n| n.subscription_id == id && n.id == *sid)
+                {
                     Some(sid.clone())
                 } else {
                     None
@@ -190,9 +239,14 @@ pub async fn mutate(state: &AppState, mutation: Mutation) -> Result<Value> {
     Ok(result)
 }
 fn reconcile(repo: &mut Repository) {
-    let sub_ids: std::collections::HashSet<_> = repo.subscriptions.iter().map(|s| s.id.clone()).collect();
+    let sub_ids: std::collections::HashSet<_> =
+        repo.subscriptions.iter().map(|s| s.id.clone()).collect();
     repo.selected_servers.retain(|sub_id, server_id| {
-        sub_ids.contains(sub_id) && repo.nodes.iter().any(|n| n.subscription_id == *sub_id && n.id == *server_id)
+        sub_ids.contains(sub_id)
+            && repo
+                .nodes
+                .iter()
+                .any(|n| n.subscription_id == *sub_id && n.id == *server_id)
     });
 
     if !repo
@@ -213,7 +267,8 @@ fn reconcile(repo: &mut Repository) {
         .find(|n| Some(&n.id) == repo.selected_server_id.as_ref())
         .map(|n| n.subscription_id.clone());
 
-    if let (Some(sub_id), Some(srv_id)) = (&repo.selected_subscription_id, &repo.selected_server_id) {
+    if let (Some(sub_id), Some(srv_id)) = (&repo.selected_subscription_id, &repo.selected_server_id)
+    {
         repo.selected_servers.insert(sub_id.clone(), srv_id.clone());
     }
 }
@@ -225,17 +280,30 @@ pub struct ImportResult {
 pub async fn import(
     state: &AppState,
     input: String,
-    name: String,
+    name: Option<String>,
     refresh_id: Option<String>,
 ) -> Result<ImportResult> {
-    if name.trim().is_empty() || name.len() > 320 {
+    if name.as_ref().is_some_and(|name| name.len() > 320) {
         return Err(BackendError::invalid());
     }
-    let body = crate::subscription::fetcher::fetch(&input).await?;
+    let fetched = crate::subscription::fetcher::fetch_with_metadata(&input).await?;
+    let resolved_name = name
+        .as_deref()
+        .map(str::trim)
+        .filter(|name| !name.is_empty())
+        .map(str::to_owned)
+        .or_else(|| fetched.suggested_name.clone())
+        .or_else(|| {
+            url::Url::parse(input.trim())
+                .ok()
+                .and_then(|url| url.host_str().map(str::to_owned))
+                .map(|host| host.trim_start_matches("www.").to_owned())
+        })
+        .unwrap_or_else(|| "Subscription".into());
     let id = refresh_id
         .clone()
         .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
-    let parsed = crate::subscription::parser::parse(&body, &id)?;
+    let parsed = crate::subscription::parser::parse(&fetched.body, &id)?;
     let _guard = state.mutations.lock().await;
     let mut next = state.repository.read().await.clone();
     if refresh_id.is_some() && !next.sources.contains_key(&id) {
@@ -245,11 +313,22 @@ pub async fn import(
     next.nodes.extend(parsed.nodes);
     if let Some(sub) = next.subscriptions.iter_mut().find(|s| s.id == id) {
         sub.updated_at = now();
+        if let Some(info) = fetched.user_info {
+            sub.upload = info.upload;
+            sub.download = info.download;
+            sub.total = info.total;
+            sub.expire = info.expire;
+        }
     } else {
+        let info = fetched.user_info.unwrap_or_default();
         next.subscriptions.push(Subscription {
             id: id.clone(),
-            name: name.trim().into(),
+            name: resolved_name,
             updated_at: now(),
+            upload: info.upload,
+            download: info.download,
+            total: info.total,
+            expire: info.expire,
         });
     }
     next.sources.insert(id.clone(), input);

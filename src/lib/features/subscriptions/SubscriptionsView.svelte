@@ -7,10 +7,12 @@
 	import { t, i18n } from '../../i18n';
 	import type { Subscription } from '../../services/catalog';
 	import Dialog from '../../components/Dialog.svelte';
+	import ConfirmDialog from '../../components/ConfirmDialog.svelte';
 	import StatusDot from '../../components/StatusDot.svelte';
 	import IconButton from '../../components/IconButton.svelte';
 	import PopupMenu from '../../components/PopupMenu.svelte';
 	import MenuItem from '../../components/MenuItem.svelte';
+	import MaterialIcon from '../../components/MaterialIcon.svelte';
 	import reloadIcon from '../../../assets/reload.svg';
 	import menuIcon from '../../../assets/menu.svg';
 	import pencilIcon from '../../../assets/pencil.svg';
@@ -22,7 +24,11 @@
 	import { formatSubscriptionUpdatedAgo } from '../../utils/time';
 
 	const focusTask = createDeferredTask();
-	onDestroy(focusTask.cancel);
+	let copyResetTimer: ReturnType<typeof setTimeout> | undefined;
+	onDestroy(() => {
+		focusTask.cancel();
+		if (copyResetTimer) clearTimeout(copyResetTimer);
+	});
 
 	const catalogStore = catalog.state;
 	const connectionStore = connection.state;
@@ -36,7 +42,11 @@
 	let menu = $state<string | null>(null);
 	let busy = $state<string | null>(null);
 	let error = $state('');
-	let exported = $state('');
+	let deleteBusy = $state(false);
+	let sharing = $state<Subscription | null>(null);
+	let sharedSource = $state('');
+	let shareError = $state('');
+	let copyState = $state<'idle' | 'copied' | 'failed'>('idle');
 
 	let activeSubId = $derived(
 		$catalogStore.selectedSubscriptionId ??
@@ -127,29 +137,57 @@
 
 	async function remove() {
 		if (!deleting) return;
+		deleteBusy = true;
 		try {
 			await catalog.removeSubscription(deleting.id);
 			deleting = null;
 			error = '';
 		} catch (e) {
 			error = t('errors.' + errorCode(e));
+		} finally {
+			deleteBusy = false;
 		}
 	}
 
-	function exportSub(sub: Subscription) {
-		exported = JSON.stringify(
-			{
-				version: 1,
-				demo: true,
-				name: sub.name,
-				servers: $catalogStore.servers.filter(
-					(s) => s.subscriptionId === sub.id,
-				),
-			},
-			null,
-			2,
-		);
+	async function showSubscriptionSource(sub: Subscription) {
 		menu = null;
+		sharing = sub;
+		sharedSource = '';
+		shareError = '';
+		copyState = 'idle';
+		try {
+			sharedSource = await catalog.getSubscriptionSource(sub.id);
+		} catch (cause) {
+			shareError = t('subscriptions.sourceUnavailable');
+			console.error('[subscription-source] Unable to retrieve source', cause);
+		}
+	}
+
+	async function copySubscriptionSource() {
+		if (!sharedSource) return;
+		copyState = 'idle';
+		try {
+			if (navigator.clipboard?.writeText) {
+				await navigator.clipboard.writeText(sharedSource);
+			} else {
+				const textarea = document.createElement('textarea');
+				textarea.value = sharedSource;
+				textarea.style.position = 'fixed';
+				textarea.style.opacity = '0';
+				document.body.appendChild(textarea);
+				textarea.select();
+				const copied = document.execCommand('copy');
+				textarea.remove();
+				if (!copied) throw new Error('Clipboard unavailable');
+			}
+			copyState = 'copied';
+			if (copyResetTimer) clearTimeout(copyResetTimer);
+			copyResetTimer = setTimeout(() => {
+				copyState = 'idle';
+			}, 1800);
+		} catch {
+			copyState = 'failed';
+		}
 	}
 </script>
 
@@ -253,27 +291,27 @@
 							</div>
 						{/if}
 					</div>
-					{#if expanded === sub.id}
-						<div class="card-body" transition:slide={{ duration: 240 }}>
-							<div class="metrics-row">
-								<div class="metric-item">
-									<span class="metric-label">
-										{t('subscriptions.daysLabel')}
-									</span>
-									<span class="metric-val">{sub.daysRemaining ?? '—'}</span>
-								</div>
-								<div class="metric-item">
-									<span class="metric-label">
-										{t('subscriptions.trafficLabel')}
-									</span>
-									<span class="metric-val">{sub.traffic ?? '—'}</span>
-								</div>
+					<div class="card-body">
+						<div class="metrics-row">
+							<div class="metric-item">
+								<span class="metric-label">
+									{t('subscriptions.daysLabel')}
+								</span>
+								<span class="metric-val">{sub.daysRemaining ?? '—'}</span>
 							</div>
-							<div class="updated-time">
-								{formatUpdatedAgo(sub)}
+							<div class="metric-item">
+								<span class="metric-label">
+									{t('subscriptions.trafficLabel')}
+								</span>
+								<span class="metric-val">{sub.traffic ?? '—'}</span>
 							</div>
 						</div>
-					{/if}
+						{#if expanded === sub.id}
+							<div class="updated-time" transition:slide={{ duration: 220 }}>
+								{formatUpdatedAgo(sub)}
+							</div>
+						{/if}
+					</div>
 				</article>
 			</div>
 		{:else}<p>{t('subscriptions.empty')}</p>{/each}
@@ -290,9 +328,9 @@
 			/>
 			<MenuItem
 				icon={shareIcon}
-				label={t('common.export')}
+				label={t('common.share')}
 				onclick={() => {
-					if (activeMenuSub) exportSub(activeMenuSub);
+					if (activeMenuSub) void showSubscriptionSource(activeMenuSub);
 				}}
 			/>
 			<MenuItem
@@ -311,23 +349,61 @@
 </section>
 
 {#if deleting}
-	<Dialog title={t('common.delete')} onClose={() => (deleting = null)}>
-		<p>{t('subscriptions.deleteConfirm', { name: deleting.name })}</p>
-		{#if error}
-			<p role="alert">{error}</p>
-		{/if}
-		<button class="danger" onclick={remove}>{t('common.delete')}</button>
-	</Dialog>
+	<ConfirmDialog
+		title={t('common.areYouSure')}
+		description={t('subscriptions.deleteConfirm', { name: deleting.name })}
+		cancelLabel={t('common.cancel')}
+		confirmLabel={t('common.continue')}
+		onCancel={() => (deleting = null)}
+		onConfirm={remove}
+		busy={deleteBusy}
+	/>
 {/if}
 
-{#if exported}
-	<Dialog title={t('common.export')} onClose={() => (exported = '')}>
-		<p>{t('demo.export')}</p>
-		<textarea
-			readonly
-			value={exported}
-			aria-label={t('common.export')}
-			rows="10"></textarea>
+{#if sharing}
+	<Dialog
+		title={t('subscriptions.shareTitle', { name: sharing.name })}
+		onClose={() => (sharing = null)}
+		variant="immersive"
+	>
+		<div class="share-content">
+			<p class="share-hint">{t('subscriptions.shareHint')}</p>
+			{#if sharedSource}
+				<div class="source-field">
+					<textarea
+						readonly
+						value={sharedSource}
+						aria-label={t('subscriptions.source')}
+						rows="3"></textarea>
+					<button
+						class="copy-icon-button"
+						class:copied={copyState === 'copied'}
+						type="button"
+						onclick={copySubscriptionSource}
+						aria-label={copyState === 'copied'
+							? t('common.copied')
+							: t('common.copy')}
+						title={copyState === 'copied'
+							? t('common.copied')
+							: t('common.copy')}
+					>
+						<span class="copy-icon">
+							<MaterialIcon
+								name={copyState === 'copied' ? 'check' : 'content_copy'}
+								size={20}
+							/>
+						</span>
+					</button>
+				</div>
+				{#if copyState === 'failed'}
+					<p class="copy-error" role="alert">{t('subscriptions.copyFailed')}</p>
+				{/if}
+			{:else if shareError}
+				<p class="share-error" role="alert">{shareError}</p>
+			{:else}
+				<p class="share-loading">{t('common.loading')}</p>
+			{/if}
+		</div>
 	</Dialog>
 {/if}
 
@@ -371,6 +447,10 @@
 		padding: 18px 22px;
 		display: flex;
 		flex-direction: column;
+		min-height: 108px;
+		transition:
+			background-color 200ms ease,
+			transform 220ms var(--ease-spring);
 	}
 	.sub-card:hover,
 	.sub-card.expanded {
@@ -478,8 +558,7 @@
 		transform: rotate(180deg);
 	}
 	.card-body {
-		margin-top: 12px;
-		padding-top: 11px;
+		margin-top: 14px;
 		border-top: none;
 		display: flex;
 		justify-content: space-between;
@@ -509,9 +588,113 @@
 		max-width: 50%;
 		text-align: right;
 	}
+	.share-content {
+		display: flex;
+		flex-direction: column;
+		align-items: center;
+		gap: 24px;
+	}
+	.share-hint,
+	.share-loading {
+		margin: 0;
+		color: rgba(255, 255, 255, 0.75);
+		font-size: 14px;
+		line-height: 1.4;
+		text-align: center;
+	}
+	.source-field {
+		position: relative;
+		width: 100%;
+		min-height: 96px;
+		border-radius: 24px;
+		background: rgba(255, 255, 255, 0.15);
+		overflow: hidden;
+		transition: background-color 180ms ease;
+	}
+	.source-field textarea {
+		width: 100%;
+		height: 96px;
+		min-height: 96px;
+		resize: none;
+		border: 0;
+		border-radius: 24px;
+		background: transparent;
+		padding: 18px 68px 18px 18px;
+		color: rgba(255, 255, 255, 0.9);
+		font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+		font-size: 11px;
+		line-height: 1.45;
+		word-break: break-all;
+		outline: none;
+	}
+	.copy-icon-button {
+		position: absolute;
+		right: 12px;
+		top: 50%;
+		width: 44px;
+		height: 44px;
+		min-height: 44px;
+		display: grid;
+		place-items: center;
+		transform: translateY(-50%);
+		border: 0;
+		border-radius: 50%;
+		background: #fff;
+		color: rgba(0, 0, 0, 0.82);
+		padding: 0;
+		box-shadow: 0 8px 24px rgba(0, 0, 0, 0.22);
+		transition:
+			transform 180ms var(--ease-spring),
+			background-color 220ms ease,
+			color 220ms ease;
+	}
+	.copy-icon-button:hover {
+		background: #f0f0f0;
+		transform: translateY(-50%) scale(1.06);
+	}
+	.copy-icon-button:active {
+		transform: translateY(-50%) scale(0.92);
+	}
+	.copy-icon-button.copied {
+		background: var(--color-success);
+		color: #10210d;
+	}
+	.copy-icon {
+		display: grid;
+		place-items: center;
+	}
+	.copy-icon-button.copied .copy-icon {
+		animation: copy-confirm 420ms var(--ease-spring);
+	}
+	@keyframes copy-confirm {
+		0% {
+			transform: scale(0.55) rotate(-18deg);
+			opacity: 0;
+		}
+		55% {
+			transform: scale(1.18) rotate(3deg);
+			opacity: 1;
+		}
+		100% {
+			transform: scale(1) rotate(0);
+			opacity: 1;
+		}
+	}
+	.copy-error,
+	.share-error {
+		margin: 0;
+		border-radius: 14px;
+		background: rgba(243, 57, 57, 0.12);
+		padding: 10px 12px;
+		font-size: 12px;
+		line-height: 1.4;
+	}
 	@media (prefers-reduced-motion: reduce) {
 		:global(.card-chevron) {
 			transition: none;
+		}
+		.copy-icon-button.copied .copy-icon {
+			animation: none;
 		}
 	}
 </style>

@@ -40,14 +40,15 @@ Port 5173 is strict to avoid displaying a different project in the native window
 - `domain`: validated nodes and typed protocol/transport/security data.
 - `xray`: deterministic configuration, bundled hash verification and staged updater.
 - `services`: catalog transactions, lifecycle, concurrency-limited HTTPS latency probes,
-  real public IP and Xray traffic counters.
+  background public-IP detection and Xray traffic counters.
 - `platform`: Windows process enumeration, DPAPI integration, proxy journal, TUN helper
   and route inspection. Other operating systems are not shipped or runtime-tested.
 
 ### Lifecycle and Windows networking
 
-Each connection is generated and checked by `xray run -test` before replacing a working
-session. Xray receives configuration over stdin. One connection operation owns the
+Each connection is generated and passed directly to the managed Xray process over stdin;
+startup failure is detected before the connection is published. Separate `xray run -test`
+validation remains in the core-update safety path. One connection operation owns the
 session; temporary latency probes have separate ports, Job Objects and a four-probe
 limit. The backend emits state/statistics events, detects process exits and rejects
 common competing-VPN routes before reporting TUN Connected.
@@ -103,12 +104,11 @@ files are staged and validated, and activation stores current/previous version p
 A failed reconnect restores the previous core. An updated core requires fresh official
 metadata on startup/helper launch; offline startup falls back to the verified bundled core.
 
-Application updates use the standard Tauri signature verifier. **No release channel
-or signing key is configured yet**, as requested. Checks report `configured: false`.
-To prepare a future signed release, create signing keys outside this repository with
-Tauri's signer and run `scripts/build-signed-release.ps1` with an HTTPS endpoint and
-public/private key file paths. Supply `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` separately
-if needed. The script builds signed updater artifacts; it does not publish them.
+Application updates use the standard Tauri signature verifier and the latest signed
+GitHub Release. `.github/workflows/release.yml` builds the Windows installer, updater
+artifact and `latest.json` when a `v*` tag is pushed. The private signing key stays in
+GitHub Actions Secrets; the matching public key is compiled into release builds.
+See [RELEASING.md](RELEASING.md) for the one-time repository setup and release command.
 See [SECURITY.md](SECURITY.md) for trust boundaries and remaining limitations.
 
 ## Verification

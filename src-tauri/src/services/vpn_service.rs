@@ -167,7 +167,6 @@ async fn connect_session(
     let bytes = serde_json::to_vec(&config)
         .map_err(|_| BackendError::new("INVALID_CONFIG", "Could not serialize Xray config"))?;
     let core = state.core.read().await.clone();
-    validate(&core, &bytes).await?;
     stop(session).await?;
     publish(
         state,
@@ -204,7 +203,7 @@ async fn connect_session(
         }
     }
     match result {
-        Ok(ip) => {
+        Ok(()) => {
             let node = repo
                 .nodes
                 .iter()
@@ -224,8 +223,8 @@ async fn connect_session(
                 Snapshot {
                     status: "connected".into(),
                     info: Some(ConnectionInfo {
-                        server_id: id,
-                        ip,
+                        server_id: id.clone(),
+                        ip: String::new(),
                         protocol: protocol.into(),
                         connected_at: super::catalog_service::now(),
                         demo: false,
@@ -234,6 +233,7 @@ async fn connect_session(
                 },
             )
             .await;
+            refresh_public_ip(state.clone(), app.clone(), id, proxy_port);
             Ok(())
         }
         Err(error) => {
@@ -260,7 +260,7 @@ async fn start_tunnel(
     proxy_port: u16,
     metrics_port: u16,
     core_version: String,
-) -> Result<String> {
+) -> Result<()> {
     repository.sources.clear();
     #[cfg(windows)]
     {
@@ -286,9 +286,9 @@ async fn start_tunnel(
                 .is_ok()
             {
                 crate::platform::network::verify_tunnel_routes()?;
-                return public_ip(proxy_port).await;
+                return Ok(());
             }
-            tokio::time::sleep(Duration::from_millis(100)).await;
+            tokio::time::sleep(Duration::from_millis(25)).await;
         }
     }
     Err(BackendError::new("TUN_FAILED", "Tunnel was not ready"))
@@ -299,7 +299,7 @@ pub(crate) async fn start(
     bytes: &[u8],
     proxy_port: u16,
     metrics_port: u16,
-) -> Result<String> {
+) -> Result<()> {
     #[cfg(windows)]
     {
         session.child = Some(crate::platform::process::CoreProcess::spawn(core, bytes).await?);
@@ -330,15 +330,38 @@ pub(crate) async fn start(
             .await
             .is_ok()
         {
-            return public_ip(proxy_port).await;
+            return Ok(());
         }
-        tokio::time::sleep(Duration::from_millis(100)).await;
+        tokio::time::sleep(Duration::from_millis(25)).await;
     }
     Err(BackendError::new(
         "CORE_START_FAILED",
         "Xray did not become ready",
     ))
 }
+
+fn refresh_public_ip(
+    state: Arc<AppState>,
+    app: tauri::AppHandle,
+    server_id: String,
+    proxy_port: u16,
+) {
+    tauri::async_runtime::spawn(async move {
+        let Ok(ip) = public_ip(proxy_port).await else {
+            return;
+        };
+        let mut snapshot = state.snapshot.read().await.clone();
+        let Some(info) = snapshot.info.as_mut() else {
+            return;
+        };
+        if snapshot.status != "connected" || info.server_id != server_id {
+            return;
+        }
+        info.ip = ip;
+        publish(&state, &app, snapshot).await;
+    });
+}
+
 pub async fn public_ip(proxy_port: u16) -> Result<String> {
     let error = || {
         BackendError::new(

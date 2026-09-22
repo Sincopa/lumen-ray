@@ -46,7 +46,9 @@ pub async fn run() -> Result<()> {
         std::env::var_os("LUMEN_TEST_SUBSCRIPTION_FILE").ok_or_else(error)?,
     )
     .map_err(|_| error())?;
-    let body = crate::subscription::fetcher::fetch(source.trim()).await?;
+    let body = crate::subscription::fetcher::fetch_with_metadata(source.trim())
+        .await?
+        .body;
     let parsed = crate::subscription::parser::parse(&body, "native-smoke")?;
     let node = parsed.nodes.first().ok_or_else(error)?;
     let id = node.id.clone();

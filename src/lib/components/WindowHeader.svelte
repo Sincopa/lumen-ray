@@ -6,6 +6,7 @@
 	import maximizeIcon from '../../assets/maximaze.svg';
 	import crossIcon from '../../assets/cross.svg';
 	import settingsIcon from '../../assets/settings.svg';
+	import bellIcon from '../../assets/bell-ring.svg';
 
 	interface Props {
 		title?: string;
@@ -13,6 +14,8 @@
 		darkSurface?: boolean;
 		isSettingsOpen?: boolean;
 		onOpenSettings?: () => void;
+		updateVersion?: string | null;
+		onOpenUpdate?: () => void;
 	}
 
 	let {
@@ -21,6 +24,8 @@
 		darkSurface = false,
 		isSettingsOpen = false,
 		onOpenSettings,
+		updateVersion = null,
+		onOpenUpdate,
 	}: Props = $props();
 
 	let failure = $state(false);
@@ -43,9 +48,21 @@
 	<div class="logo">{title}</div>
 
 	<div class="header-right">
+		{#if updateVersion && onOpenUpdate}
+			<button
+				class="header-circle-btn update-btn"
+				onclick={onOpenUpdate}
+				aria-label={t('settings.updateAvailable', { version: updateVersion })}
+				title={t('settings.updateAvailable', { version: updateVersion })}
+			>
+				<img src={bellIcon} alt="" width="24" height="24" />
+				<span class="update-dot" aria-hidden="true"></span>
+			</button>
+		{/if}
+
 		{#if onOpenSettings}
 			<button
-				class="settings-btn"
+				class="header-circle-btn settings-btn"
 				class:active={isSettingsOpen}
 				onclick={onOpenSettings}
 				aria-label={t('settings.title')}
@@ -53,8 +70,8 @@
 				<img
 					src={settingsIcon}
 					alt=""
-					width="17"
-					height="17"
+					width="24"
+					height="24"
 					class="settings-icon"
 				/>
 			</button>
@@ -96,6 +113,8 @@
 
 <style>
 	.window-header {
+		position: relative;
+		z-index: 90;
 		display: flex;
 		justify-content: space-between;
 		align-items: center;
@@ -125,11 +144,11 @@
 		gap: 8px;
 	}
 
-	.settings-btn {
-		width: 32px;
-		height: 32px;
-		min-width: 32px;
-		min-height: 32px;
+	.header-circle-btn {
+		width: 40px;
+		height: 40px;
+		min-width: 40px;
+		min-height: 40px;
 		border-radius: 50%;
 		background: rgba(0, 0, 0, 0.25);
 		border: none;
@@ -145,17 +164,49 @@
 			transform 0.2s cubic-bezier(0.34, 1.56, 0.64, 1);
 	}
 
-	.settings-btn:hover {
+	.header-circle-btn:hover {
 		background: rgba(255, 255, 255, 0.15);
 		transform: scale(1.08);
 	}
 
-	.settings-btn:active {
+	.header-circle-btn:active {
 		transform: scale(0.92);
 	}
 
 	.settings-btn.active {
 		background: rgba(255, 255, 255, 0.25);
+	}
+
+	.update-btn {
+		position: relative;
+		animation: bell-arrival 420ms var(--ease-spring);
+	}
+
+	.update-btn img {
+		filter: brightness(0) invert(1);
+		opacity: 0.82;
+	}
+
+	.update-dot {
+		position: absolute;
+		top: 5px;
+		right: 5px;
+		width: 8px;
+		height: 8px;
+		border-radius: 50%;
+		background: var(--color-accent);
+		box-shadow: 0 0 0 2px rgba(20, 20, 20, 0.82);
+	}
+
+	@keyframes bell-arrival {
+		0% {
+			transform: scale(0.65) rotate(-14deg);
+			opacity: 0;
+		}
+		100% {
+			transform: scale(1) rotate(0);
+			opacity: 1;
+		}
 	}
 
 	.settings-icon {
@@ -218,5 +269,11 @@
 
 	.control-btn.close:hover {
 		background: rgba(243, 57, 57, 0.6);
+	}
+
+	@media (prefers-reduced-motion: reduce) {
+		.update-btn {
+			animation: none;
+		}
 	}
 </style>

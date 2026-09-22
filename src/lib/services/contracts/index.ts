@@ -33,6 +33,7 @@ export type SubscriptionService = Pick<
 	CatalogService,
 	| 'importSubscription'
 	| 'refreshSubscription'
+	| 'getSubscriptionSource'
 	| 'renameSubscription'
 	| 'removeSubscription'
 >;

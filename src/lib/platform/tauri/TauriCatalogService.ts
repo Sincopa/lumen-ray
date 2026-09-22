@@ -76,7 +76,7 @@ export class TauriCatalogService {
 	async removeRules(ids: Set<string>) {
 		await this.mutate({ kind: 'removeRules', ids: [...ids] });
 	}
-	async importSubscription(input: string, name: string) {
+	async importSubscription(input: string, name?: string) {
 		await this.ready;
 		const result = await invoke<{ catalog: Catalog }>('import_subscription', {
 			input,
@@ -90,6 +90,10 @@ export class TauriCatalogService {
 			id,
 		});
 		this.publish(result.catalog);
+	}
+	async getSubscriptionSource(id: string) {
+		await this.ready;
+		return invoke<string>('get_subscription_source', { id });
 	}
 	async pingServer(id: string): Promise<number | 'timeout'> {
 		await this.ready;

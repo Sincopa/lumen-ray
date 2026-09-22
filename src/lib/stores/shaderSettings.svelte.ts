@@ -71,7 +71,7 @@ class ShaderSettingsManager {
 	selectedPreset = $state<string>('aurora');
 	/**
 	 * UI scale multiplier (0.75 – 1.5).
-	 * In Tauri: resizes the native window proportionally (390×s by 845×s).
+	 * In Tauri: resizes the native window proportionally from the configured base size.
 	 * In browser dev-mode: applies CSS zoom on the root element.
 	 */
 	uiScale = $state<number>(1.0);

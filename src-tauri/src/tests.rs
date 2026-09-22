@@ -155,6 +155,36 @@ async fn bundled_core_validation() {
     }
 }
 
+#[cfg(windows)]
+#[tokio::test]
+async fn core_readiness_does_not_wait_for_external_ip() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = core::prepare(
+        &std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("resources/core"),
+        directory.path(),
+    )
+    .unwrap();
+    let (proxy_port, metrics_port) = vpn_service::ports().unwrap();
+    let bytes = serde_json::to_vec(&serde_json::json!({
+        "log": { "loglevel": "none" },
+        "inbounds": [{
+            "listen": "127.0.0.1",
+            "port": proxy_port,
+            "protocol": "socks",
+            "settings": { "udp": true }
+        }],
+        "outbounds": [{ "protocol": "freedom", "tag": "direct" }]
+    }))
+    .unwrap();
+    let started = std::time::Instant::now();
+    let mut session = vpn_service::Session::default();
+    vpn_service::start(&path, &mut session, &bytes, proxy_port, metrics_port)
+        .await
+        .unwrap();
+    assert!(started.elapsed() < std::time::Duration::from_secs(3));
+    vpn_service::stop(&mut session).await.unwrap();
+}
+
 #[test]
 fn rejects_lossy_translations_and_oversized_inputs() {
     let node = uri::parse(VLESS, "sub").unwrap();
@@ -405,4 +435,3 @@ fn balanced_xray_subscription_and_clean_names() {
     assert_eq!(servers[1]["name"], "Финляндия");
     assert_eq!(servers[1]["countryCode"], "fi");
 }
-

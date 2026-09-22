@@ -73,6 +73,7 @@ pub fn run() {
             commands::catalog::mutate_catalog,
             commands::catalog::import_subscription,
             commands::catalog::refresh_subscription,
+            commands::catalog::get_subscription_source,
             commands::catalog::get_processes,
             commands::catalog::ping_server,
             commands::settings::get_settings,
@@ -140,7 +141,10 @@ pub fn run() {
                 .show_menu_on_left_click(false)
                 .on_menu_event(|app, event| {
                     let id = event.id().as_ref().to_string();
-                    let state = app.state::<std::sync::Arc<app::state::AppState>>().inner().clone();
+                    let state = app
+                        .state::<std::sync::Arc<app::state::AppState>>()
+                        .inner()
+                        .clone();
                     let app_handle = app.clone();
                     tauri::async_runtime::spawn(async move {
                         handle_tray_menu_event(&app_handle, &state, &id).await;
@@ -294,8 +298,13 @@ pub fn create_tray_menu(
     } else {
         "Подключиться"
     };
-    let toggle_item =
-        MenuItem::with_id(app, "toggle_connect", toggle_text, !is_connecting, None::<&str>)?;
+    let toggle_item = MenuItem::with_id(
+        app,
+        "toggle_connect",
+        toggle_text,
+        !is_connecting,
+        None::<&str>,
+    )?;
 
     let sep1 = PredefinedMenuItem::separator(app)?;
 

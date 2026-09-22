@@ -20,17 +20,30 @@
 
 	async function submit() {
 		if (busy) return;
-		if (!source.trim()) {
+		let cleanSource = source
+			.trim()
+			.replace(/^\uFEFF/, '')
+			.replace(/^["'<]|["'>]$/g, '')
+			.trim();
+		if (!cleanSource) {
 			error = t('errors.invalidSubscription');
 			return;
+		}
+		if (
+			!cleanSource.includes('://') &&
+			!cleanSource.startsWith('{') &&
+			!cleanSource.startsWith('[') &&
+			!cleanSource.includes('proxies:') &&
+			cleanSource.includes('.') &&
+			cleanSource.includes('/') &&
+			!cleanSource.includes(' ')
+		) {
+			cleanSource = `https://${cleanSource}`;
 		}
 		busy = true;
 		error = '';
 		try {
-			await catalog.importSubscription(
-				source.trim(),
-				name.trim() || t('common.name'),
-			);
+			await catalog.importSubscription(cleanSource, name.trim() || undefined);
 			source = '';
 			name = '';
 			onSuccess?.();

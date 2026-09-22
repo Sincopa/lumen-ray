@@ -44,18 +44,32 @@ pub fn icon(path: &str) -> Option<String> {
             dc: std::ptr::null_mut(),
         };
         let name: Vec<u16> = path.encode_utf16().chain(Some(0)).collect();
-        let mut file: SHFILEINFOW = std::mem::zeroed();
-        if SHGetFileInfoW(
+        let mut icon_id = 0;
+        if PrivateExtractIconsW(
             name.as_ptr(),
             0,
-            &mut file,
-            std::mem::size_of_val(&file) as u32,
-            SHGFI_ICON | SHGFI_SMALLICON,
+            64,
+            64,
+            &mut resources.icon,
+            &mut icon_id,
+            1,
+            0,
         ) == 0
+            || resources.icon.is_null()
         {
-            return None;
+            let mut file: SHFILEINFOW = std::mem::zeroed();
+            if SHGetFileInfoW(
+                name.as_ptr(),
+                0,
+                &mut file,
+                std::mem::size_of_val(&file) as u32,
+                SHGFI_ICON | SHGFI_LARGEICON,
+            ) == 0
+            {
+                return None;
+            }
+            resources.icon = file.hIcon;
         }
-        resources.icon = file.hIcon;
         if GetIconInfo(resources.icon, &mut resources.info) == 0
             || resources.info.hbmColor.is_null()
         {
@@ -127,10 +141,19 @@ pub fn icon(path: &str) -> Option<String> {
 }
 #[cfg(test)]
 mod tests {
+    use base64::Engine;
+
     #[test]
     fn extracts_current_executable_icon() {
         let executable = std::env::current_exe().unwrap();
         let icon = super::icon(&executable.to_string_lossy()).unwrap();
         assert!(icon.starts_with("data:image/png;base64,iVBOR"));
+        let bytes = base64::engine::general_purpose::STANDARD
+            .decode(icon.trim_start_matches("data:image/png;base64,"))
+            .unwrap();
+        let decoder = png::Decoder::new(std::io::Cursor::new(bytes));
+        let reader = decoder.read_info().unwrap();
+        assert!(reader.info().width >= 32);
+        assert!(reader.info().height >= 32);
     }
 }

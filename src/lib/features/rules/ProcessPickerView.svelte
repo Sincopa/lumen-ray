@@ -400,6 +400,8 @@
 		width: 100%;
 		height: 100%;
 		object-fit: contain;
+		image-rendering: auto;
+		transform: translateZ(0);
 	}
 
 	.generic-file-icon {

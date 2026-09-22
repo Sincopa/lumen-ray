@@ -1,7 +1,7 @@
 {
 	"name": "lumen",
 	"private": true,
-	"version": "0.1.0",
+	"version": "0.2.0",
 	"description": "Lumen — Modern, ultra-lightweight desktop VPN & proxy client built with Svelte 5 and Tauri 2",
 	"license": "Apache-2.0",
 	"type": "module",
@@ -21,7 +21,8 @@
 		"tauri:dev": "tauri dev",
 		"tauri:build": "tauri build",
 		"build:release": "tauri build --no-bundle",
-		"build:installer": "tauri build"
+		"build:installer": "tauri build",
+		"release:version": "node scripts/set-version.mjs"
 	},
 	"engines": {
 		"node": ">=22.12.0"

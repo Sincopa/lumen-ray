@@ -1,0 +1,87 @@
+name: Release Lumen
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  release-windows:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: './src-tauri -> target'
+
+      - name: Check updater signing settings
+        shell: pwsh
+        env:
+          PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          PUBLIC_KEY: ${{ vars.TAURI_UPDATER_PUBLIC_KEY }}
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:PRIVATE_KEY)) {
+            throw "Repository secret TAURI_SIGNING_PRIVATE_KEY is missing"
+          }
+          if ([string]::IsNullOrWhiteSpace($env:PUBLIC_KEY)) {
+            throw "Repository variable TAURI_UPDATER_PUBLIC_KEY is missing"
+          }
+
+      - name: Check release version
+        if: github.ref_type == 'tag'
+        shell: pwsh
+        run: |
+          $version = (Get-Content -Raw src-tauri/tauri.conf.json | ConvertFrom-Json).version
+          if ($env:GITHUB_REF_NAME -ne "v$version") {
+            throw "Tag $env:GITHUB_REF_NAME does not match application version v$version"
+          }
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Prepare verified Xray core
+        shell: pwsh
+        run: powershell -NoProfile -File scripts/prepare-core.ps1
+
+      - name: Verify frontend
+        run: |
+          npm run check
+          npm test
+
+      - name: Verify Rust backend
+        run: cargo test --locked --manifest-path src-tauri/Cargo.toml
+
+      - name: Build and publish signed release
+        uses: tauri-apps/tauri-action@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          LUMEN_UPDATE_PUBLIC_KEY: ${{ vars.TAURI_UPDATER_PUBLIC_KEY }}
+          LUMEN_UPDATE_ENDPOINT: https://github.com/Sincopa/lumen-ray/releases/latest/download/latest.json
+        with:
+          tagName: v__VERSION__
+          releaseName: Lumen v__VERSION__
+          releaseBody: Download the Windows installer below. Existing installations receive this version through the built-in signed updater.
+          releaseDraft: false
+          prerelease: false
+          generateReleaseNotes: true
+          uploadUpdaterJson: true
+          updaterJsonPreferNsis: true
+          args: --config src-tauri/tauri.release.conf.json

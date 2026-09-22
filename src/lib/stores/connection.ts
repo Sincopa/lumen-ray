@@ -60,10 +60,9 @@ export class ConnectionController {
 		const error = errorCode(cause);
 		try {
 			const { status, info } = await this.readConnection();
-			const finalStatus = status === 'connecting' ? 'error' : status;
-			this.update({ status: finalStatus, info, error, busy: false });
+			this.update({ status, info, error });
 		} catch {
-			this.update({ status: 'error', info: null, error, busy: false });
+			this.update({ status: 'error', info: null, error });
 		}
 	}
 

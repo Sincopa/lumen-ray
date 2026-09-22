@@ -13,6 +13,7 @@
 		currentTab: 'home' | 'subscriptions' | 'servers' | 'settings' | 'rules';
 		routingMode?: 'global' | 'rules';
 		hasSubscriptions?: boolean;
+		modeDisabled?: boolean;
 		onTabChange: (
 			tab: 'home' | 'subscriptions' | 'servers' | 'settings' | 'rules',
 		) => void;
@@ -24,6 +25,7 @@
 		currentTab = 'home',
 		routingMode = 'global',
 		hasSubscriptions = true,
+		modeDisabled = false,
 		onTabChange,
 		onModeChange,
 		onActionClick,
@@ -37,6 +39,7 @@
 	}
 
 	function toggleMode() {
+		if (modeDisabled) return;
 		const nextMode = routingMode === 'global' ? 'rules' : 'global';
 		onModeChange?.(nextMode);
 	}
@@ -139,8 +142,10 @@
 			<!-- Mode switcher pill (global/rules) — click anywhere to toggle -->
 			<div
 				class="action-pill"
+				class:disabled={modeDisabled}
 				role="button"
-				tabindex="0"
+				tabindex={modeDisabled ? -1 : 0}
+				aria-disabled={modeDisabled}
 				aria-label={t('home.modeGlobal') + ' / ' + t('home.modeRules')}
 				onclick={toggleMode}
 				onkeydown={(e) => {
@@ -154,6 +159,7 @@
 					type="button"
 					class="action-pill-btn"
 					class:action-active={routingMode === 'global'}
+					disabled={modeDisabled}
 					aria-pressed={routingMode === 'global'}
 					aria-label={t('home.modeGlobal')}
 					use:tooltip={t('home.modeGlobal')}
@@ -173,6 +179,7 @@
 					type="button"
 					class="action-pill-btn"
 					class:action-active={routingMode === 'rules'}
+					disabled={modeDisabled}
 					aria-pressed={routingMode === 'rules'}
 					aria-label={t('home.modeRules')}
 					use:tooltip={t('home.modeRules')}
@@ -354,6 +361,15 @@
 		padding: 5px 6px;
 		box-sizing: border-box;
 		cursor: pointer;
+	}
+
+	.action-pill.disabled {
+		cursor: not-allowed;
+		opacity: 0.62;
+	}
+
+	.action-pill.disabled .action-pill-btn {
+		cursor: not-allowed;
 	}
 
 	.action-pill-btn {

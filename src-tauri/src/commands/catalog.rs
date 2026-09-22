@@ -8,7 +8,10 @@ use std::sync::Arc;
 #[tauri::command]
 pub async fn get_catalog(state: tauri::State<'_, Arc<AppState>>) -> Result<Value> {
     let latencies = state.latencies.read().await;
-    Ok(service::snapshot(&*state.repository.read().await, &latencies))
+    Ok(service::snapshot(
+        &*state.repository.read().await,
+        &latencies,
+    ))
 }
 #[tauri::command]
 pub async fn mutate_catalog(
@@ -46,7 +49,7 @@ pub async fn import_subscription(
     state: tauri::State<'_, Arc<AppState>>,
     app: tauri::AppHandle,
     input: String,
-    name: String,
+    name: Option<String>,
 ) -> Result<service::ImportResult> {
     let result = service::import(&state, input, name, None).await?;
     crate::update_tray_menu(&app, &state);
@@ -73,10 +76,24 @@ pub async fn refresh_subscription(
                 .clone(),
         )
     };
-    let result = service::import(&state, input, name, Some(id)).await?;
+    let result = service::import(&state, input, Some(name), Some(id)).await?;
     disconnect_removed_server(&state, &app).await?;
     crate::update_tray_menu(&app, &state);
     Ok(result)
+}
+#[tauri::command]
+pub async fn get_subscription_source(
+    state: tauri::State<'_, Arc<AppState>>,
+    id: String,
+) -> Result<String> {
+    state
+        .repository
+        .read()
+        .await
+        .sources
+        .get(&id)
+        .cloned()
+        .ok_or_else(BackendError::invalid)
 }
 async fn disconnect_removed_server(state: &AppState, app: &tauri::AppHandle) -> Result<()> {
     let active = state

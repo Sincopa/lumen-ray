@@ -9,18 +9,19 @@ use tauri_plugin_updater::UpdaterExt;
 #[serde(rename_all = "camelCase")]
 pub struct ApplicationUpdate {
     pub configured: bool,
+    pub current_version: String,
     pub version: Option<String>,
 }
 fn application_updater(app: &tauri::AppHandle) -> Result<Option<tauri_plugin_updater::Updater>> {
-    let (Some(endpoint), Some(key)) = (
-        option_env!("LUMEN_UPDATE_ENDPOINT"),
-        option_env!("LUMEN_UPDATE_PUBLIC_KEY"),
-    ) else {
+    let endpoint = option_env!("LUMEN_UPDATE_ENDPOINT")
+        .unwrap_or("https://github.com/Sincopa/lumen-ray/releases/latest/download/latest.json");
+    let Some(key) = option_env!("LUMEN_UPDATE_PUBLIC_KEY").filter(|key| !key.trim().is_empty())
+    else {
         return Ok(None);
     };
     let url = url::Url::parse(endpoint)
         .map_err(|_| BackendError::new("UPDATE_FAILED", "Invalid build-time update endpoint"))?;
-    if url.scheme() != "https" || key.is_empty() {
+    if url.scheme() != "https" {
         return Err(BackendError::new(
             "UPDATE_FAILED",
             "Signed HTTPS updates are required",
@@ -36,9 +37,11 @@ fn application_updater(app: &tauri::AppHandle) -> Result<Option<tauri_plugin_upd
 }
 #[tauri::command]
 pub async fn check_application_update(app: tauri::AppHandle) -> Result<ApplicationUpdate> {
+    let current_version = app.package_info().version.to_string();
     let Some(updater) = application_updater(&app)? else {
         return Ok(ApplicationUpdate {
             configured: false,
+            current_version,
             version: None,
         });
     };
@@ -48,6 +51,7 @@ pub async fn check_application_update(app: tauri::AppHandle) -> Result<Applicati
         .map_err(|_| BackendError::new("UPDATE_FAILED", "Could not check application updates"))?;
     Ok(ApplicationUpdate {
         configured: true,
+        current_version,
         version: update.map(|u| u.version),
     })
 }

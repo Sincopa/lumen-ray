@@ -8,6 +8,7 @@
 	import { t } from '../../i18n';
 	import type { Rule } from '../../services/catalog';
 	import Dialog from '../../components/Dialog.svelte';
+	import ConfirmDialog from '../../components/ConfirmDialog.svelte';
 	import CountryFlag from '../../components/CountryFlag.svelte';
 	import MaterialIcon from '../../components/MaterialIcon.svelte';
 	import IconButton from '../../components/IconButton.svelte';
@@ -488,16 +489,9 @@
 				{@const ruleIcon = getRuleIcon(rule)}
 				<article class="rule-row">
 					<div class="rule-left">
-						<div
-							class="app-icon-wrapper"
-							class:domain-icon={!ruleIcon}
-						>
+						<div class="app-icon-wrapper" class:domain-icon={!ruleIcon}>
 							{#if ruleIcon}
-								<img
-									class="app-icon"
-									src={ruleIcon}
-									alt=""
-								/>
+								<img class="app-icon" src={ruleIcon} alt="" />
 							{:else}
 								<span class="globe-text" aria-hidden="true">
 									<MaterialIcon
@@ -562,7 +556,7 @@
 						{/if}
 					</div>
 				</article>
-			{:else}<p>{t('rules.empty')}</p>{/each}
+			{:else}<p class="rules-empty">{t('rules.empty')}</p>{/each}
 		</div>
 		{#if selectMode}
 			<div class="select-bar">
@@ -590,13 +584,14 @@
 {/if}
 
 {#if deleting}
-	<Dialog title={t('common.delete')} onClose={() => (deleting = false)}>
-		<p>{t('rules.deleteConfirm', { count: selected.length })}</p>
-		{#if error}
-			<p role="alert">{error}</p>
-		{/if}
-		<button class="danger" onclick={remove}>{t('common.delete')}</button>
-	</Dialog>
+	<ConfirmDialog
+		title={t('common.areYouSure')}
+		description={t('rules.deleteConfirm', { count: selected.length })}
+		cancelLabel={t('common.cancel')}
+		confirmLabel={t('common.continue')}
+		onCancel={() => (deleting = false)}
+		onConfirm={remove}
+	/>
 {/if}
 
 {#if exported}
@@ -862,6 +857,16 @@
 	}
 	.rules-list::-webkit-scrollbar {
 		display: none;
+	}
+	.rules-empty {
+		margin: 14px auto 0;
+		color: rgba(255, 255, 255, 0.25);
+		font-family: var(--font-family-base);
+		font-size: 14px;
+		font-weight: 400;
+		line-height: 1;
+		letter-spacing: -0.28px;
+		text-align: center;
 	}
 	.rule-row {
 		min-height: 60px;

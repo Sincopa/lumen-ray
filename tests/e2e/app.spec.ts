@@ -62,13 +62,90 @@ test('server choice survives navigation, connecting and reload', async ({
 	);
 });
 
-test('subscription import, rename, refresh and delete work', async ({
+test('routing mode stays locked for the whole VPN session', async ({
+	page,
+}) => {
+	await page.goto('/');
+	const modeButtons = page.locator('.action-pill-btn');
+	await expect(modeButtons.first()).toBeEnabled();
+	await page.locator('.central-logo-btn').click();
+	await expect(modeButtons.first()).toBeDisabled();
+	await expect(page.getByRole('status')).toHaveText(ru.home.connected);
+	await expect(modeButtons.last()).toBeDisabled();
+	await page.locator('.central-logo-btn').click();
+	await expect(modeButtons.first()).toBeEnabled();
+});
+
+test('empty home morphs the centered add button into a subscription field', async ({
 	page,
 }) => {
 	await page.goto('/');
 	await page
 		.getByRole('button', { name: ru.nav.subscriptions, exact: true })
 		.click();
+	await page.locator('.sub-card-wrapper .title-group').click();
+	await page
+		.locator('.sub-card-wrapper')
+		.getByRole('button', { name: ru.common.menu, exact: true })
+		.click();
+	await page
+		.getByRole('button', { name: ru.common.delete, exact: true })
+		.click();
+	await page
+		.getByRole('dialog')
+		.getByRole('button', { name: ru.common.continue, exact: true })
+		.click();
+	await page.getByRole('button', { name: ru.nav.home, exact: true }).click();
+
+	const app = page.locator('.app-viewport');
+	const add = page.getByRole('button', {
+		name: ru.subscriptions.addProfile,
+		exact: true,
+	});
+	const [appBounds, buttonBounds] = await Promise.all([
+		app.boundingBox(),
+		add.boundingBox(),
+	]);
+	expect(appBounds).not.toBeNull();
+	expect(buttonBounds).not.toBeNull();
+	expect(
+		Math.abs(
+			buttonBounds!.y +
+				buttonBounds!.height / 2 -
+				(appBounds!.y + appBounds!.height / 2),
+		),
+	).toBeLessThan(2);
+	await page.screenshot({ path: 'artifacts/verification/empty-home-add.png' });
+
+	await add.click();
+	const input = page.getByLabel(ru.subscriptions.domainLink, { exact: true });
+	await expect(input).toBeFocused();
+	await expect(input).toHaveAttribute(
+		'placeholder',
+		ru.subscriptions.pasteLink,
+	);
+	await page.waitForTimeout(380);
+	await page.screenshot({
+		path: 'artifacts/verification/empty-home-input.png',
+	});
+	await input.fill('https://example.com/subscription');
+	await input.press('Enter');
+	await expect(page.locator('.connection-view')).toBeVisible();
+});
+
+test('subscription import, sharing, rename, refresh and delete work', async ({
+	page,
+	context,
+}) => {
+	await context.grantPermissions(['clipboard-read', 'clipboard-write']);
+	await page.setViewportSize({ width: 620, height: 700 });
+	await page.goto('/');
+	await page
+		.getByRole('button', { name: ru.nav.subscriptions, exact: true })
+		.click();
+	await page.screenshot({
+		path: 'artifacts/verification/subscription-metrics.png',
+	});
 	await page
 		.getByRole('button', { name: ru.subscriptions.addProfile, exact: true })
 		.click();
@@ -101,11 +178,52 @@ test('subscription import, rename, refresh and delete work', async ({
 		.getByRole('button', { name: ru.common.menu, exact: true })
 		.click();
 	await page
-		.getByRole('button', { name: ru.common.delete, exact: true })
+		.getByRole('button', { name: ru.common.share, exact: true })
+		.click();
+	const shareDialog = page.getByRole('dialog');
+	const appBounds = await page.locator('.app-viewport').boundingBox();
+	const overlayBounds = await page.locator('.dialog-backdrop').boundingBox();
+	expect(overlayBounds).toEqual(appBounds);
+	await expect(shareDialog.getByRole('textbox')).toHaveValue(
+		'https://example.com/secret-test-token',
+	);
+	await page.waitForTimeout(260);
+	await page.screenshot({
+		path: 'artifacts/verification/subscription-share-dialog.png',
+	});
+	await shareDialog
+		.getByRole('button', { name: ru.common.copy, exact: true })
+		.click();
+	await expect(
+		shareDialog.getByRole('button', { name: ru.common.copied, exact: true }),
+	).toBeVisible();
+	await expect(shareDialog.locator('.copy-icon:not([inert])')).toHaveText(
+		'check',
+	);
+	await page.screenshot({
+		path: 'artifacts/verification/subscription-share-copied.png',
+	});
+	await shareDialog
+		.getByRole('button', { name: ru.common.close, exact: true })
+		.click();
+	await renamed
+		.getByRole('button', { name: ru.common.menu, exact: true })
 		.click();
 	await page
-		.getByRole('dialog')
 		.getByRole('button', { name: ru.common.delete, exact: true })
+		.click();
+	await expect(page.locator('.confirm-dialog')).toHaveCSS('width', '326px');
+	await expect(page.locator('.confirm-button').first()).toHaveCSS(
+		'height',
+		'64px',
+	);
+	await page.waitForTimeout(300);
+	await page.screenshot({
+		path: 'artifacts/verification/subscription-delete-modal.png',
+	});
+	await page
+		.getByRole('dialog')
+		.getByRole('button', { name: ru.common.continue, exact: true })
 		.click();
 	await expect(renamed).toHaveCount(0);
 	expect(await page.evaluate(() => JSON.stringify(localStorage))).not.toContain(
@@ -142,6 +260,12 @@ test('add panels and searches stay usable in the compact window', async ({
 		.getByRole('button', { name: ru.common.close })
 		.click();
 	await page.getByRole('button', { name: ru.nav.rules, exact: true }).click();
+	const emptyRules = page.getByText(ru.rules.empty, { exact: true });
+	await expect(emptyRules).toBeVisible();
+	await expect(emptyRules).toHaveCSS('color', 'rgba(255, 255, 255, 0.25)');
+	await page.screenshot({
+		path: 'artifacts/verification/rules-empty-state.png',
+	});
 	await page
 		.getByRole('region', { name: ru.rules.title })
 		.getByRole('button', { name: ru.common.add })
@@ -227,7 +351,7 @@ test('settings are honest and language and animation persist', async ({
 		path: 'artifacts/verification/settings-main-tuned.png',
 	});
 	await expect(
-		page.getByRole('combobox', { name: 'Режим маршрутизации' }),
+		page.getByRole('combobox', { name: ru.settings.routingMode }),
 	).toBeDisabled();
 	await page
 		.getByRole('button', { name: ru.settings.presets, exact: true })
@@ -236,17 +360,17 @@ test('settings are honest and language and animation persist', async ({
 	await page.getByRole('button', { name: /Cyberpunk/ }).click();
 	await page.getByRole('button', { name: ru.common.back }).click();
 	await expect(
-		page.getByRole('checkbox', { name: 'Kill Switch', exact: true }),
+		page.getByRole('checkbox', { name: ru.settings.autoConnect, exact: true }),
 	).toBeDisabled();
 	await expect(
-		page.getByRole('checkbox', { name: 'Kill Switch', exact: true }),
+		page.getByRole('checkbox', { name: ru.settings.autoConnect, exact: true }),
 	).not.toBeChecked();
 	await page
-		.getByRole('checkbox', { name: 'Анимированный фон', exact: true })
+		.getByRole('checkbox', { name: ru.settings.animation, exact: true })
 		.uncheck();
 	await expect(page.locator('canvas')).toHaveClass(/disabled/);
 	await page
-		.getByRole('combobox', { name: 'Язык интерфейса', exact: true })
+		.getByRole('combobox', { name: ru.settings.language, exact: true })
 		.click();
 	await page.getByRole('option', { name: 'English' }).click();
 	await page.reload();
@@ -254,6 +378,33 @@ test('settings are honest and language and animation persist', async ({
 		page.getByText('Demo mode · traffic is not protected'),
 	).toBeVisible();
 	await expect(page.locator('canvas')).toHaveClass(/disabled/);
+});
+
+test('interface scale applies only after the slider is released', async ({
+	page,
+}) => {
+	await page.goto('/');
+	await page
+		.getByRole('button', { name: ru.nav.settings, exact: true })
+		.click();
+	const slider = page.getByRole('slider', { name: ru.settings.uiScale });
+	const scale = () =>
+		page.evaluate(() =>
+			document.documentElement.style.getPropertyValue('--ui-zoom'),
+		);
+	const initialScale = await scale();
+
+	await slider.evaluate((element) => {
+		const input = element as HTMLInputElement;
+		input.value = '1.25';
+		input.dispatchEvent(new Event('input', { bubbles: true }));
+	});
+	expect(await scale()).toBe(initialScale);
+
+	await slider.evaluate((element) => {
+		element.dispatchEvent(new Event('change', { bubbles: true }));
+	});
+	await expect.poll(scale).toBe('1.25');
 });
 
 test('updated shader links and restored cards keep their controls', async ({
@@ -318,7 +469,7 @@ test('updated shader links and restored cards keep their controls', async ({
 		.click();
 	await page
 		.getByRole('dialog')
-		.getByRole('button', { name: ru.common.delete, exact: true })
+		.getByRole('button', { name: ru.common.continue, exact: true })
 		.click();
 	await expect(page.locator('.rule-row')).toHaveCount(0);
 	expect(errors).toEqual([]);
@@ -326,7 +477,7 @@ test('updated shader links and restored cards keep their controls', async ({
 
 for (const size of [
 	{ width: 360, height: 560 },
-	{ width: 390, height: 845 },
+	{ width: 400, height: 700 },
 	{ width: 800, height: 600 },
 ]) {
 	test(

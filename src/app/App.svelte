@@ -22,6 +22,7 @@
 	import { LogicalSize } from '@tauri-apps/api/dpi';
 	import { listen } from '@tauri-apps/api/event';
 	import { nativeSettings } from '../lib/services/settings';
+	import { applicationUpdate } from '../lib/services/applicationUpdate';
 
 	type TabName = 'home' | 'subscriptions' | 'servers' | 'settings' | 'rules';
 
@@ -36,6 +37,7 @@
 	const connectionStore = connection.state;
 	const catalogStore = catalog.state;
 	const persistenceError = catalog.persistenceError;
+	const applicationUpdateState = applicationUpdate.state;
 
 	// Local state
 	let currentTab = $state<TabName>('home');
@@ -58,7 +60,7 @@
 
 	/**
 	 * Applies the current uiScale:
-	 * - Tauri: resizes the native window (390 × scale, 845 × scale).
+	 * - Tauri: resizes the native window (base width × scale, base height × scale).
 	 *   The CSS width/height stay at 100vw/100vh so the UI fills the window.
 	 *   CSS custom properties --app-width/--app-height are updated so
 	 *   border-radius and clamp() calculations remain correct.
@@ -70,7 +72,7 @@
 
 		// Set CSS zoom on .app-viewport — scales ALL UI elements proportionally
 		// (text, padding, border-radius, icons — everything).
-		// --app-width stays at 390px; zoom makes the 390px box visually larger.
+		// The base dimensions stay unchanged; zoom scales the rendered UI.
 		document.documentElement.style.setProperty('--ui-zoom', String(scale));
 
 		if (runtime.isTauri) {
@@ -108,13 +110,19 @@
 				);
 			}
 		} catch (err) {
-			console.error('[auto-refresh] Failed to refresh subscription or ping:', err);
+			console.error(
+				'[auto-refresh] Failed to refresh subscription or ping:',
+				err,
+			);
 		}
 	}
 
 	onMount(() => {
 		void connection.initialize();
-		void refreshAndPingSubscriptions();
+		if (runtime.isTauri) {
+			void refreshAndPingSubscriptions();
+		}
+		void applicationUpdate.check({ silent: true });
 
 		const handleContextMenu = (e: MouseEvent) => {
 			e.preventDefault();
@@ -146,9 +154,12 @@
 	$effect(() => {
 		const hours = $nativeSettings.updateIntervalHours ?? 24;
 		if (hours <= 0) return;
-		const timer = setInterval(() => {
-			void refreshAndPingSubscriptions();
-		}, hours * 3600 * 1000);
+		const timer = setInterval(
+			() => {
+				void refreshAndPingSubscriptions();
+			},
+			hours * 3600 * 1000,
+		);
 		return () => {
 			clearInterval(timer);
 		};
@@ -172,6 +183,7 @@
 	}
 
 	async function changeMode(mode: 'global' | 'rules') {
+		if (!['disconnected', 'error'].includes(connectionState)) return;
 		try {
 			await catalog.setRoutingMode(mode);
 		} catch (e) {
@@ -211,6 +223,10 @@
 			onOpenSettings={() => {
 				currentTab = currentTab === 'settings' ? 'home' : 'settings';
 			}}
+			updateVersion={$applicationUpdateState.version}
+			onOpenUpdate={() => {
+				currentTab = 'settings';
+			}}
 		/>
 
 		<p class="demo-notice sr-only">{runtime.isTauri ? '' : t('demo.notice')}</p>
@@ -248,7 +264,7 @@
 					>
 						{#if currentTab === 'home'}
 							{#if !hasSubscriptions}
-								<EmptyHomeView onAddProfile={() => (importing = true)} />
+								<EmptyHomeView />
 							{:else}
 								<ConnectionView
 									{connectionState}
@@ -285,6 +301,7 @@
 				{currentTab}
 				{routingMode}
 				{hasSubscriptions}
+				modeDisabled={!['disconnected', 'error'].includes(connectionState)}
 				onTabChange={handleTabChange}
 				onModeChange={changeMode}
 				onActionClick={() => (importing = true)}
@@ -312,7 +329,7 @@
 		border-radius: var(--radius-window) var(--radius-window)
 			var(--radius-window-bottom) var(--radius-window-bottom);
 		/* Scales the entire UI (text, spacing, icons) proportionally.
-		   --app-width/height stay at base 390×845; the native window is resized
+		   --app-width/height stay at their base values; the native window is resized
 		   separately to accommodate the zoomed content. */
 		zoom: var(--ui-zoom, 1);
 	}

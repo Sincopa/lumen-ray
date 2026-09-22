@@ -18,6 +18,11 @@
 		"name": "Name",
 		"save": "Save",
 		"export": "Export",
+		"areYouSure": "Are you sure?",
+		"cancel": "Cancel",
+		"continue": "Continue",
+		"copy": "Copy link",
+		"copied": "Link copied",
 		"back": "Back"
 	},
 	"nav": {
@@ -51,6 +56,8 @@
 		"addProfile": "Add profile",
 		"domainLink": "Domain link",
 		"domainLinkPlaceholder": "Add subscription link",
+		"pasteLink": "Paste link",
+		"importLink": "Import subscription",
 		"addHint": "Give this subscription a clear name, then paste its link or key.",
 		"namePlaceholder": "For example, Personal subscription",
 		"sourcePlaceholder": "https://example.com/subscription or vless://…",
@@ -62,7 +69,11 @@
 		"empty": "Add your first subscription.",
 		"serverCount": "Servers: {count}",
 		"updatedAt": "Updated: {time}",
-		"deleteConfirm": "Delete “{name}”, its servers and associated rules?"
+		"deleteConfirm": "Do you want to delete “{name}”, its servers and associated rules?",
+		"shareTitle": "Link to “{name}”",
+		"shareHint": "Copy the link to import this subscription on another device.",
+		"sourceUnavailable": "The link is unavailable in this demo session.",
+		"copyFailed": "Automatic copying failed. Select the link manually."
 	},
 	"servers": {
 		"title": "Servers",
@@ -125,6 +136,10 @@
 		"checkUpdates": "Check for updates",
 		"checkingUpdates": "Checking...",
 		"latestVersionInstalled": "Latest version installed",
+		"updateAvailable": "Update {version} is available",
+		"downloadUpdate": "Download {version}",
+		"downloadingUpdate": "Downloading...",
+		"updatesUnavailable": "Configure the update channel",
 		"xrayCore": "Xray Core",
 		"xrayDesc": "Network backend is not connected",
 		"mockReady": "Demo",
@@ -176,6 +191,7 @@
 		"timeout": "Operation timed out. Check the status and retry.",
 		"invalidServer": "Select an available server.",
 		"invalidSubscription": "Check the name and URL or key format.",
+		"subscriptionFetchFailed": "Unable to download subscription. Check internet connection or URL availability.",
 		"invalidRule": "Enter a domain without a path or an application name ending in .exe, and select a server.",
 		"storage": "Could not read or save settings. Check storage access.",
 		"unknown": "The action failed. Please retry."
@@ -192,7 +208,7 @@
 		"select": "Select {name}",
 		"edit": "Edit {name}",
 		"toggle": "Enable rule {name}",
-		"empty": "No rules yet. Add a domain or application.",
+		"empty": "No rules yet.",
 		"editTitle": "Rule settings",
 		"kind": "Rule type",
 		"domain": "Domain",

@@ -4,6 +4,7 @@ export type ErrorCode =
 	| 'timeout'
 	| 'invalidServer'
 	| 'invalidSubscription'
+	| 'subscriptionFetchFailed'
 	| 'invalidRule'
 	| 'storage'
 	| 'unknown';
@@ -21,6 +22,7 @@ export function errorCode(error: unknown): ErrorCode {
 		'timeout',
 		'invalidServer',
 		'invalidSubscription',
+		'subscriptionFetchFailed',
 		'invalidRule',
 		'storage',
 	];
@@ -35,7 +37,7 @@ export function errorCode(error: unknown): ErrorCode {
 		INVALID_SERVER: 'invalidServer',
 		INVALID_RULE: 'invalidRule',
 		SUBSCRIPTION_INVALID: 'invalidSubscription',
-		SUBSCRIPTION_FETCH_FAILED: 'invalidSubscription',
+		SUBSCRIPTION_FETCH_FAILED: 'subscriptionFetchFailed',
 		STORAGE_FAILED: 'storage',
 		STORAGE_VERSION: 'storage',
 		CORE_NOT_FOUND: 'unavailable',

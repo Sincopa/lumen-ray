@@ -221,6 +221,9 @@
 	}
 
 	.central-logo-btn {
+		width: 164px;
+		height: 164px;
+		flex: 0 0 164px;
 		background: transparent;
 		border: none;
 		cursor: pointer;
@@ -228,59 +231,58 @@
 		display: flex;
 		align-items: center;
 		justify-content: center;
-		transition: transform 0.34s var(--ease-spring);
+		transition: filter 0.24s ease;
 		border-radius: 50%;
 	}
 
-	.central-logo-btn:hover {
-		transform: scale(1.05);
-	}
-
-	.central-logo-btn:active {
-		transform: scale(0.96);
-		transition-duration: 0.12s;
-	}
-
 	.giant-logo-img {
-		width: 124px;
-		height: 124px;
+		width: 164px;
+		height: 164px;
 		object-fit: contain;
 		filter: brightness(0.15);
+		transform: scale(0.7561);
+		will-change: transform, filter, opacity;
 		transition:
 			filter 0.35s ease,
-			transform 0.3s ease,
-			width 420ms var(--ease-spring),
-			height 420ms var(--ease-spring);
+			transform 420ms var(--ease-spring),
+			opacity 240ms ease;
 	}
 
 	.central-logo-btn:hover .giant-logo-img {
 		filter: brightness(0.1);
+		transform: scale(0.79);
+	}
+
+	.central-logo-btn:active .giant-logo-img {
+		transform: scale(0.73);
+		transition-duration: 120ms;
 	}
 
 	.central-logo-btn.connected .giant-logo-img {
-		width: 164px;
-		height: 164px;
+		transform: scale(1);
 		filter: brightness(0.12);
 		animation: logoPulse 3s infinite ease-in-out;
 	}
 
 	.central-logo-btn.connecting .giant-logo-img {
-		width: 164px;
-		height: 164px;
+		transform: scale(1);
+		animation: connectingPulse 1.6s infinite ease-in-out;
 	}
 
-	.central-logo-btn.connecting {
-		animation: pulseLogo 1.6s infinite ease-in-out;
+	.central-logo-btn:is(.connected, .connecting):hover .giant-logo-img {
+		transform: scale(1.02);
 	}
 
-	@keyframes pulseLogo {
+	.central-logo-btn:is(.connected, .connecting):active .giant-logo-img {
+		transform: scale(0.98);
+	}
+
+	@keyframes connectingPulse {
 		0%,
 		100% {
-			transform: scale(1);
 			opacity: 0.7;
 		}
 		50% {
-			transform: scale(1.05);
 			opacity: 1;
 		}
 	}

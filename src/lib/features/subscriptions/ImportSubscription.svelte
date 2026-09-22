@@ -21,7 +21,7 @@
 		busy = true;
 		error = '';
 		try {
-			await catalog.importSubscription(source, name);
+			await catalog.importSubscription(source, name.trim() || undefined);
 			source = '';
 			onClose();
 		} catch (e) {
@@ -40,7 +40,6 @@
 			{t('common.name')}
 			<input
 				bind:value={name}
-				required
 				maxlength="80"
 				autocomplete="off"
 				placeholder={t('subscriptions.namePlaceholder')}

@@ -16,6 +16,14 @@ pub struct Subscription {
     pub id: String,
     pub name: String,
     pub updated_at: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub upload: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub download: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub total: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub expire: Option<u64>,
 }
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]

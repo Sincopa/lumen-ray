@@ -21,15 +21,16 @@
 		shaderSettings,
 		SHADER_PRESETS,
 	} from '../../stores/shaderSettings.svelte';
+	import { applicationUpdate } from '../../services/applicationUpdate';
 
 	let autoConnect = $state(false);
 	let resettingProxy = $state(false);
 	let resetSuccess = $state(false);
-	let checkingUpdates = $state(false);
-	let updateCheckResult = $state('');
 	let currentSubView = $state<'main' | 'presets' | 'colors'>('main');
+	const applicationUpdateState = applicationUpdate.state;
 
 	let uiScaleText = $state(Math.round(shaderSettings.uiScale * 100).toString());
+	let uiScaleDraft = $state(shaderSettings.uiScale);
 	let exposureText = $state(shaderSettings.exposure.toFixed(2));
 	let isEditingUiScale = $state(false);
 	let isEditingExposure = $state(false);
@@ -37,6 +38,7 @@
 	$effect(() => {
 		if (!isEditingUiScale) {
 			uiScaleText = Math.round(shaderSettings.uiScale * 100).toString();
+			uiScaleDraft = shaderSettings.uiScale;
 		}
 	});
 
@@ -46,17 +48,12 @@
 		}
 	});
 
-	function handleCheckUpdates() {
-		if (checkingUpdates) return;
-		checkingUpdates = true;
-		updateCheckResult = '';
-		setTimeout(() => {
-			checkingUpdates = false;
-			updateCheckResult = t('settings.latestVersionInstalled');
-			setTimeout(() => {
-				updateCheckResult = '';
-			}, 3000);
-		}, 1200);
+	function handleUpdateAction() {
+		if ($applicationUpdateState.status === 'available') {
+			void applicationUpdate.install();
+		} else {
+			void applicationUpdate.check();
+		}
 	}
 
 	async function handleResetProxy() {
@@ -85,7 +82,13 @@
 		}
 		const clamped = Math.min(150, Math.max(75, parsed));
 		shaderSettings.setUiScale(clamped / 100);
+		uiScaleDraft = clamped / 100;
 		uiScaleText = clamped.toString();
+	}
+
+	function commitUiScaleSlider() {
+		shaderSettings.setUiScale(uiScaleDraft);
+		uiScaleText = Math.round(uiScaleDraft * 100).toString();
 	}
 
 	function commitExposure() {
@@ -174,14 +177,15 @@
 							max="1.5"
 							step="0.05"
 							aria-label={t('settings.uiScale')}
-							value={shaderSettings.uiScale}
+							value={uiScaleDraft}
 							oninput={(e) => {
 								const val = parseFloat((e.target as HTMLInputElement).value);
-								shaderSettings.setUiScale(val);
+								uiScaleDraft = val;
 								if (!isEditingUiScale) {
 									uiScaleText = Math.round(val * 100).toString();
 								}
 							}}
+							onchange={commitUiScaleSlider}
 							class="range-slider"
 						/>
 						<div class="range-input-wrapper">
@@ -208,18 +212,38 @@
 				<!-- App Version & Updates -->
 				<SettingRow label={t('settings.appVersion')}>
 					<div class="version-badge-container">
-						<span class="badge version-badge">v0.1.0</span>
+						<span class="badge version-badge">
+							v{$applicationUpdateState.currentVersion}
+						</span>
 						<button
 							type="button"
 							class="action-btn"
-							disabled={checkingUpdates}
-							onclick={handleCheckUpdates}
+							class:success={$applicationUpdateState.status === 'latest'}
+							disabled={['checking', 'downloading'].includes(
+								$applicationUpdateState.status,
+							)}
+							onclick={handleUpdateAction}
 						>
-							{#if checkingUpdates}
+							{#if $applicationUpdateState.status === 'checking'}
 								<span class="loading-spinner"></span>
 								<span>{t('settings.checkingUpdates')}</span>
-							{:else if updateCheckResult}
-								<span class="success-text">✓ {updateCheckResult}</span>
+							{:else if $applicationUpdateState.status === 'downloading'}
+								<span class="loading-spinner"></span>
+								<span>{t('settings.downloadingUpdate')}</span>
+							{:else if $applicationUpdateState.status === 'available'}
+								<span>
+									{t('settings.downloadUpdate', {
+										version: $applicationUpdateState.version ?? '',
+									})}
+								</span>
+							{:else if $applicationUpdateState.status === 'latest'}
+								<span class="success-text">
+									✓ {t('settings.latestVersionInstalled')}
+								</span>
+							{:else if $applicationUpdateState.status === 'unconfigured'}
+								<span>{t('settings.updatesUnavailable')}</span>
+							{:else if $applicationUpdateState.status === 'error'}
+								<span>{t('common.retry')}</span>
 							{:else}
 								<span>{t('settings.checkUpdates')}</span>
 							{/if}
@@ -307,10 +331,11 @@
 					<Dropdown
 						label={t('settings.dnsServer')}
 						options={dnsOptions}
-						value={runtime.isTauri ? ($nativeSettings.dnsServer ?? 'system') : 'system'}
+						value={runtime.isTauri
+							? ($nativeSettings.dnsServer ?? 'system')
+							: 'system'}
 						disabled={!runtime.isTauri}
-						onChange={(value) =>
-							updateNativeSettings({ dnsServer: value })}
+						onChange={(value) => updateNativeSettings({ dnsServer: value })}
 						compact
 					/>
 				</SettingRow>
@@ -321,7 +346,9 @@
 						mode="checkbox"
 						disabled={!runtime.isTauri}
 						ariaLabel={t('settings.bypassLan')}
-						checked={runtime.isTauri ? ($nativeSettings.bypassLan ?? true) : true}
+						checked={runtime.isTauri
+							? ($nativeSettings.bypassLan ?? true)
+							: true}
 						onchange={(val) => updateNativeSettings({ bypassLan: val })}
 					/>
 				</SettingRow>
@@ -331,10 +358,14 @@
 					<Dropdown
 						label={t('settings.updateInterval')}
 						options={updateIntervalOptions}
-						value={runtime.isTauri ? ($nativeSettings.updateIntervalHours?.toString() ?? '24') : '24'}
+						value={runtime.isTauri
+							? ($nativeSettings.updateIntervalHours?.toString() ?? '24')
+							: '24'}
 						disabled={!runtime.isTauri}
 						onChange={(value) =>
-							updateNativeSettings({ updateIntervalHours: parseInt(value, 10) })}
+							updateNativeSettings({
+								updateIntervalHours: parseInt(value, 10),
+							})}
 						compact
 					/>
 				</SettingRow>
