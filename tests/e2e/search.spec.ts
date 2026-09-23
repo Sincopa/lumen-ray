@@ -1,5 +1,6 @@
 import { test, expect } from '@playwright/test';
 import { initialCatalog } from '../../src/lib/services/catalog';
+import ru from '../../src/locales/ru.json' with { type: 'json' };
 
 test('server search matches country, protocol and subscription after indexing', async ({
 	page,
@@ -53,9 +54,8 @@ test('rule lookup and selection stay reactive after changing a server', async ({
 		.click();
 	await page.getByRole('button', { name: /Нидерланды/ }).click();
 	await expect(row.locator('.server-pill')).toContainText('Нидерланды');
-	await page.getByRole('button', { name: 'Меню', exact: true }).click();
 	await page
-		.getByRole('button', { name: 'Редактировать', exact: true })
+		.getByRole('button', { name: ru.rules.selectMode, exact: true })
 		.click();
 	const selection = row.getByRole('checkbox', {
 		name: 'Выбрать example.com',

@@ -140,6 +140,8 @@ pub enum Mutation {
     SetRoutingMode { mode: String },
     SaveRules { rules: Vec<Rule> },
     RemoveRules { ids: Vec<String> },
+    ApplyPreset { preset_id: String },
+    RemovePreset { preset_id: String },
 }
 pub async fn mutate(state: &AppState, mutation: Mutation) -> Result<Value> {
     let _guard = state.mutations.lock().await;
@@ -216,10 +218,22 @@ pub async fn mutate(state: &AppState, mutation: Mutation) -> Result<Value> {
             if rules.len() > 4096 {
                 return Err(BackendError::new("INVALID_RULE", "Too many routing rules"));
             }
-            for rule in rules {
+            for mut rule in rules {
                 if rule.id.is_empty() || rule.name.trim().is_empty() || rule.name.len() > 1024 {
                     return Err(BackendError::new("INVALID_RULE", "Invalid rule"));
                 }
+                match rule.matcher {
+                    crate::storage::repository::RuleMatcher::Geosite => {
+                        rule.name =
+                            crate::storage::repository::normalize_geo_tag(&rule.name, "geosite")?;
+                    }
+                    crate::storage::repository::RuleMatcher::Geoip => {
+                        rule.name =
+                            crate::storage::repository::normalize_geo_tag(&rule.name, "geoip")?;
+                    }
+                    _ => {}
+                }
+                rule.is_domain = rule.matcher == crate::storage::repository::RuleMatcher::Domain;
                 if let Some(existing) = next.rules.iter_mut().find(|r| r.id == rule.id) {
                     *existing = rule;
                 } else {
@@ -228,6 +242,34 @@ pub async fn mutate(state: &AppState, mutation: Mutation) -> Result<Value> {
             }
         }
         Mutation::RemoveRules { ids } => next.rules.retain(|r| !ids.contains(&r.id)),
+        Mutation::ApplyPreset { preset_id } => {
+            let target = next
+                .selected_subscription_id
+                .as_deref()
+                .unwrap_or("subscription");
+            if ["russia-optimized", "bypass-blocking"].contains(&preset_id.as_str())
+                && next.subscriptions.is_empty()
+                && next.nodes.is_empty()
+            {
+                return Err(BackendError::new(
+                    "INVALID_SERVER",
+                    "Cannot apply proxy preset without an active server or subscription",
+                ));
+            }
+            let preset_rules = generate_preset_rules(&preset_id, target)?;
+            let custom_rules: Vec<Rule> = next
+                .rules
+                .into_iter()
+                .filter(|r| r.preset_id.as_deref() != Some(&preset_id))
+                .collect();
+            let mut updated_rules = preset_rules;
+            updated_rules.extend(custom_rules);
+            next.rules = updated_rules;
+        }
+        Mutation::RemovePreset { preset_id } => {
+            next.rules
+                .retain(|r| r.preset_id.as_deref() != Some(&preset_id));
+        }
     }
     if let Some(id) = &next.selected_server_id {
         crate::xray::config::build(&next, id, 10808, 10809, false)?;
@@ -286,7 +328,23 @@ pub async fn import(
     if name.as_ref().is_some_and(|name| name.len() > 320) {
         return Err(BackendError::invalid());
     }
-    let fetched = crate::subscription::fetcher::fetch_with_metadata(&input).await?;
+    let operation = if refresh_id.is_some() {
+        "refresh"
+    } else {
+        "import"
+    };
+    let source_kind = if input.trim().starts_with("http://") || input.trim().starts_with("https://")
+    {
+        "remote"
+    } else {
+        "inline"
+    };
+    log::info!("Subscription {operation} started ({source_kind} source)");
+    let fetched = crate::subscription::fetcher::fetch_with_metadata(&input)
+        .await
+        .inspect_err(|error| {
+            log::warn!("Subscription {operation} download failed: {}", error.code);
+        })?;
     let resolved_name = name
         .as_deref()
         .map(str::trim)
@@ -303,7 +361,18 @@ pub async fn import(
     let id = refresh_id
         .clone()
         .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
-    let parsed = crate::subscription::parser::parse(&fetched.body, &id)?;
+    let parsed = crate::subscription::parser::parse(&fetched.body, &id).inspect_err(|error| {
+        log::warn!("Subscription {operation} parsing failed: {}", error.code);
+    })?;
+    let mut skipped = std::collections::BTreeMap::new();
+    for diagnostic in &parsed.diagnostics {
+        *skipped.entry(diagnostic.code).or_insert(0usize) += 1;
+    }
+    log::info!(
+        "Subscription {operation} parsed: {} supported nodes, {} skipped ({skipped:?})",
+        parsed.nodes.len(),
+        parsed.diagnostics.len()
+    );
     let _guard = state.mutations.lock().await;
     let mut next = state.repository.read().await.clone();
     if refresh_id.is_some() && !next.sources.contains_key(&id) {
@@ -348,4 +417,143 @@ pub async fn import(
         catalog,
         diagnostics: parsed.diagnostics,
     })
+}
+
+pub fn generate_preset_rules(preset_id: &str, target_proxy: &str) -> Result<Vec<Rule>> {
+    use crate::storage::repository::{Rule, RuleMatcher};
+    match preset_id {
+        "russia-optimized" => Ok(vec![
+            Rule {
+                id: format!("{preset_id}-geoip-private"),
+                name: "private".into(),
+                matcher: RuleMatcher::Geoip,
+                server_id: "direct".into(),
+                enabled: true,
+                preset_id: Some(preset_id.into()),
+                is_domain: false,
+            },
+            Rule {
+                id: format!("{preset_id}-geosite-antifilter"),
+                name: "antifilter".into(),
+                matcher: RuleMatcher::Geosite,
+                server_id: target_proxy.into(),
+                enabled: true,
+                preset_id: Some(preset_id.into()),
+                is_domain: false,
+            },
+            Rule {
+                id: format!("{preset_id}-geosite-antifilter-community"),
+                name: "antifilter-community".into(),
+                matcher: RuleMatcher::Geosite,
+                server_id: target_proxy.into(),
+                enabled: true,
+                preset_id: Some(preset_id.into()),
+                is_domain: false,
+            },
+            Rule {
+                id: format!("{preset_id}-geoip-antifilter"),
+                name: "antifilter".into(),
+                matcher: RuleMatcher::Geoip,
+                server_id: target_proxy.into(),
+                enabled: true,
+                preset_id: Some(preset_id.into()),
+                is_domain: false,
+            },
+            Rule {
+                id: format!("{preset_id}-geoip-antifilter-community"),
+                name: "antifilter-community".into(),
+                matcher: RuleMatcher::Geoip,
+                server_id: target_proxy.into(),
+                enabled: true,
+                preset_id: Some(preset_id.into()),
+                is_domain: false,
+            },
+            Rule {
+                id: format!("{preset_id}-geosite-category-ru"),
+                name: "category-ru".into(),
+                matcher: RuleMatcher::Geosite,
+                server_id: "direct".into(),
+                enabled: true,
+                preset_id: Some(preset_id.into()),
+                is_domain: false,
+            },
+            Rule {
+                id: format!("{preset_id}-geoip-ru"),
+                name: "ru".into(),
+                matcher: RuleMatcher::Geoip,
+                server_id: "direct".into(),
+                enabled: true,
+                preset_id: Some(preset_id.into()),
+                is_domain: false,
+            },
+        ]),
+        "bypass-blocking" => Ok(vec![
+            Rule {
+                id: format!("{preset_id}-geosite-antifilter"),
+                name: "antifilter".into(),
+                matcher: RuleMatcher::Geosite,
+                server_id: target_proxy.into(),
+                enabled: true,
+                preset_id: Some(preset_id.into()),
+                is_domain: false,
+            },
+            Rule {
+                id: format!("{preset_id}-geosite-antifilter-community"),
+                name: "antifilter-community".into(),
+                matcher: RuleMatcher::Geosite,
+                server_id: target_proxy.into(),
+                enabled: true,
+                preset_id: Some(preset_id.into()),
+                is_domain: false,
+            },
+            Rule {
+                id: format!("{preset_id}-geoip-antifilter"),
+                name: "antifilter".into(),
+                matcher: RuleMatcher::Geoip,
+                server_id: target_proxy.into(),
+                enabled: true,
+                preset_id: Some(preset_id.into()),
+                is_domain: false,
+            },
+            Rule {
+                id: format!("{preset_id}-geoip-antifilter-community"),
+                name: "antifilter-community".into(),
+                matcher: RuleMatcher::Geoip,
+                server_id: target_proxy.into(),
+                enabled: true,
+                preset_id: Some(preset_id.into()),
+                is_domain: false,
+            },
+        ]),
+        "russia-direct" => Ok(vec![
+            Rule {
+                id: format!("{preset_id}-geosite-category-ru"),
+                name: "category-ru".into(),
+                matcher: RuleMatcher::Geosite,
+                server_id: "direct".into(),
+                enabled: true,
+                preset_id: Some(preset_id.into()),
+                is_domain: false,
+            },
+            Rule {
+                id: format!("{preset_id}-geoip-ru"),
+                name: "ru".into(),
+                matcher: RuleMatcher::Geoip,
+                server_id: "direct".into(),
+                enabled: true,
+                preset_id: Some(preset_id.into()),
+                is_domain: false,
+            },
+            Rule {
+                id: format!("{preset_id}-geoip-private"),
+                name: "private".into(),
+                matcher: RuleMatcher::Geoip,
+                server_id: "direct".into(),
+                enabled: true,
+                preset_id: Some(preset_id.into()),
+                is_domain: false,
+            },
+        ]),
+        _ => Err(BackendError::new("INVALID_PRESET", "Unknown rule preset")),
+    }
 }

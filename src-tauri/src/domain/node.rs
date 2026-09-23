@@ -135,20 +135,6 @@ impl VpnNode {
         if !["none", "tls", "reality"].contains(&self.security.kind.as_str()) {
             return Err(BackendError::unsupported());
         }
-        if self.protocol == Protocol::Vless && self.security.kind == "none" {
-            let local = match self.address.parse::<std::net::IpAddr>() {
-                Ok(std::net::IpAddr::V4(ip)) => {
-                    ip.is_private() || ip.is_loopback() || ip.is_link_local()
-                }
-                Ok(std::net::IpAddr::V6(ip)) => {
-                    ip.is_loopback() || ip.is_unique_local() || ip.is_unicast_link_local()
-                }
-                Err(_) => self.address == "localhost" || self.address.ends_with(".local"),
-            };
-            if !local {
-                return Err(BackendError::unsupported());
-            }
-        }
         if self.security.kind == "reality"
             && (self.security.public_key.is_empty() || self.security.server_name.is_empty())
         {

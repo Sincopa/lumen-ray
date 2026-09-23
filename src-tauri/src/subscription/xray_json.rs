@@ -143,9 +143,11 @@ pub fn parse(v: &Value, subscription: &str) -> Result<VpnNode> {
         balancer: None,
         id: String::new(),
         subscription_id: subscription.into(),
-        name: v["remarks"].as_str()
+        name: v["remarks"]
+            .as_str()
             .or_else(|| v["tag"].as_str())
-            .unwrap_or("Server").into(),
+            .unwrap_or("Server")
+            .into(),
         address: endpoint["address"]
             .as_str()
             .ok_or_else(BackendError::invalid)?

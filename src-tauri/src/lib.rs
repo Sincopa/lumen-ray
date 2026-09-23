@@ -61,8 +61,10 @@ pub fn run() {
                 .build(),
         )
         .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_notification::init())
         .invoke_handler(tauri::generate_handler![
             vpn::connect,
+            vpn::connect_exact,
             vpn::disconnect,
             vpn::reconnect,
             vpn::get_status,
@@ -76,13 +78,18 @@ pub fn run() {
             commands::catalog::get_subscription_source,
             commands::catalog::get_processes,
             commands::catalog::ping_server,
+            commands::diagnostics::get_network_diagnostics,
+            commands::diagnostics::open_log_console,
+            commands::notifications::send_lumen_notification,
             commands::settings::get_settings,
             commands::settings::set_settings,
             commands::settings::reset_network_settings,
             commands::updates::check_core_update,
             commands::updates::install_core_update,
             commands::updates::check_application_update,
-            commands::updates::install_application_update
+            commands::updates::install_application_update,
+            commands::geo::get_geo_database_info,
+            commands::geo::update_geo_databases
         ])
         .setup(|app| {
             let resources = if cfg!(debug_assertions) {
@@ -95,7 +102,10 @@ pub fn run() {
             let data = std::env::var_os("LUMEN_TEST_DATA_DIR")
                 .map(std::path::PathBuf::from)
                 .unwrap_or(data);
-            let state = app::state::AppState::open(data, resources)?;
+            let state = app::state::AppState::open(data, resources.clone())?;
+            if let Err(e) = crate::xray::geo::ensure_initialized(&resources, &state.data) {
+                log::warn!("Geo database initialization error: {:?}", e);
+            }
             let active = crate::xray::updater::current(&state.data.join("core"));
             if active != crate::xray::core::VERSION {
                 let resolved = tauri::async_runtime::block_on(async {
@@ -134,7 +144,7 @@ pub fn run() {
                     }
                 }
             });
-            let initial_menu = create_tray_menu(&app.handle(), &state)?;
+            let initial_menu = create_tray_menu(app.handle(), &state)?;
             let mut tray_builder = tauri::tray::TrayIconBuilder::with_id("main-tray")
                 .menu(&initial_menu)
                 .tooltip("Lumen")
@@ -315,7 +325,7 @@ pub fn create_tray_menu(
         .filter(|n| {
             repo.selected_subscription_id
                 .as_ref()
-                .map_or(true, |sid| n.subscription_id == *sid)
+                .is_none_or(|sid| n.subscription_id == *sid)
         })
         .collect();
 
@@ -456,7 +466,7 @@ async fn handle_tray_menu_event(
             .await;
             let status = state.snapshot.read().await.status.clone();
             if status == "connected" {
-                let _ = services::vpn_service::connect(state, app, srv_id.to_string()).await;
+                let _ = services::vpn_service::connect_exact(state, app, srv_id.to_string()).await;
             }
             update_tray_menu(app, state);
         }

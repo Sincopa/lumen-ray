@@ -33,6 +33,7 @@ tempfile = "3"
 fs2 = "0.4"
 zip = { version = "6", default-features = false, features = ["deflate"] }
 tauri-plugin-updater = "2"
+tauri-plugin-notification = "2"
 
 [target.'cfg(windows)'.dependencies]
 png = "0.17"

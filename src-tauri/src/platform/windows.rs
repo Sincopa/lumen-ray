@@ -109,7 +109,9 @@ pub fn set_autostart(enabled: bool) -> Result<()> {
     let hkcu = RegKey::predef(HKEY_CURRENT_USER);
     let (key, _) = hkcu
         .create_subkey(r"Software\Microsoft\Windows\CurrentVersion\Run")
-        .map_err(|_| BackendError::new("STORAGE_FAILED", "Failed to access Windows Run registry"))?;
+        .map_err(|_| {
+            BackendError::new("STORAGE_FAILED", "Failed to access Windows Run registry")
+        })?;
     if enabled {
         let exe = std::env::current_exe()
             .map_err(|_| BackendError::new("STORAGE_FAILED", "Executable path is unavailable"))?;

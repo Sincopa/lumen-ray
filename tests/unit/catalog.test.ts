@@ -2,6 +2,7 @@ import { describe, it, expect, vi } from 'vitest';
 import { get } from 'svelte/store';
 import {
 	CatalogService,
+	LatencyProbeTracker,
 	initialCatalog,
 	validCatalog,
 	validateSubscription,
@@ -19,6 +20,28 @@ function storage(): StoragePort {
 }
 
 describe('catalog', () => {
+	it('tracks each latency probe until its final overlapping run finishes', async () => {
+		const tracker = new LatencyProbeTracker();
+		let finishFirst!: () => void;
+		let finishSecond!: () => void;
+		const first = tracker.track(
+			'server',
+			() => new Promise<void>((resolve) => (finishFirst = resolve)),
+		);
+		const second = tracker.track(
+			'server',
+			() => new Promise<void>((resolve) => (finishSecond = resolve)),
+		);
+
+		expect(get(tracker.state).has('server')).toBe(true);
+		finishFirst();
+		await first;
+		expect(get(tracker.state).has('server')).toBe(true);
+		finishSecond();
+		await second;
+		expect(get(tracker.state).has('server')).toBe(false);
+	});
+
 	it('derives a profile name when import name is omitted', async () => {
 		const service = new CatalogService();
 		await service.importSubscription('https://sub.example.com/profile');
@@ -278,5 +301,179 @@ describe('catalog', () => {
 				'vless://00000000-0000-4000-8000-000000000001@1.1.1.1:443?type=tcp\nvless://00000000-0000-4000-8000-000000000002@2.2.2.2:443?type=tcp',
 			),
 		).not.toThrow();
+	});
+
+	it('normalizes geo tags and handles prefix stripping and mismatch rejection', async () => {
+		const { normalizeGeoTag } = await import(
+			'../../src/lib/services/catalog'
+		);
+		expect(normalizeGeoTag('ru', 'geoip')).toBe('ru');
+		expect(normalizeGeoTag('geoip:ru', 'geoip')).toBe('ru');
+		expect(normalizeGeoTag('geosite:category-ru', 'geosite')).toBe(
+			'category-ru',
+		);
+		expect(normalizeGeoTag('category-ru', 'geosite')).toBe('category-ru');
+		expect(normalizeGeoTag('antifilter-community', 'geosite')).toBe(
+			'antifilter-community',
+		);
+		expect(normalizeGeoTag('private', 'geoip')).toBe('private');
+
+		// Mismatched prefixes must throw
+		expect(() => normalizeGeoTag('geosite:ru', 'geoip')).toThrow(
+			'invalidRule',
+		);
+		expect(() => normalizeGeoTag('geoip:category-ru', 'geosite')).toThrow(
+			'invalidRule',
+		);
+
+		// Malformed or unsafe characters
+		expect(() => normalizeGeoTag('invalid/tag', 'geoip')).toThrow(
+			'invalidRule',
+		);
+		expect(() => normalizeGeoTag('tag with space', 'geosite')).toThrow(
+			'invalidRule',
+		);
+		expect(() => normalizeGeoTag('', 'geosite')).toThrow('invalidRule');
+	});
+
+	it('saves and compiles geosite, geoip, domain, and application rules', () => {
+		const service = new CatalogService();
+		service.saveRule({
+			id: 'geo-1',
+			name: 'geosite:category-ru',
+			matcher: 'geosite',
+			serverId: 'direct',
+			enabled: true,
+		});
+		service.saveRule({
+			id: 'geo-2',
+			name: 'geoip:private',
+			matcher: 'geoip',
+			serverId: 'direct',
+			enabled: true,
+		});
+		service.saveRule({
+			id: 'custom-app',
+			name: 'Code.exe',
+			matcher: 'application',
+			serverId: 'demo-fi',
+			enabled: true,
+		});
+
+		const rules = get(service.state).rules;
+		const r1 = rules.find((r) => r.id === 'geo-1');
+		const r2 = rules.find((r) => r.id === 'geo-2');
+		const r3 = rules.find((r) => r.id === 'custom-app');
+
+		expect(r1?.name).toBe('category-ru');
+		expect(r1?.matcher).toBe('geosite');
+		expect(r1?.isDomain).toBe(false);
+
+		expect(r2?.name).toBe('private');
+		expect(r2?.matcher).toBe('geoip');
+		expect(r2?.isDomain).toBe(false);
+
+		expect(r3?.name).toBe('Code.exe');
+		expect(r3?.matcher).toBe('application');
+		expect(r3?.isDomain).toBe(false);
+	});
+
+	it('applies presets idempotently and preserves custom user rules', async () => {
+		const service = new CatalogService();
+
+		// Add custom user rule
+		service.saveRule({
+			id: 'user-custom-rule',
+			name: 'my-custom-domain.com',
+			matcher: 'domain',
+			serverId: 'direct',
+			enabled: true,
+		});
+
+		// Apply preset "russia-optimized"
+		await service.applyPreset('russia-optimized');
+		let rules = get(service.state).rules;
+
+		// 7 preset rules + 1 custom user rule = 8 rules
+		expect(rules.length).toBe(8);
+		expect(rules.some((r) => r.id === 'user-custom-rule')).toBe(true);
+
+		// Verify exact order of preset rules
+		const presetRules = rules.filter(
+			(r) => r.presetId === 'russia-optimized',
+		);
+		expect(presetRules.length).toBe(7);
+		expect(presetRules[0].name).toBe('private');
+		expect(presetRules[0].matcher).toBe('geoip');
+		expect(presetRules[0].serverId).toBe('direct');
+
+		expect(presetRules[1].name).toBe('antifilter');
+		expect(presetRules[1].matcher).toBe('geosite');
+
+		expect(presetRules[2].name).toBe('antifilter-community');
+		expect(presetRules[2].matcher).toBe('geosite');
+
+		expect(presetRules[3].name).toBe('antifilter');
+		expect(presetRules[3].matcher).toBe('geoip');
+
+		expect(presetRules[4].name).toBe('antifilter-community');
+		expect(presetRules[4].matcher).toBe('geoip');
+
+		expect(presetRules[5].name).toBe('category-ru');
+		expect(presetRules[5].matcher).toBe('geosite');
+		expect(presetRules[5].serverId).toBe('direct');
+
+		expect(presetRules[6].name).toBe('ru');
+		expect(presetRules[6].matcher).toBe('geoip');
+		expect(presetRules[6].serverId).toBe('direct');
+
+		// Idempotency: applying again must not duplicate rules
+		await service.applyPreset('russia-optimized');
+		rules = get(service.state).rules;
+		expect(rules.length).toBe(8);
+
+		// Remove preset: custom user rule must remain intact
+		await service.removePreset('russia-optimized');
+		rules = get(service.state).rules;
+		expect(rules.length).toBe(1);
+		expect(rules[0].id).toBe('user-custom-rule');
+
+		// Apply russia-direct preset and check exact order
+		await service.applyPreset('russia-direct');
+		const directPresetRules = get(service.state).rules.filter(
+			(r) => r.presetId === 'russia-direct',
+		);
+		expect(directPresetRules.length).toBe(3);
+		expect(directPresetRules[0].name).toBe('category-ru');
+		expect(directPresetRules[0].matcher).toBe('geosite');
+		expect(directPresetRules[1].name).toBe('ru');
+		expect(directPresetRules[1].matcher).toBe('geoip');
+		expect(directPresetRules[2].name).toBe('private');
+		expect(directPresetRules[2].matcher).toBe('geoip');
+
+		// Verify custom rule with block target
+		service.saveRule({
+			id: 'block-rule',
+			name: 'malware.com',
+			matcher: 'domain',
+			serverId: 'block',
+			enabled: true,
+		});
+		const savedBlock = get(service.state).rules.find((r) => r.id === 'block-rule');
+		expect(savedBlock?.serverId).toBe('block');
+	});
+
+	it('provides geo database information and mock updates', async () => {
+		const { getGeoDatabaseInfo, updateGeoDatabases } = await import(
+			'../../src/lib/services/geoDatabase'
+		);
+		const info = await getGeoDatabaseInfo();
+		expect(info.version).toBe('202410152325');
+		expect(info.source).toContain('NetworkKeeper/v2ray-rules-ru');
+		expect(info.valid).toBe(true);
+
+		const updated = await updateGeoDatabases();
+		expect(updated.version).toBe('202410152325');
+		expect(updated.valid).toBe(true);
 	});
 });

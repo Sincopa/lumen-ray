@@ -65,6 +65,20 @@ fn protocols_and_base64() {
     assert_eq!(parsed.diagnostics.len(), 1);
 }
 #[test]
+fn accepts_plain_vless_subscriptions_from_public_servers() {
+    use base64::Engine;
+
+    let link = "vless://00000000-0000-4000-8000-000000000001@203.0.113.10:443?encryption=none&security=none&type=tcp#Plain-VLESS";
+    let encoded = base64::engine::general_purpose::STANDARD.encode(link);
+    let parsed = parser::parse(&encoded, "plain-vless").unwrap();
+
+    assert_eq!(parsed.nodes.len(), 1);
+    assert!(parsed.diagnostics.is_empty());
+    assert_eq!(parsed.nodes[0].security.kind, "none");
+    assert_eq!(parsed.nodes[0].transport.network, "tcp");
+    assert!(config::outbound(&parsed.nodes[0], "proxy").is_ok());
+}
+#[test]
 fn yaml_json_and_config_routing() {
     let yaml="proxies:\n  - name: test\n    type: trojan\n    server: example.com\n    port: 443\n    password: secret\n";
     let node = parser::parse(yaml, "sub").unwrap().nodes.remove(0);
@@ -199,7 +213,7 @@ fn rejects_lossy_translations_and_oversized_inputs() {
 
 #[test]
 fn ip_rules_and_default_direct() {
-    use crate::storage::repository::Rule;
+    use crate::storage::repository::{Rule, RuleMatcher};
     let node = uri::parse(VLESS, "sub").unwrap();
     let mut repo = Repository {
         nodes: vec![node.clone()],
@@ -215,9 +229,11 @@ fn ip_rules_and_default_direct() {
         repo.rules = vec![Rule {
             id: "rule".into(),
             name: name.into(),
-            is_domain: true,
+            matcher: RuleMatcher::Domain,
             server_id: "subscription".into(),
             enabled: true,
+            preset_id: None,
+            is_domain: true,
         }];
         let value =
             serde_json::to_value(config::build(&repo, &node.id, 10808, 10809, true).unwrap())
@@ -237,15 +253,33 @@ fn ip_rules_and_default_direct() {
 async fn private_subscription_config_validation() {
     let filename =
         std::env::var_os("LUMEN_TEST_SUBSCRIPTION_FILE").expect("Set local test subscription file");
-    let source = std::fs::read_to_string(filename).unwrap();
-    let body = crate::subscription::fetcher::fetch(source.trim())
-        .await
-        .unwrap();
-    let parsed = parser::parse(&body, "test").unwrap();
+    let source_file = std::fs::read_to_string(filename).unwrap();
+    let lines: Vec<_> = source_file
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .collect();
+    let sources = if lines.len() > 1
+        && lines
+            .iter()
+            .all(|line| line.starts_with("https://") || line.starts_with("http://"))
+    {
+        lines
+    } else {
+        vec![source_file.trim()]
+    };
+    let mut nodes = Vec::new();
+    let mut diagnostic_count = 0;
+    for (index, source) in sources.into_iter().enumerate() {
+        let body = crate::subscription::fetcher::fetch(source).await.unwrap();
+        let parsed = parser::parse(&body, &format!("test-{index}")).unwrap();
+        diagnostic_count += parsed.diagnostics.len();
+        nodes.extend(parsed.nodes);
+    }
     eprintln!(
         "Supported nodes: {}; unsupported nodes: {}",
-        parsed.nodes.len(),
-        parsed.diagnostics.len()
+        nodes.len(),
+        diagnostic_count
     );
     let directory = tempfile::tempdir().unwrap();
     let core = core::prepare(
@@ -254,7 +288,7 @@ async fn private_subscription_config_validation() {
     )
     .unwrap();
     let repo = Repository {
-        nodes: parsed.nodes,
+        nodes,
         ..Default::default()
     };
     let mut failures = std::collections::BTreeMap::new();
@@ -434,4 +468,265 @@ fn balanced_xray_subscription_and_clean_names() {
     assert_eq!(servers[0]["countryCode"], "fm");
     assert_eq!(servers[1]["name"], "Финляндия");
     assert_eq!(servers[1]["countryCode"], "fi");
+}
+
+#[test]
+fn rule_model_backward_compatibility_migration() {
+    use crate::storage::repository::{Rule, RuleMatcher};
+
+    // Old rule with isDomain: true should deserialize to RuleMatcher::Domain
+    let legacy_domain = r#"{
+        "id": "leg-dom",
+        "name": "example.com",
+        "isDomain": true,
+        "serverId": "direct",
+        "enabled": true
+    }"#;
+    let rule: Rule = serde_json::from_str(legacy_domain).unwrap();
+    assert_eq!(rule.matcher, RuleMatcher::Domain);
+    assert!(rule.is_domain);
+    assert_eq!(rule.id, "leg-dom");
+
+    // Old rule with isDomain: false should deserialize to RuleMatcher::Application
+    let legacy_app = r#"{
+        "id": "leg-app",
+        "name": "discord.exe",
+        "isDomain": false,
+        "serverId": "subscription",
+        "enabled": true
+    }"#;
+    let rule: Rule = serde_json::from_str(legacy_app).unwrap();
+    assert_eq!(rule.matcher, RuleMatcher::Application);
+    assert!(!rule.is_domain);
+
+    // New rule with explicit matcher geosite
+    let geosite_rule = r#"{
+        "id": "geo-s",
+        "name": "category-ru",
+        "matcher": "geosite",
+        "serverId": "direct",
+        "enabled": true
+    }"#;
+    let rule: Rule = serde_json::from_str(geosite_rule).unwrap();
+    assert_eq!(rule.matcher, RuleMatcher::Geosite);
+    assert!(!rule.is_domain);
+
+    // New rule with explicit matcher geoip
+    let geoip_rule = r#"{
+        "id": "geo-i",
+        "name": "ru",
+        "matcher": "geoip",
+        "serverId": "direct",
+        "enabled": true
+    }"#;
+    let rule: Rule = serde_json::from_str(geoip_rule).unwrap();
+    assert_eq!(rule.matcher, RuleMatcher::Geoip);
+
+    // Serialization must contain both matcher and isDomain for frontend/mock compatibility
+    let serialized = serde_json::to_value(&rule).unwrap();
+    assert_eq!(serialized["matcher"], "geoip");
+    assert_eq!(serialized["isDomain"], false);
+}
+
+#[test]
+fn geo_rules_xray_config_compilation() {
+    use crate::storage::repository::{Rule, RuleMatcher};
+
+    let node = uri::parse(VLESS, "sub").unwrap();
+    let mut repo = Repository {
+        nodes: vec![node.clone()],
+        routing_mode: "rules".into(),
+        ..Default::default()
+    };
+
+    repo.rules = vec![
+        Rule {
+            id: "r1".into(),
+            name: "private".into(),
+            matcher: RuleMatcher::Geoip,
+            server_id: "direct".into(),
+            enabled: true,
+            preset_id: None,
+            is_domain: false,
+        },
+        Rule {
+            id: "r2".into(),
+            name: "geosite:antifilter".into(), // prefix should be stripped
+            matcher: RuleMatcher::Geosite,
+            server_id: "subscription".into(),
+            enabled: true,
+            preset_id: None,
+            is_domain: false,
+        },
+        Rule {
+            id: "r3".into(),
+            name: "category-ru".into(),
+            matcher: RuleMatcher::Geosite,
+            server_id: "block".into(),
+            enabled: true,
+            preset_id: None,
+            is_domain: false,
+        },
+        Rule {
+            id: "r4".into(),
+            name: "geoip:ru".into(), // prefix should be stripped
+            matcher: RuleMatcher::Geoip,
+            server_id: "direct".into(),
+            enabled: true,
+            preset_id: None,
+            is_domain: false,
+        },
+    ];
+
+    let value =
+        serde_json::to_value(config::build(&repo, &node.id, 10808, 10809, true).unwrap()).unwrap();
+
+    // Verify domainStrategy is IPIfNonMatch
+    assert_eq!(value["routing"]["domainStrategy"], "IPIfNonMatch");
+
+    let rules = value["routing"]["rules"].as_array().unwrap();
+    // Rules 0: probe, 1: process self/, 2: bypass_lan (since default true)
+    let custom_rules = &rules[3..7];
+
+    // Rule 1: geoip:private -> direct (must be in ip, never in domain)
+    assert_eq!(custom_rules[0]["ip"][0], "geoip:private");
+    assert!(custom_rules[0].get("domain").is_none());
+    assert_eq!(custom_rules[0]["outboundTag"], "direct");
+
+    // Rule 2: geosite:antifilter -> proxy (must be in domain, never in ip)
+    assert_eq!(custom_rules[1]["domain"][0], "geosite:antifilter");
+    assert!(custom_rules[1].get("ip").is_none());
+    assert_eq!(custom_rules[1]["outboundTag"], "proxy");
+
+    // Rule 3: geosite:category-ru -> block
+    assert_eq!(custom_rules[2]["domain"][0], "geosite:category-ru");
+    assert_eq!(custom_rules[2]["outboundTag"], "block");
+
+    // Rule 4: geoip:ru -> direct
+    assert_eq!(custom_rules[3]["ip"][0], "geoip:ru");
+    assert_eq!(custom_rules[3]["outboundTag"], "direct");
+
+    // Final rules: unhandled DNS (port 53) and default fallback
+    let last = rules.last().unwrap();
+    assert_eq!(last["network"], "tcp,udp");
+    assert_eq!(last["outboundTag"], "direct");
+
+    // Tag validation: mismatched prefix must error
+    repo.rules = vec![Rule {
+        id: "bad".into(),
+        name: "geosite:category-ru".into(),
+        matcher: RuleMatcher::Geoip,
+        server_id: "direct".into(),
+        enabled: true,
+        preset_id: None,
+        is_domain: false,
+    }];
+    assert!(config::build(&repo, &node.id, 10808, 10809, true).is_err());
+
+    // Tag validation: invalid characters like path traversal / ext: must error
+    repo.rules = vec![Rule {
+        id: "bad2".into(),
+        name: "ext:bad.dat:ru".into(),
+        matcher: RuleMatcher::Geosite,
+        server_id: "direct".into(),
+        enabled: true,
+        preset_id: None,
+        is_domain: false,
+    }];
+    assert!(config::build(&repo, &node.id, 10808, 10809, true).is_err());
+}
+
+#[test]
+fn preset_application_idempotency_and_preservation() {
+    use crate::services::catalog_service::generate_preset_rules;
+
+    let rules = generate_preset_rules("russia-optimized", "sub-1").unwrap();
+    assert_eq!(rules.len(), 7);
+
+    // Exact order required:
+    assert_eq!(rules[0].name, "private");
+    assert_eq!(rules[0].server_id, "direct");
+
+    assert_eq!(rules[1].name, "antifilter");
+    assert_eq!(rules[1].server_id, "sub-1");
+
+    assert_eq!(rules[2].name, "antifilter-community");
+    assert_eq!(rules[2].server_id, "sub-1");
+
+    assert_eq!(rules[3].name, "antifilter");
+    assert_eq!(rules[3].server_id, "sub-1");
+
+    assert_eq!(rules[4].name, "antifilter-community");
+    assert_eq!(rules[4].server_id, "sub-1");
+
+    assert_eq!(rules[5].name, "category-ru");
+    assert_eq!(rules[5].server_id, "direct");
+
+    assert_eq!(rules[6].name, "ru");
+    assert_eq!(rules[6].server_id, "direct");
+
+    // Check all preset rules have preset_id populated
+    for r in &rules {
+        assert_eq!(r.preset_id.as_deref(), Some("russia-optimized"));
+    }
+
+    // Check bypass-blocking
+    let bb = generate_preset_rules("bypass-blocking", "sub-1").unwrap();
+    assert_eq!(bb.len(), 4);
+    assert_eq!(bb[0].name, "antifilter");
+    assert_eq!(bb[1].name, "antifilter-community");
+    assert_eq!(bb[2].name, "antifilter");
+    assert_eq!(bb[3].name, "antifilter-community");
+
+    // Check russia-direct: category-ru (1), ru (2), private (3)
+    let rd = generate_preset_rules("russia-direct", "sub-1").unwrap();
+    assert_eq!(rd.len(), 3);
+    assert_eq!(rd[0].name, "category-ru");
+    assert_eq!(rd[1].name, "ru");
+    assert_eq!(rd[2].name, "private");
+
+    // Check case-insensitive prefix normalization
+    assert_eq!(
+        crate::storage::repository::normalize_geo_tag("GeoSite:category-ru", "geosite").unwrap(),
+        "category-ru"
+    );
+    assert_eq!(
+        crate::storage::repository::normalize_geo_tag("GEOSITE:antifilter", "geosite").unwrap(),
+        "antifilter"
+    );
+    assert_eq!(
+        crate::storage::repository::normalize_geo_tag("GeoIP:ru", "geoip").unwrap(),
+        "ru"
+    );
+    assert_eq!(
+        crate::storage::repository::normalize_geo_tag("GEOIP:private", "geoip").unwrap(),
+        "private"
+    );
+}
+
+#[tokio::test]
+async fn geo_database_delivery_and_initialization() {
+    let resources = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("resources/core");
+    let temp_data = tempfile::tempdir().unwrap();
+
+    // Verify initial state is missing
+    let info = crate::xray::geo::info(temp_data.path());
+    assert_eq!(info.status, "missing");
+
+    // Initialize from bundled resources
+    crate::xray::geo::ensure_initialized(&resources, temp_data.path()).unwrap();
+
+    // Verify initialized status is ready
+    let info = crate::xray::geo::info(temp_data.path());
+    assert_eq!(info.status, "ready");
+    assert_eq!(info.version, crate::xray::geo::BUNDLED_GEO_VERSION);
+    assert_eq!(info.source, crate::xray::geo::GEO_SOURCE_NAME);
+
+    // Verify files exist and have non-zero size
+    let geoip = temp_data.path().join("geo/geoip.dat");
+    let geosite = temp_data.path().join("geo/geosite.dat");
+    assert!(geoip.is_file());
+    assert!(geosite.is_file());
+    assert!(std::fs::metadata(&geoip).unwrap().len() > 100_000);
+    assert!(std::fs::metadata(&geosite).unwrap().len() > 1_000_000);
 }

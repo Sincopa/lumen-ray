@@ -181,7 +181,8 @@ fn resolve_resources() -> Result<std::path::PathBuf> {
         );
     }
     if cfg!(debug_assertions) {
-        candidates.push(std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("resources/core"));
+        candidates
+            .push(std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("resources/core"));
     }
     for candidate in candidates {
         if candidate.join("xray.exe").is_file() {
@@ -222,6 +223,9 @@ pub async fn run(id: &str, parent: u32) -> Result<()> {
     } else {
         crate::xray::updater::prepare(&request.core_version, &data.path().join("core")).await?
     };
+    if let Some(parent) = core.parent() {
+        std::env::set_var("XRAY_LOCATION_ASSET", parent);
+    }
     crate::services::vpn_service::validate(&core, &bytes).await?;
     let mut child = super::process::CoreProcess::spawn(&core, &bytes).await?;
     // Closing the authenticated pipe (including parent crash) tears down the child and Wintun.

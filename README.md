@@ -67,8 +67,12 @@ startup recovery; third-party changes made after activation are preserved.
 Core shutdown sends a console break signal and waits for graceful exit, with bounded
 forced termination and Job Object cleanup as a fallback. Native proxy crash detection
 and startup proxy recovery passed; the TUN crash/route/DNS recovery matrix remains open.
-Kill Switch is deliberately not implemented. Auto-connect reconnects the saved selected
-node when the application starts; it does not install Windows autorun.
+Kill Switch is deliberately not implemented. Auto-connect connects the saved node at
+application startup; Windows autorun is a separate setting. Optional auto-reconnect
+checks the active SOCKS route periodically, retries after network loss or core exit
+with bounded backoff, and stops after a manual disconnect. "Lowest latency" probes
+up to 16 nodes in the active subscription when no measurements exist, then checks
+connectivity and tries another node on a node-specific failure.
 
 ### Subscriptions and storage
 
@@ -91,10 +95,14 @@ schema defaults; unknown future versions fail explicitly. Browser localStorage c
 are separate and never seed the native runtime. Appearance/language preferences remain
 in the original frontend storage.
 
-The existing interface has no IP/speed panel or updater screen. Real IP/statistics and
-safe updater commands are available through the service/IPC layer; new visual controls
-were not added. Process paths and executable icons come from Windows; inaccessible
-icons use the existing fallback.
+The existing home interface has no IP/speed panel. Settings now include an Xray update
+action and a diagnostics subview with IPv4/IPv6 checks, configured/system DNS, proxy
+and TUN route status, and a credential-free copyable report. Subscription refresh
+processes every subscription with two simultaneous fetches and bounded retries.
+Latency checks can run at startup, when opening Servers, or only on demand. Optional
+Windows notifications cover interruptions, recovery, impending subscription expiry,
+and application updates. Process paths and executable icons come from Windows;
+inaccessible icons use the existing fallback.
 
 ### Updates
 

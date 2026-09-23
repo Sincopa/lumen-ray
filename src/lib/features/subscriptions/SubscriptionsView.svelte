@@ -300,26 +300,27 @@
 					<button
 						type="button"
 						class="card-body"
+						class:expanded={expanded === sub.id}
 						aria-expanded={expanded === sub.id}
 						onclick={() => toggleSubscription(sub.id)}
 					>
-						<div class="metrics-row">
-							<div class="metric-item">
-								<span class="metric-label">
-									{t('subscriptions.daysLabel')}
-								</span>
-								<span class="metric-val">{sub.daysRemaining ?? '—'}</span>
-							</div>
-							<div class="metric-item">
-								<span class="metric-label">
-									{t('subscriptions.trafficLabel')}
-								</span>
-								<span class="metric-val">{sub.traffic ?? '—'}</span>
-							</div>
-						</div>
 						{#if expanded === sub.id}
-							<div class="updated-time" transition:slide={{ duration: 220 }}>
-								{formatUpdatedAgo(sub)}
+							<div class="card-details" transition:slide={{ duration: 220 }}>
+								<div class="metrics-row">
+									<div class="metric-item">
+										<span class="metric-label">
+											{t('subscriptions.daysLabel')}
+										</span>
+										<span class="metric-val">{sub.daysRemaining ?? '—'}</span>
+									</div>
+									<div class="metric-item">
+										<span class="metric-label">
+											{t('subscriptions.trafficLabel')}
+										</span>
+										<span class="metric-val">{sub.traffic ?? '—'}</span>
+									</div>
+								</div>
+								<div class="updated-time">{formatUpdatedAgo(sub)}</div>
 							</div>
 						{/if}
 					</button>
@@ -458,16 +459,21 @@
 		padding: 18px 22px;
 		display: flex;
 		flex-direction: column;
-		min-height: 108px;
+		min-height: 60px;
 		transition:
 			background-color 200ms ease,
-			transform 220ms var(--ease-spring);
+			transform 220ms var(--ease-spring),
+			min-height 220ms ease;
 		cursor: pointer;
 	}
-	.sub-card:hover,
+	.sub-card:hover {
+		background: rgba(0, 0, 0, 0.3);
+		border: none;
+	}
 	.sub-card.expanded {
 		background: rgba(0, 0, 0, 0.3);
 		border: none;
+		min-height: 108px;
 	}
 	.card-header {
 		display: flex;
@@ -570,7 +576,7 @@
 		transform: rotate(180deg);
 	}
 	.card-body {
-		margin-top: 14px;
+		margin-top: 0;
 		border-top: none;
 		border-right: 0;
 		border-bottom: 0;
@@ -582,6 +588,15 @@
 		text-align: left;
 		cursor: pointer;
 		display: flex;
+		flex-direction: column;
+		transition: margin-top 220ms ease;
+	}
+	.card-body.expanded {
+		margin-top: 14px;
+	}
+	.card-details {
+		display: flex;
+		width: 100%;
 		justify-content: space-between;
 		align-items: flex-end;
 		gap: 12px;

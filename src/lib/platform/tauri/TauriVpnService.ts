@@ -39,6 +39,9 @@ export class TauriVpnService implements VpnService {
 	async connect(serverId: string): Promise<void> {
 		await invoke('connect', { serverId });
 	}
+	async connectExact(serverId: string): Promise<void> {
+		await invoke('connect_exact', { serverId });
+	}
 
 	async disconnect(): Promise<void> {
 		await invoke('disconnect');

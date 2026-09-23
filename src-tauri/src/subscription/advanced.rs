@@ -65,9 +65,11 @@ pub fn parse(v: &Value, subscription: &str) -> Result<VpnNode> {
     let mut node = VpnNode {
         id: String::new(),
         subscription_id: subscription.into(),
-        name: v["remarks"].as_str()
+        name: v["remarks"]
+            .as_str()
             .or_else(|| v["tag"].as_str())
-            .unwrap_or("Server").into(),
+            .unwrap_or("Server")
+            .into(),
         address,
         port,
         credential,

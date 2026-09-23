@@ -1,4 +1,6 @@
 <script lang="ts">
+	import { onMount } from 'svelte';
+	import { invoke } from '@tauri-apps/api/core';
 	import chevronIcon from '../../../assets/chevron.svg';
 	import reloadIcon from '../../../assets/reload.svg';
 	import Dropdown from '../../components/Dropdown.svelte';
@@ -22,12 +24,85 @@
 		SHADER_PRESETS,
 	} from '../../stores/shaderSettings.svelte';
 	import { applicationUpdate } from '../../services/applicationUpdate';
+	import { coreUpdate } from '../../services/coreUpdate';
+	import {
+		getGeoDatabaseInfo,
+		updateGeoDatabases,
+		type GeoDatabaseInfo,
+	} from '../../services/geoDatabase';
+
+	interface NetworkDiagnostics {
+		status: string;
+		networkMode: string;
+		coreVersion: string;
+		publicIpv4: string | null;
+		publicIpv6: string | null;
+		systemDns: string[];
+		configuredDns: string;
+		tunnelReady: boolean;
+		routesReady: boolean;
+		routingConflict: boolean;
+		systemProxyEnabled: boolean;
+		proxyManaged: boolean;
+	}
 
 	let autoConnect = $state(false);
 	let resettingProxy = $state(false);
 	let resetSuccess = $state(false);
-	let currentSubView = $state<'main' | 'presets' | 'colors'>('main');
+	let currentSubView = $state<
+		'main' | 'presets' | 'colors' | 'notifications' | 'diagnostics'
+	>('main');
 	const applicationUpdateState = applicationUpdate.state;
+	const coreUpdateState = coreUpdate.state;
+	let diagnostics = $state<NetworkDiagnostics | null>(null);
+	let diagnosticsBusy = $state(false);
+	let diagnosticsError = $state(false);
+	let reportCopied = $state(false);
+	let openingLogConsole = $state(false);
+	let logConsoleError = $state(false);
+	let customDnsOpen = $state(false);
+	let customDnsDraft = $state('');
+	let customDnsInvalid = $state(false);
+	let geoInfo = $state<GeoDatabaseInfo | null>(null);
+	let geoUpdating = $state(false);
+	let geoUpdateSuccess = $state(false);
+	let geoError = $state<string | null>(null);
+
+	onMount(() => {
+		void loadGeoInfo();
+	});
+
+	async function loadGeoInfo() {
+		try {
+			geoInfo = await getGeoDatabaseInfo();
+			if (!geoInfo.valid && geoInfo.error) {
+				geoError = geoInfo.error;
+			}
+		} catch {
+			geoError = 'GEO_DATA_MISSING';
+		}
+	}
+
+	async function handleUpdateGeo() {
+		geoUpdating = true;
+		geoError = null;
+		geoUpdateSuccess = false;
+		try {
+			geoInfo = await updateGeoDatabases();
+			if (!geoInfo.valid && geoInfo.error) {
+				geoError = geoInfo.error;
+			} else {
+				geoUpdateSuccess = true;
+				setTimeout(() => {
+					geoUpdateSuccess = false;
+				}, 4000);
+			}
+		} catch (e) {
+			geoError = e instanceof Error ? e.message : 'GEO_DATA_MISSING';
+		} finally {
+			geoUpdating = false;
+		}
+	}
 
 	let uiScaleText = $state(Math.round(shaderSettings.uiScale * 100).toString());
 	let uiScaleDraft = $state(shaderSettings.uiScale);
@@ -54,6 +129,79 @@
 		} else {
 			void applicationUpdate.check();
 		}
+	}
+
+	function handleCoreUpdateAction() {
+		if ($coreUpdateState.status === 'available') void coreUpdate.install();
+		else void coreUpdate.check();
+	}
+
+	async function loadDiagnostics() {
+		if (!runtime.isTauri) return;
+		diagnosticsBusy = true;
+		diagnosticsError = false;
+		try {
+			diagnostics = await invoke<NetworkDiagnostics>('get_network_diagnostics');
+		} catch {
+			diagnosticsError = true;
+		} finally {
+			diagnosticsBusy = false;
+		}
+	}
+
+	async function copyDiagnostics() {
+		if (!diagnostics) return;
+		const report = [
+			`Lumen / Xray ${diagnostics.coreVersion}`,
+			`Status: ${diagnostics.status}`,
+			`Mode: ${diagnostics.networkMode}`,
+			`IPv4: ${diagnostics.publicIpv4 ?? 'unavailable'}`,
+			`IPv6: ${diagnostics.publicIpv6 ?? 'unavailable'}`,
+			`System DNS: ${diagnostics.systemDns.join(', ') || 'unavailable'}`,
+			`Selected DNS: ${diagnostics.configuredDns}`,
+			`TUN adapter: ${diagnostics.tunnelReady}`,
+			`TUN routes: ${diagnostics.routesReady}`,
+			`Routing conflict: ${diagnostics.routingConflict}`,
+			`System proxy enabled: ${diagnostics.systemProxyEnabled}`,
+			`System proxy managed: ${diagnostics.proxyManaged}`,
+		].join('\n');
+		try {
+			await navigator.clipboard.writeText(report);
+			reportCopied = true;
+			setTimeout(() => {
+				reportCopied = false;
+			}, 2000);
+		} catch {
+			diagnosticsError = true;
+		}
+	}
+
+	async function openLogConsole() {
+		if (!runtime.isTauri || openingLogConsole) return;
+		openingLogConsole = true;
+		logConsoleError = false;
+		try {
+			await invoke('open_log_console');
+		} catch {
+			logConsoleError = true;
+		} finally {
+			openingLogConsole = false;
+		}
+	}
+
+	function commitCustomDns() {
+		const value = customDnsDraft.trim();
+		const octets = value.split('.');
+		const valid =
+			octets.length === 4 &&
+			octets.every(
+				(octet) => /^\d{1,3}$/.test(octet) && Number(octet) <= 255,
+			) &&
+			value !== '0.0.0.0' &&
+			value !== '255.255.255.255' &&
+			Number(octets[0]) < 224;
+		customDnsInvalid = !valid;
+		if (valid) void updateNativeSettings({ dnsServer: value });
 	}
 
 	async function handleResetProxy() {
@@ -119,6 +267,29 @@
 		{ value: '8.8.8.8', label: t('settings.dnsGoogle') },
 		{ value: '94.140.14.14', label: t('settings.dnsAdGuard') },
 		{ value: '9.9.9.9', label: t('settings.dnsQuad9') },
+		{ value: 'custom', label: t('settings.dnsCustom') },
+	]);
+	let dnsSelection = $derived(
+		['system', '1.1.1.1', '8.8.8.8', '94.140.14.14', '9.9.9.9'].includes(
+			$nativeSettings.dnsServer,
+		)
+			? $nativeSettings.dnsServer
+			: 'custom',
+	);
+	$effect(() => {
+		if (dnsSelection === 'custom' && !customDnsOpen) {
+			customDnsDraft = $nativeSettings.dnsServer;
+		}
+	});
+
+	let serverSelectionOptions = $derived([
+		{ value: 'manual', label: t('settings.serverManual') },
+		{ value: 'best', label: t('settings.serverBest') },
+	]);
+	let pingPolicyOptions = $derived([
+		{ value: 'startup', label: t('settings.pingStartup') },
+		{ value: 'list', label: t('settings.pingList') },
+		{ value: 'manual', label: t('settings.pingManual') },
 	]);
 
 	let updateIntervalOptions = $derived([
@@ -289,6 +460,11 @@
 						onchange={(val) => updateNativeSettings({ startMinimized: val })}
 					/>
 				</SettingRow>
+				<SettingRow
+					label={t('settings.notifications')}
+					showChevron
+					onclick={() => (currentSubView = 'notifications')}
+				/>
 			</div>
 		</div>
 
@@ -324,19 +500,81 @@
 					/>
 				</SettingRow>
 
+				<SettingRow
+					label={t('settings.autoReconnect')}
+					description={t('settings.autoReconnectDesc')}
+				>
+					<ToggleSwitch
+						mode="checkbox"
+						disabled={!runtime.isTauri}
+						ariaLabel={t('settings.autoReconnect')}
+						checked={$nativeSettings.autoReconnect}
+						onchange={(value) => updateNativeSettings({ autoReconnect: value })}
+					/>
+				</SettingRow>
+
+				<SettingRow
+					label={t('settings.serverSelection')}
+					description={t('settings.serverSelectionDesc')}
+				>
+					<Dropdown
+						label={t('settings.serverSelection')}
+						options={serverSelectionOptions}
+						value={$nativeSettings.serverSelection}
+						disabled={!runtime.isTauri}
+						onChange={(value) =>
+							updateNativeSettings({
+								serverSelection: value as 'manual' | 'best',
+							})}
+						compact
+					/>
+				</SettingRow>
+
 				<!-- DNS Server -->
-				<SettingRow label={t('settings.dnsServer')}>
+				<SettingRow
+					label={t('settings.dnsServer')}
+					description={t('settings.dnsTunOnly')}
+				>
 					<Dropdown
 						label={t('settings.dnsServer')}
 						options={dnsOptions}
 						value={runtime.isTauri
-							? ($nativeSettings.dnsServer ?? 'system')
+							? customDnsOpen
+								? 'custom'
+								: dnsSelection
 							: 'system'}
 						disabled={!runtime.isTauri}
-						onChange={(value) => updateNativeSettings({ dnsServer: value })}
+						onChange={(value) => {
+							customDnsOpen = value === 'custom';
+							customDnsInvalid = false;
+							if (value !== 'custom')
+								void updateNativeSettings({ dnsServer: value });
+						}}
 						compact
 					/>
 				</SettingRow>
+				{#if customDnsOpen || dnsSelection === 'custom'}
+					<SettingRow
+						label={t('settings.dnsCustomAddress')}
+						description={customDnsInvalid
+							? t('settings.dnsInvalid')
+							: t('settings.dnsCustomHint')}
+					>
+						<input
+							class="ping-url-input custom-dns-input"
+							type="text"
+							inputmode="decimal"
+							placeholder="9.9.9.9"
+							aria-label={t('settings.dnsCustomAddress')}
+							bind:value={customDnsDraft}
+							onchange={commitCustomDns}
+							onkeydown={(event) => {
+								if (event.key === 'Enter')
+									(event.target as HTMLInputElement).blur();
+							}}
+						/>
+					</SettingRow>
+				{/if}
 
 				<!-- Bypass LAN -->
 				<SettingRow label={t('settings.bypassLan')}>
@@ -363,6 +601,19 @@
 						onChange={(value) =>
 							updateNativeSettings({
 								updateIntervalHours: parseInt(value, 10),
+							})}
+						compact
+					/>
+				</SettingRow>
+				<SettingRow label={t('settings.pingPolicy')}>
+					<Dropdown
+						label={t('settings.pingPolicy')}
+						options={pingPolicyOptions}
+						value={$nativeSettings.pingPolicy}
+						disabled={!runtime.isTauri}
+						onChange={(value) =>
+							updateNativeSettings({
+								pingPolicy: value as 'startup' | 'list' | 'manual',
 							})}
 						compact
 					/>
@@ -409,11 +660,95 @@
 
 				<!-- Xray Core Status -->
 				<SettingRow label={t('settings.xrayCore')}>
-					<span class="badge">
-						{runtime.isTauri
-							? $nativeSettings.coreVersion
-							: t('settings.mockReady')}
-					</span>
+					<div class="version-badge-container">
+						<span class="badge version-badge">
+							{runtime.isTauri
+								? $nativeSettings.coreVersion
+								: t('settings.mockReady')}
+						</span>
+						<button
+							type="button"
+							class="action-btn"
+							class:success={$coreUpdateState.status === 'latest'}
+							disabled={!runtime.isTauri ||
+								['checking', 'installing'].includes($coreUpdateState.status)}
+							onclick={handleCoreUpdateAction}
+						>
+							{#if $coreUpdateState.status === 'checking'}{t(
+									'settings.checkingUpdates',
+								)}
+							{:else if $coreUpdateState.status === 'installing'}{t(
+									'settings.downloadingUpdate',
+								)}
+							{:else if $coreUpdateState.status === 'available'}{t(
+									'settings.downloadUpdate',
+									{ version: $coreUpdateState.version ?? '' },
+								)}
+							{:else if $coreUpdateState.status === 'latest'}{t(
+									'settings.latestVersionInstalled',
+								)}
+							{:else if $coreUpdateState.status === 'error'}{t('common.retry')}
+							{:else}{t('settings.checkUpdates')}{/if}
+						</button>
+					</div>
+				</SettingRow>
+				<!-- GeoIP / GeoSite Database Status -->
+				<SettingRow
+					label={t('settings.geoDatabases') || 'Базы GeoIP / GeoSite'}
+					description={geoError
+						? t('errors.' + geoError) ||
+							t('settings.geoDataCorrupted') ||
+							'Базы GeoIP/GeoSite отсутствуют или повреждены'
+						: geoInfo
+							? `${geoInfo.source}${geoInfo.lastUpdated ? ' · ' + new Date(geoInfo.lastUpdated).toLocaleDateString() : ''}`
+							: undefined}
+				>
+					<div class="version-badge-container">
+						<span
+							class="badge version-badge"
+							class:error-badge={geoError || (geoInfo && !geoInfo.valid)}
+						>
+							{geoInfo?.version || '202410152325'}
+						</span>
+						<button
+							type="button"
+							class="action-btn"
+							class:success={geoUpdateSuccess}
+							disabled={geoUpdating}
+							onclick={handleUpdateGeo}
+						>
+							{geoUpdating
+								? t('settings.downloadingUpdate') || 'Обновление...'
+								: geoUpdateSuccess
+									? t('settings.latestVersionInstalled') || 'Обновлено'
+									: t('settings.updateDatabases') || 'Обновить базы'}
+						</button>
+					</div>
+				</SettingRow>
+				<SettingRow
+					label={t('settings.diagnostics')}
+					showChevron
+					onclick={() => {
+						currentSubView = 'diagnostics';
+						void loadDiagnostics();
+					}}
+				/>
+				<SettingRow
+					label={t('settings.logConsole')}
+					description={logConsoleError
+						? t('settings.logConsoleError')
+						: t('settings.logConsoleDesc')}
+				>
+					<button
+						type="button"
+						class="action-btn"
+						disabled={!runtime.isTauri || openingLogConsole}
+						onclick={() => void openLogConsole()}
+					>
+						{openingLogConsole
+							? t('common.loading')
+							: t('settings.openLogConsole')}
+					</button>
 				</SettingRow>
 			</div>
 			<p class="availability">
@@ -444,6 +779,170 @@
 					showChevron
 					onclick={() => (currentSubView = 'colors')}
 				/>
+			</div>
+		</div>
+	{:else if currentSubView === 'notifications'}
+		<div class="subview-container">
+			<div class="subview-header">
+				<button
+					type="button"
+					class="back-btn"
+					onclick={() => (currentSubView = 'main')}
+					aria-label={t('common.back')}
+				>
+					<img
+						src={chevronIcon}
+						alt=""
+						class="back-chevron"
+						aria-hidden="true"
+					/>
+					<span class="subview-title">{t('settings.notifications')}</span>
+				</button>
+			</div>
+			<div class="settings-group">
+				<SettingRow label={t('settings.notifyDisconnect')}>
+					<ToggleSwitch
+						mode="checkbox"
+						disabled={!runtime.isTauri}
+						ariaLabel={t('settings.notifyDisconnect')}
+						checked={$nativeSettings.notifyDisconnect}
+						onchange={(value) =>
+							updateNativeSettings({ notifyDisconnect: value })}
+					/>
+				</SettingRow>
+				<SettingRow label={t('settings.notifyReconnect')}>
+					<ToggleSwitch
+						mode="checkbox"
+						disabled={!runtime.isTauri}
+						ariaLabel={t('settings.notifyReconnect')}
+						checked={$nativeSettings.notifyReconnect}
+						onchange={(value) =>
+							updateNativeSettings({ notifyReconnect: value })}
+					/>
+				</SettingRow>
+				<SettingRow label={t('settings.notifyExpiry')}>
+					<ToggleSwitch
+						mode="checkbox"
+						disabled={!runtime.isTauri}
+						ariaLabel={t('settings.notifyExpiry')}
+						checked={$nativeSettings.notifyExpiry}
+						onchange={(value) => updateNativeSettings({ notifyExpiry: value })}
+					/>
+				</SettingRow>
+				<SettingRow label={t('settings.notifyUpdate')}>
+					<ToggleSwitch
+						mode="checkbox"
+						disabled={!runtime.isTauri}
+						ariaLabel={t('settings.notifyUpdate')}
+						checked={$nativeSettings.notifyUpdate}
+						onchange={(value) => updateNativeSettings({ notifyUpdate: value })}
+					/>
+				</SettingRow>
+			</div>
+		</div>
+	{:else if currentSubView === 'diagnostics'}
+		<div class="subview-container">
+			<div class="subview-header">
+				<button
+					type="button"
+					class="back-btn"
+					onclick={() => (currentSubView = 'main')}
+					aria-label={t('common.back')}
+				>
+					<img
+						src={chevronIcon}
+						alt=""
+						class="back-chevron"
+						aria-hidden="true"
+					/>
+					<span class="subview-title">{t('settings.diagnostics')}</span>
+				</button>
+			</div>
+			{#if diagnostics}
+				<div class="settings-group">
+					<SettingRow label={t('settings.diagStatus')}>
+						<span class="diag-value">{t('home.' + diagnostics.status)}</span>
+					</SettingRow>
+					<SettingRow label={t('settings.routingMode')}>
+						<span class="diag-value">
+							{t(
+								diagnostics.networkMode === 'tun'
+									? 'settings.modeTun'
+									: 'settings.modeProxy',
+							)}
+						</span>
+					</SettingRow>
+					<SettingRow label={t('settings.xrayCore')}>
+						<span class="diag-value">{diagnostics.coreVersion}</span>
+					</SettingRow>
+					<SettingRow label="IPv4">
+						<span class="diag-value">
+							{diagnostics.publicIpv4 ?? t('settings.diagUnavailable')}
+						</span>
+					</SettingRow>
+					<SettingRow label="IPv6">
+						<span class="diag-value">
+							{diagnostics.publicIpv6 ?? t('settings.diagUnavailable')}
+						</span>
+					</SettingRow>
+					<SettingRow label={t('settings.diagSystemDns')}>
+						<span class="diag-value">
+							{diagnostics.systemDns.join(', ') ||
+								t('settings.diagUnavailable')}
+						</span>
+					</SettingRow>
+					<SettingRow label={t('settings.dnsServer')}>
+						<span class="diag-value">{diagnostics.configuredDns}</span>
+					</SettingRow>
+					<SettingRow label={t('settings.diagTunnel')}>
+						<span class="diag-value">
+							{diagnostics.tunnelReady
+								? t('settings.diagReady')
+								: t('settings.diagUnavailable')}
+						</span>
+					</SettingRow>
+					<SettingRow label={t('settings.diagRoutes')}>
+						<span class="diag-value">
+							{diagnostics.routingConflict
+								? t('settings.diagConflict')
+								: diagnostics.routesReady
+									? t('settings.diagReady')
+									: t('settings.diagUnavailable')}
+						</span>
+					</SettingRow>
+					<SettingRow label={t('settings.diagProxy')}>
+						<span class="diag-value">
+							{diagnostics.proxyManaged
+								? t('settings.diagProxyLumen')
+								: diagnostics.systemProxyEnabled
+									? t('settings.diagProxyOther')
+									: t('settings.diagProxyOff')}
+						</span>
+					</SettingRow>
+				</div>
+			{/if}
+			{#if diagnosticsError}<p class="availability" role="alert">
+					{t('settings.diagError')}
+				</p>{/if}
+			<div class="diagnostics-actions">
+				<button
+					type="button"
+					class="action-btn"
+					disabled={diagnosticsBusy || !runtime.isTauri}
+					onclick={() => void loadDiagnostics()}
+				>
+					{diagnosticsBusy
+						? t('settings.checkingUpdates')
+						: t('settings.diagRefresh')}
+				</button>
+				<button
+					type="button"
+					class="action-btn"
+					disabled={!diagnostics}
+					onclick={() => void copyDiagnostics()}
+				>
+					{reportCopied ? t('common.copied') : t('settings.diagCopy')}
+				</button>
 			</div>
 		</div>
 	{:else if currentSubView === 'presets'}
@@ -1064,6 +1563,25 @@
 		background: rgba(255, 255, 255, 0.1);
 		color: rgba(255, 255, 255, 0.85);
 		font-variant-numeric: tabular-nums;
+	}
+	.version-badge.error-badge {
+		background: rgba(229, 62, 62, 0.2);
+		color: #feb2b2;
+	}
+	.custom-dns-input {
+		width: 130px;
+	}
+	.diag-value {
+		max-width: 160px;
+		font-size: 12px;
+		color: rgba(255, 255, 255, 0.78);
+		text-align: right;
+		word-break: break-word;
+	}
+	.diagnostics-actions {
+		display: flex;
+		gap: 8px;
+		padding: 0 4px;
 	}
 
 	.ping-url-wrapper {

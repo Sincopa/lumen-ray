@@ -1,8 +1,14 @@
 import { writable } from 'svelte/store';
 import { invoke } from '@tauri-apps/api/core';
-import type { Catalog, Rule } from '../../services/catalog';
+import { listen } from '@tauri-apps/api/event';
+import {
+	LatencyProbeTracker,
+	type Catalog,
+	type Rule,
+} from '../../services/catalog';
 
 export class TauriCatalogService {
+	private readonly probes = new LatencyProbeTracker();
 	private current: Catalog = {
 		version: 1,
 		servers: [],
@@ -13,6 +19,7 @@ export class TauriCatalogService {
 		routingMode: 'global',
 	};
 	readonly state = writable(this.current);
+	readonly pinging = this.probes.state;
 	readonly persistenceError = writable(false);
 	private readonly ready: Promise<void>;
 	constructor() {
@@ -20,6 +27,9 @@ export class TauriCatalogService {
 			this.publish(value),
 		);
 		void this.ready.catch(() => this.persistenceError.set(true));
+		void listen<Catalog>('catalog://changed', (event) =>
+			this.publish(event.payload),
+		);
 	}
 	private publish(value: Catalog) {
 		const existingLatencies = new Map(
@@ -76,6 +86,12 @@ export class TauriCatalogService {
 	async removeRules(ids: Set<string>) {
 		await this.mutate({ kind: 'removeRules', ids: [...ids] });
 	}
+	async applyPreset(presetId: string) {
+		await this.mutate({ kind: 'applyPreset', presetId });
+	}
+	async removePreset(presetId: string) {
+		await this.mutate({ kind: 'removePreset', presetId });
+	}
 	async importSubscription(input: string, name?: string) {
 		await this.ready;
 		const result = await invoke<{ catalog: Catalog }>('import_subscription', {
@@ -96,14 +112,16 @@ export class TauriCatalogService {
 		return invoke<string>('get_subscription_source', { id });
 	}
 	async pingServer(id: string): Promise<number | 'timeout'> {
-		await this.ready;
-		const latency = await invoke<number | 'timeout'>('ping_server', { id });
-		this.publish({
-			...this.current,
-			servers: this.current.servers.map((server) =>
-				server.id === id ? { ...server, latency } : server,
-			),
+		return this.probes.track(id, async () => {
+			await this.ready;
+			const latency = await invoke<number | 'timeout'>('ping_server', { id });
+			this.publish({
+				...this.current,
+				servers: this.current.servers.map((server) =>
+					server.id === id ? { ...server, latency } : server,
+				),
+			});
+			return latency;
 		});
-		return latency;
 	}
 }

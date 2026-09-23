@@ -19,10 +19,16 @@
 	import { runtime } from '../lib/runtime';
 	import { APP_WIDTH, APP_HEIGHT } from '../lib/constants/app';
 	import { getCurrentWindow } from '@tauri-apps/api/window';
+	import { invoke } from '@tauri-apps/api/core';
 	import { LogicalSize } from '@tauri-apps/api/dpi';
 	import { listen } from '@tauri-apps/api/event';
-	import { nativeSettings } from '../lib/services/settings';
+	import { nativeSettings, settingsReady } from '../lib/services/settings';
 	import { applicationUpdate } from '../lib/services/applicationUpdate';
+	import {
+		pingAllServers,
+		refreshAllSubscriptions,
+	} from '../lib/services/maintenance';
+	import { i18n } from '../lib/i18n';
 
 	type TabName = 'home' | 'subscriptions' | 'servers' | 'settings' | 'rules';
 
@@ -97,29 +103,30 @@
 		void applyScale(shaderSettings.uiScale);
 	});
 
-	async function refreshAndPingSubscriptions() {
-		try {
-			// Native catalog loading is asynchronous. Waiting for getServers() here
-			// prevents the startup pass from observing the service's empty seed state.
-			const servers = await catalog.getServers();
-			const sub = $catalogStore.subscriptions[0];
-			const tasks: Promise<unknown>[] = servers.map((server) =>
-				catalog.pingServer(server.id),
-			);
-			if (sub) tasks.push(catalog.refreshSubscription(sub.id));
-			await Promise.allSettled(tasks);
-		} catch (err) {
-			console.error(
-				'[auto-refresh] Failed to refresh subscription or ping:',
-				err,
-			);
-		}
+	function notify(kind: 'disconnect' | 'reconnect' | 'expiry' | 'update') {
+		if (!runtime.isTauri) return Promise.resolve();
+		return invoke<void>('send_lumen_notification', {
+			kind,
+			language: i18n.currentLanguage,
+		});
+	}
+
+	async function startMaintenance() {
+		const ready = await Promise.allSettled([
+			settingsReady,
+			catalog.getServers(),
+		]);
+		if (ready.some((result) => result.status === 'rejected')) return;
+		if ($nativeSettings.pingPolicy === 'startup')
+			void pingAllServers().catch(() => {});
+		if ($nativeSettings.updateIntervalHours > 0)
+			void refreshAllSubscriptions().catch(() => {});
 	}
 
 	onMount(() => {
 		void connection.initialize();
 		if (runtime.isTauri) {
-			void refreshAndPingSubscriptions();
+			void startMaintenance();
 		}
 		void applicationUpdate.check({ silent: true });
 
@@ -155,13 +162,70 @@
 		if (hours <= 0) return;
 		const timer = setInterval(
 			() => {
-				void refreshAndPingSubscriptions();
+				void refreshAllSubscriptions().catch(() => {});
 			},
 			hours * 3600 * 1000,
 		);
 		return () => {
 			clearInterval(timer);
 		};
+	});
+
+	$effect(() => {
+		if (
+			runtime.isTauri &&
+			currentTab === 'servers' &&
+			$nativeSettings.pingPolicy === 'list'
+		) {
+			void pingAllServers().catch(() => {});
+		}
+	});
+
+	let wasConnected = false;
+	let interrupted = false;
+	$effect(() => {
+		const status = $connectionStore.status;
+		if (status === 'connected') {
+			if (interrupted) void notify('reconnect').catch(() => {});
+			wasConnected = true;
+			interrupted = false;
+		} else if (status === 'error' && wasConnected) {
+			wasConnected = false;
+			interrupted = true;
+			void notify('disconnect').catch(() => {});
+		} else if (status === 'disconnected') {
+			wasConnected = false;
+			interrupted = false;
+		}
+	});
+
+	$effect(() => {
+		const version = $applicationUpdateState.version;
+		if (!runtime.isTauri || !$nativeSettings.notifyUpdate || !version) return;
+		const key = `lumen-update-notified-${version}`;
+		if (localStorage.getItem(key)) return;
+		localStorage.setItem(key, '1');
+		void notify('update').catch(() => localStorage.removeItem(key));
+	});
+
+	$effect(() => {
+		if (!runtime.isTauri || !$nativeSettings.notifyExpiry) return;
+		const marked: string[] = [];
+		for (const subscription of $catalogStore.subscriptions) {
+			if (typeof subscription.daysRemaining !== 'number') continue;
+			const key = `lumen-expiry-notified-${subscription.id}`;
+			if (subscription.daysRemaining > 7) {
+				localStorage.removeItem(key);
+				continue;
+			}
+			if (localStorage.getItem(key)) continue;
+			localStorage.setItem(key, '1');
+			marked.push(key);
+		}
+		if (marked.length)
+			void notify('expiry').catch(() => {
+				for (const key of marked) localStorage.removeItem(key);
+			});
 	});
 
 	// Action handlers
@@ -182,7 +246,7 @@
 	}
 
 	async function changeMode(mode: 'global' | 'rules') {
-		if (!['disconnected', 'error'].includes(connectionState)) return;
+		if ($connectionStore.busy) return;
 		try {
 			await catalog.setRoutingMode(mode);
 		} catch (e) {
@@ -300,7 +364,7 @@
 				{currentTab}
 				{routingMode}
 				{hasSubscriptions}
-				modeDisabled={!['disconnected', 'error'].includes(connectionState)}
+				modeDisabled={$connectionStore.busy}
 				onTabChange={handleTabChange}
 				onModeChange={changeMode}
 				onActionClick={() => (importing = true)}

@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { onDestroy } from 'svelte';
+	import { fade } from 'svelte/transition';
 	import { createDeferredTask } from '../../utils/deferredTask';
 	import CountryFlag from '../../components/CountryFlag.svelte';
 	import IconButton from '../../components/IconButton.svelte';
@@ -28,6 +29,7 @@
 		renameTask.cancel();
 	});
 	const catalogStore = catalog.state;
+	const pingingServers = catalog.pinging;
 	let {
 		selectedId = '',
 		disabled = false,
@@ -186,6 +188,15 @@
 			id: 'direct',
 			countryCode: '',
 			name: t('rules.direct'),
+		});
+	}
+
+	function selectBlock() {
+		if (disabled) return;
+		onSelect?.({
+			id: 'block',
+			countryCode: '',
+			name: t('rules.block') || 'Блокировать',
 		});
 	}
 </script>
@@ -376,6 +387,28 @@
 					{/if}
 				</span>
 			</button>
+
+			<!-- Special Option 3: Block (Blackhole) -->
+			<button
+				class="server-row special-row"
+				class:active-server={selectedId === 'block'}
+				{disabled}
+				aria-pressed={selectedId === 'block'}
+				onclick={selectBlock}
+			>
+				<span class="special-icon-badge block-badge">
+					<MaterialIcon name="block" size={20} />
+				</span>
+				<span class="server-text">
+					<span class="protocol">{t('rules.blockDesc') || 'Блокировать'}</span>
+					<span class="special-title">{t('rules.block')}</span>
+				</span>
+				<span class="ping">
+					{#if selectedId === 'block' && !busy}
+						<StatusDot size={8} />
+					{/if}
+				</span>
+			</button>
 		{/if}
 
 		{#each filtered as server (server.id)}
@@ -394,20 +427,24 @@
 					</span>
 				</span>
 				<span class="ping">
-					{#if server.id === selectedId && !busy}
+					{#if server.id === selectedId && !$pingingServers.has(server.id)}
 						<StatusDot size={8} />
 					{/if}
-					{#if busy && server.latency === 'timeout'}
-						<span class="ping-spinner" aria-label="Loading ping"></span>
-					{:else if typeof server.latency === 'number'}
-						<NumberFlow value={server.latency} /> ms
-					{:else if server.latency === 'timeout'}
-						{t('servers.timeout')}
-					{:else if server.latency}
-						{server.latency} ms
-					{:else}
-						—
-					{/if}
+					{#key $pingingServers.has(server.id)}
+						<span class="ping-reading" transition:fade={{ duration: 140 }}>
+							{#if $pingingServers.has(server.id)}
+								<span class="ping-spinner" aria-label="Loading ping"></span>
+							{:else if typeof server.latency === 'number'}
+								<NumberFlow value={server.latency} /> ms
+							{:else if server.latency === 'timeout'}
+								{t('servers.timeout')}
+							{:else if server.latency}
+								{server.latency} ms
+							{:else}
+								—
+							{/if}
+						</span>
+					{/key}
 				</span>
 			</button>
 		{:else}<p class="hint">{t('servers.empty')}</p>{/each}
@@ -590,6 +627,13 @@
 		display: inline-block;
 	}
 
+	.ping-reading {
+		display: inline-flex;
+		align-items: center;
+		justify-content: flex-end;
+		min-width: 42px;
+	}
+
 	@keyframes ping-spin {
 		to {
 			transform: rotate(360deg);
@@ -669,6 +713,10 @@
 	.special-icon-badge.direct-badge {
 		background: rgba(134, 225, 111, 0.15);
 		color: #86e16f;
+	}
+	.special-icon-badge.block-badge {
+		background: rgba(255, 99, 132, 0.15);
+		color: #ff6384;
 	}
 	.special-title {
 		font-size: 14px;

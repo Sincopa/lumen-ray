@@ -1,5 +1,5 @@
 <script lang="ts">
-	import type { Rule, Server } from '../../services/catalog';
+	import type { Rule, RuleMatcher, Server } from '../../services/catalog';
 	import { t } from '../../i18n';
 	import CountryFlag from '../../components/CountryFlag.svelte';
 	import MaterialIcon from '../../components/MaterialIcon.svelte';
@@ -28,39 +28,93 @@
 	}: Props = $props();
 
 	// svelte-ignore state_referenced_locally
-	let isDomain = $state(rule.isDomain);
-	// svelte-ignore state_referenced_locally
-	let name = $state(
-		rule.isDomain ? rule.name.replace(/^https?:\/\//i, '') : rule.name,
+	let matcher = $state<RuleMatcher>(
+		rule.matcher ?? (rule.isDomain ? 'domain' : 'application'),
 	);
+
+	function initialName(r: Rule, m: RuleMatcher): string {
+		if (m === 'domain') return r.name.replace(/^https?:\/\//i, '');
+		if (m === 'geosite') return r.name.replace(/^geosite:/i, '');
+		if (m === 'geoip') return r.name.replace(/^geoip:/i, '');
+		return r.name;
+	}
+
+	// svelte-ignore state_referenced_locally
+	let name = $state(initialName(rule, matcher));
 	let serverId = $derived(rule.serverId);
 	let error = $state('');
+
+	const matcherIndex = $derived(
+		['application', 'domain', 'geosite', 'geoip'].indexOf(matcher),
+	);
 
 	function cleanDomain(val: string): string {
 		// Preserve IP network prefixes; the native backend validates address and prefix length.
 		if (/^[\da-f:.]+\/\d{1,3}$/i.test(val.trim())) return val.trim();
-		return val
+		const cleaned = val
 			.trim()
 			.replace(/^https?:\/\//i, '')
-			.replace(/\/.*$/, '');
+			.replace(/[/?#].*$/, '');
+		return cleaned;
+	}
+
+	function handleDomainPaste(event: ClipboardEvent) {
+		const pasted = event.clipboardData?.getData('text');
+		if (!pasted) return;
+		event.preventDefault();
+		name = cleanDomain(pasted);
+		error = '';
+	}
+
+	function handleGeoPaste(event: ClipboardEvent) {
+		const pasted = event.clipboardData?.getData('text');
+		if (!pasted) return;
+		event.preventDefault();
+		const trimmed = pasted.trim();
+		const lower = trimmed.toLowerCase();
+		const wrongPrefix = matcher === 'geosite' ? 'geoip:' : 'geosite:';
+		const expectedPrefix = matcher === 'geosite' ? 'geosite:' : 'geoip:';
+
+		if (lower.startsWith(wrongPrefix)) {
+			error =
+				t('rules.mismatchedPrefixError', {
+					expected: expectedPrefix,
+					wrong: wrongPrefix,
+				}) || `Неверный префикс: для ${matcher} используйте ${expectedPrefix}`;
+			return;
+		}
+
+		if (lower.startsWith(expectedPrefix)) {
+			name = trimmed.slice(expectedPrefix.length).trim();
+		} else {
+			name = trimmed;
+		}
+		error = '';
+	}
+
+	function switchMatcher(next: RuleMatcher) {
+		matcher = next;
+		error = '';
 	}
 
 	function handleSave() {
 		error = '';
-		if (isDomain) {
+		const targetServer = serverId || 'subscription';
+
+		if (matcher === 'domain') {
 			const finalName = cleanDomain(name);
 			if (!finalName) {
 				error = t('errors.invalidRule');
 				return;
 			}
-			const targetServer = serverId || 'subscription';
 			onSave({
 				...rule,
+				matcher: 'domain',
 				isDomain: true,
 				name: finalName,
 				serverId: targetServer,
 			});
-		} else {
+		} else if (matcher === 'application') {
 			const procs = name
 				.split(',')
 				.map((s) => s.trim())
@@ -69,10 +123,10 @@
 				error = t('rules.chooseProcessError') || 'Выберите процесс';
 				return;
 			}
-			const targetServer = serverId || 'subscription';
 			if (procs.length === 1) {
 				onSave({
 					...rule,
+					matcher: 'application',
 					isDomain: false,
 					name: procs[0],
 					serverId: targetServer,
@@ -81,6 +135,7 @@
 				const rules: Rule[] = [
 					{
 						...rule,
+						matcher: 'application',
 						isDomain: false,
 						name: procs[0],
 						serverId: targetServer,
@@ -88,6 +143,7 @@
 					...procs.slice(1).map((p) => ({
 						id: crypto.randomUUID(),
 						name: p,
+						matcher: 'application' as RuleMatcher,
 						isDomain: false,
 						serverId: targetServer,
 						enabled: true,
@@ -95,6 +151,44 @@
 				];
 				onSave(rules);
 			}
+		} else {
+			// GeoSite or GeoIP
+			let tag = name.trim();
+			const lower = tag.toLowerCase();
+			const wrongPrefix = matcher === 'geosite' ? 'geoip:' : 'geosite:';
+			const expectedPrefix = matcher === 'geosite' ? 'geosite:' : 'geoip:';
+
+			if (lower.startsWith(wrongPrefix)) {
+				error =
+					t('rules.mismatchedPrefixError', {
+						expected: expectedPrefix,
+						wrong: wrongPrefix,
+					}) || `Неверный префикс: для ${matcher} используйте ${expectedPrefix}`;
+				return;
+			}
+
+			if (lower.startsWith(expectedPrefix)) {
+				tag = tag.slice(expectedPrefix.length).trim();
+			}
+
+			if (
+				!/^[a-zA-Z0-9_\-!@]+$/.test(tag) ||
+				tag.length === 0 ||
+				tag.length > 128
+			) {
+				error =
+					t('rules.invalidGeoTag') ||
+					'Недопустимый тег. Используйте латинские буквы, цифры, _, -, !, @ (до 128 символов)';
+				return;
+			}
+
+			onSave({
+				...rule,
+				matcher,
+				isDomain: false,
+				name: tag,
+				serverId: targetServer,
+			});
 		}
 	}
 
@@ -113,7 +207,7 @@
 
 <section class="rule-editor-view" aria-label={t('rules.editTitle')}>
 	<div class="form-container">
-		<!-- Section 1: Rule Type (Приложения / Домен) -->
+		<!-- Section 1: Rule Type (Application / Domain / GeoSite / GeoIP) -->
 		<div class="field-group">
 			<span class="field-label">{t('rules.kind')}</span>
 			<div
@@ -121,40 +215,56 @@
 				role="tablist"
 				aria-label={t('rules.kind')}
 			>
-				<div class="slider-thumb" class:domain-active={isDomain}></div>
+				<div
+					class="slider-thumb"
+					style:width="calc((100% - 12px - 18px) / 4)"
+					style:transform="translateX(calc({matcherIndex} * (100% + 6px)))"
+				></div>
 				<button
 					type="button"
 					role="tab"
 					class="segment-btn"
-					class:active-segment={!isDomain}
-					aria-selected={!isDomain}
-					onclick={() => {
-						isDomain = false;
-						rule.isDomain = false;
-						error = '';
-					}}
+					class:active-segment={matcher === 'application'}
+					aria-selected={matcher === 'application'}
+					onclick={() => switchMatcher('application')}
 				>
-					{t('rules.applicationTab') || 'Приложения'}
+					{t('rules.applicationTab') || 'Программа'}
 				</button>
 				<button
 					type="button"
 					role="tab"
 					class="segment-btn"
-					class:active-segment={isDomain}
-					aria-selected={isDomain}
-					onclick={() => {
-						isDomain = true;
-						rule.isDomain = true;
-						error = '';
-					}}
+					class:active-segment={matcher === 'domain'}
+					aria-selected={matcher === 'domain'}
+					onclick={() => switchMatcher('domain')}
 				>
 					{t('rules.domainTab') || 'Домен'}
+				</button>
+				<button
+					type="button"
+					role="tab"
+					class="segment-btn"
+					class:active-segment={matcher === 'geosite'}
+					aria-selected={matcher === 'geosite'}
+					onclick={() => switchMatcher('geosite')}
+				>
+					GeoSite
+				</button>
+				<button
+					type="button"
+					role="tab"
+					class="segment-btn"
+					class:active-segment={matcher === 'geoip'}
+					aria-selected={matcher === 'geoip'}
+					onclick={() => switchMatcher('geoip')}
+				>
+					GeoIP
 				</button>
 			</div>
 		</div>
 
-		<!-- Section 2: Domain or Application Field -->
-		{#if isDomain}
+		<!-- Section 2: Input Field based on Matcher -->
+		{#if matcher === 'domain'}
 			<div class="field-group">
 				<label class="field-label" for="domain-input">
 					{t('rules.domain')}
@@ -166,14 +276,15 @@
 						class="text-input"
 						type="text"
 						bind:value={name}
-						placeholder="ru.pinterest.com"
+						onpaste={handleDomainPaste}
+						placeholder="example.com"
 						autocomplete="off"
 						spellcheck="false"
 						required
 					/>
 				</div>
 			</div>
-		{:else}
+		{:else if matcher === 'application'}
 			<div class="field-group">
 				<span class="field-label">
 					{t('rules.applicationField') || 'Приложение'}
@@ -182,8 +293,6 @@
 					type="button"
 					class="selector-pill"
 					onclick={() => {
-						rule.isDomain = false;
-						isDomain = false;
 						onSelectProcess();
 					}}
 					aria-label={t('rules.selectProcess') || 'Выбрать процесс'}
@@ -193,6 +302,49 @@
 					</span>
 					<img src={chevronIcon} alt="" class="chevron-right" />
 				</button>
+			</div>
+		{:else}
+			<div class="field-group">
+				<label class="field-label" for="geo-input">
+					{matcher === 'geosite' ? 'GeoSite' : 'GeoIP'} ({t(
+						'rules.category',
+					) || 'Категория'})
+				</label>
+				<div class="input-pill" class:active-pill={name.length > 0}>
+					<span class="domain-prefix"
+						>{matcher === 'geosite' ? 'geosite:' : 'geoip:'}</span
+					>
+					<input
+						id="geo-input"
+						class="text-input"
+						type="text"
+						bind:value={name}
+						onpaste={handleGeoPaste}
+						placeholder={matcher === 'geosite' ? 'category-ru' : 'ru'}
+						autocomplete="off"
+						spellcheck="false"
+						required
+					/>
+				</div>
+				<div class="geo-examples">
+					<span class="example-label"
+						>{t('rules.examples') || 'Примеры'}:</span
+					>
+					<div class="example-chips">
+						{#each matcher === 'geosite' ? ['category-ru', 'antifilter', 'antifilter-community'] : ['ru', 'private', 'antifilter'] as ex (ex)}
+							<button
+								type="button"
+								class="example-tag"
+								onclick={() => {
+									name = ex;
+									error = '';
+								}}
+							>
+								{ex}
+							</button>
+						{/each}
+					</div>
+				</div>
 			</div>
 		{/if}
 
@@ -209,6 +361,11 @@
 					{#if serverId === 'direct'}
 						<MaterialIcon name="alt_route" size={20} />
 						<span class="selector-value">{t('rules.direct')}</span>
+					{:else if serverId === 'block'}
+						<MaterialIcon name="block" size={20} />
+						<span class="selector-value"
+							>{t('rules.block') || 'Блокировать'}</span
+						>
 					{:else if serverId === 'subscription' || (subscriptionName && serverId === subscriptionName)}
 						<MaterialIcon name="sync_alt" size={20} />
 						<span class="selector-value">
@@ -270,14 +427,14 @@
 	.form-container {
 		display: flex;
 		flex-direction: column;
-		gap: 24px;
+		gap: 20px;
 		width: 100%;
 	}
 
 	.field-group {
 		display: flex;
 		flex-direction: column;
-		gap: 12px;
+		gap: 10px;
 		width: 100%;
 	}
 
@@ -288,11 +445,11 @@
 		letter-spacing: -0.2px;
 	}
 
-	/* Segmented switcher (Приложения / Домен) */
+	/* Segmented switcher */
 	.type-segmented-pill {
 		position: relative;
 		width: 100%;
-		height: 56px;
+		height: 52px;
 		border-radius: 24px;
 		background: rgba(0, 0, 0, 0.22);
 		border: none;
@@ -310,17 +467,12 @@
 		top: 6px;
 		bottom: 6px;
 		left: 6px;
-		width: calc((100% - 12px - 6px) / 2);
 		border-radius: 18px;
 		background: #ffffff;
 		box-shadow: 0 2px 10px rgba(0, 0, 0, 0.25);
 		transition: transform 0.28s cubic-bezier(0.22, 1, 0.36, 1);
 		z-index: 1;
 		pointer-events: none;
-	}
-
-	.slider-thumb.domain-active {
-		transform: translateX(calc(100% + 6px));
 	}
 
 	.segment-btn {
@@ -332,16 +484,17 @@
 		background: transparent !important;
 		border: none;
 		color: rgba(255, 255, 255, 0.7);
-		font-size: 14px;
+		font-size: 13px;
 		font-weight: 500;
 		cursor: pointer;
 		transition:
 			color 200ms ease,
-			font-weight 200ms ease,
-			transform 150ms ease;
+			font-weight 200ms ease;
 		display: flex;
 		align-items: center;
 		justify-content: center;
+		padding: 0 4px;
+		white-space: nowrap;
 	}
 
 	.segment-btn:hover:not(.active-segment) {
@@ -357,7 +510,7 @@
 	.input-pill,
 	.selector-pill {
 		width: 100%;
-		height: 60px;
+		height: 56px;
 		border-radius: 24px;
 		background: rgba(0, 0, 0, 0.2);
 		border: 1px solid transparent;
@@ -398,7 +551,7 @@
 
 	.domain-prefix {
 		font-size: 14px;
-		color: rgba(255, 255, 255, 0.4);
+		color: rgba(255, 255, 255, 0.45);
 		user-select: none;
 		flex-shrink: 0;
 	}
@@ -422,6 +575,44 @@
 
 	.text-input::placeholder {
 		color: rgba(255, 255, 255, 0.45);
+	}
+
+	.geo-examples {
+		display: flex;
+		align-items: center;
+		gap: 8px;
+		flex-wrap: wrap;
+		padding: 0 4px;
+	}
+
+	.example-label {
+		font-size: 12px;
+		color: rgba(255, 255, 255, 0.5);
+	}
+
+	.example-chips {
+		display: flex;
+		align-items: center;
+		gap: 6px;
+		flex-wrap: wrap;
+	}
+
+	.example-tag {
+		background: rgba(255, 255, 255, 0.08);
+		border: 1px solid rgba(255, 255, 255, 0.12);
+		border-radius: 12px;
+		padding: 2px 8px;
+		font-size: 11px;
+		color: rgba(255, 255, 255, 0.85);
+		cursor: pointer;
+		transition:
+			background 150ms ease,
+			color 150ms ease;
+	}
+
+	.example-tag:hover {
+		background: rgba(255, 255, 255, 0.18);
+		color: #ffffff;
 	}
 
 	.selector-value {

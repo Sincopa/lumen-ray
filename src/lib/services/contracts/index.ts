@@ -20,6 +20,7 @@ export interface VpnService {
 		error?: unknown;
 	}>;
 	connect(serverId: string): Promise<void>;
+	connectExact?(serverId: string): Promise<void>;
 	disconnect(): Promise<void>;
 	reconnect(): Promise<void>;
 	getStatus(): Promise<VpnConnectionState>;

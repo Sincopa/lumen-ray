@@ -2,7 +2,9 @@
     "files":  {
                   "LICENSE":  "1f256ecad192880510e84ad60474eab7589218784b9a50bc7ceee34c2b91f1d5",
                   "xray.exe":  "0d0fc0ea2b05641acb78c01fc36ad694e7b029861b2d5eb93da0e3e9fda9a98f",
-                  "wintun.dll":  "e5da8447dc2c320edc0fc52fa01885c103de8c118481f683643cacc3220dafce"
+                  "geoip.dat":  "9315c8677c101db1097cc16a53c47cd315e576a6b50734b6a9eed72862e32402",
+                  "wintun.dll":  "e5da8447dc2c320edc0fc52fa01885c103de8c118481f683643cacc3220dafce",
+                  "geosite.dat":  "f404e3ef2f68a167cab0a4383bc239e9cdb831672982819d1549701263095b8f"
               },
     "architecture":  "x86_64",
     "version":  "26.9.9",

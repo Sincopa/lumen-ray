@@ -18,6 +18,8 @@ pub struct AppState {
     pub shutdown: tokio::sync::watch::Sender<bool>,
     pub traffic: RwLock<crate::services::stats_service::TrafficStats>,
     pub latencies: RwLock<std::collections::HashMap<String, serde_json::Value>>,
+    pub desired_server: RwLock<Option<String>>,
+    pub recovery_running: std::sync::atomic::AtomicBool,
     _instance: std::fs::File,
 }
 impl AppState {
@@ -54,6 +56,8 @@ impl AppState {
             shutdown,
             traffic: RwLock::new(Default::default()),
             latencies: RwLock::new(std::collections::HashMap::new()),
+            desired_server: RwLock::new(None),
+            recovery_running: std::sync::atomic::AtomicBool::new(false),
             _instance: instance,
         }))
     }

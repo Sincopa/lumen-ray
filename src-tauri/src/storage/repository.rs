@@ -25,14 +25,108 @@ pub struct Subscription {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub expire: Option<u64>,
 }
-#[derive(Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum RuleMatcher {
+    #[default]
+    Domain,
+    Application,
+    Geosite,
+    Geoip,
+}
+
+pub fn is_valid_geo_tag(tag: &str) -> bool {
+    let s = tag.trim();
+    if s.is_empty() || s.len() > 128 {
+        return false;
+    }
+    s.chars()
+        .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-' || c == '!' || c == '@')
+}
+
+pub fn normalize_geo_tag(tag: &str, expected_kind: &str) -> Result<String> {
+    let trimmed = tag.trim();
+    if expected_kind == "geosite" && trimmed.to_lowercase().starts_with("geoip:") {
+        return Err(BackendError::new(
+            "INVALID_RULE",
+            "Mismatched geoip prefix in geosite rule",
+        ));
+    }
+    if expected_kind == "geoip" && trimmed.to_lowercase().starts_with("geosite:") {
+        return Err(BackendError::new(
+            "INVALID_RULE",
+            "Mismatched geosite prefix in geoip rule",
+        ));
+    }
+    let prefix = format!("{expected_kind}:");
+    let normalized =
+        if trimmed.len() >= prefix.len() && trimmed[..prefix.len()].eq_ignore_ascii_case(&prefix) {
+            trimmed[prefix.len()..].trim()
+        } else {
+            trimmed
+        };
+    if !is_valid_geo_tag(normalized) {
+        return Err(BackendError::new(
+            "INVALID_RULE",
+            "Category name must contain only letters, numbers, hyphens, underscores, exclamation marks, or @",
+        ));
+    }
+    Ok(normalized.to_string())
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct Rule {
     pub id: String,
     pub name: String,
-    pub is_domain: bool,
+    pub matcher: RuleMatcher,
     pub server_id: String,
     pub enabled: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub preset_id: Option<String>,
+    pub is_domain: bool,
+}
+
+impl<'de> Deserialize<'de> for Rule {
+    fn deserialize<D>(deserializer: D) -> std::result::Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        #[derive(Deserialize)]
+        #[serde(rename_all = "camelCase")]
+        struct RuleHelper {
+            id: String,
+            name: String,
+            #[serde(default)]
+            matcher: Option<RuleMatcher>,
+            #[serde(default)]
+            is_domain: Option<bool>,
+            server_id: String,
+            enabled: bool,
+            #[serde(default)]
+            preset_id: Option<String>,
+        }
+
+        let helper = RuleHelper::deserialize(deserializer)?;
+        let matcher = match helper.matcher {
+            Some(m) => m,
+            None => match helper.is_domain {
+                Some(true) => RuleMatcher::Domain,
+                Some(false) => RuleMatcher::Application,
+                None => RuleMatcher::Domain,
+            },
+        };
+        let is_domain = matcher == RuleMatcher::Domain;
+        Ok(Rule {
+            id: helper.id,
+            name: helper.name,
+            matcher,
+            server_id: helper.server_id,
+            enabled: helper.enabled,
+            preset_id: helper.preset_id,
+            is_domain,
+        })
+    }
 }
 fn default_true() -> bool {
     true
@@ -46,6 +140,12 @@ fn default_update_interval() -> u32 {
 
 fn default_ping_url() -> String {
     "http://www.google.com/generate_204".to_string()
+}
+fn default_ping_policy() -> String {
+    "startup".to_string()
+}
+fn default_server_selection() -> String {
+    "manual".to_string()
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -67,6 +167,20 @@ pub struct Settings {
     pub update_interval_hours: u32,
     #[serde(default = "default_ping_url")]
     pub ping_url: String,
+    #[serde(default)]
+    pub auto_reconnect: bool,
+    #[serde(default = "default_server_selection")]
+    pub server_selection: String,
+    #[serde(default = "default_ping_policy")]
+    pub ping_policy: String,
+    #[serde(default)]
+    pub notify_disconnect: bool,
+    #[serde(default)]
+    pub notify_reconnect: bool,
+    #[serde(default)]
+    pub notify_expiry: bool,
+    #[serde(default)]
+    pub notify_update: bool,
 }
 impl Default for Settings {
     fn default() -> Self {
@@ -80,6 +194,13 @@ impl Default for Settings {
             bypass_lan: true,
             update_interval_hours: 1,
             ping_url: default_ping_url(),
+            auto_reconnect: false,
+            server_selection: default_server_selection(),
+            ping_policy: default_ping_policy(),
+            notify_disconnect: false,
+            notify_reconnect: false,
+            notify_expiry: false,
+            notify_update: false,
         }
     }
 }
@@ -145,6 +266,9 @@ impl RepositoryStore {
             || repo.settings.ping_url.trim().is_empty()
         {
             repo.settings.ping_url = default_ping_url();
+        }
+        if repo.settings.dns_server.trim().is_empty() {
+            repo.settings.dns_server = "system".into();
         }
         Ok(repo)
     }

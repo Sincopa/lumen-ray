@@ -7,26 +7,22 @@
 	import { errorCode } from '../../services/errors';
 	import { t } from '../../i18n';
 	import type { Rule } from '../../services/catalog';
-	import Dialog from '../../components/Dialog.svelte';
 	import ConfirmDialog from '../../components/ConfirmDialog.svelte';
 	import CountryFlag from '../../components/CountryFlag.svelte';
 	import MaterialIcon from '../../components/MaterialIcon.svelte';
 	import IconButton from '../../components/IconButton.svelte';
-	import PopupMenu from '../../components/PopupMenu.svelte';
-	import MenuItem from '../../components/MenuItem.svelte';
 	import StatusDot from '../../components/StatusDot.svelte';
 	import RoundCheckbox from '../../components/RoundCheckbox.svelte';
 	import ToggleSwitch from '../../components/ToggleSwitch.svelte';
 	import ServersView from '../servers/ServersView.svelte';
 	import RuleEditorView from './RuleEditorView.svelte';
 	import ProcessPickerView from './ProcessPickerView.svelte';
+	import PresetsModal from './PresetsModal.svelte';
 	import searchIcon from '../../../assets/search.svg';
 	import reloadIcon from '../../../assets/reload.svg';
-	import menuIcon from '../../../assets/menu.svg';
 	import addIcon from '../../../assets/add.svg';
 	import pencilIcon from '../../../assets/pencil.svg';
 	import trashIcon from '../../../assets/trash.svg';
-	import shareIcon from '../../../assets/share.svg';
 	import checkIcon from '../../../assets/check.svg';
 	import crossIcon from '../../../assets/cross.svg';
 	import chevronIcon from '../../../assets/chevron.svg';
@@ -70,7 +66,6 @@
 		}, 240);
 	}
 
-	let menu = $state(false);
 	let selectMode = $state(false);
 	let selectingRule = $state<Rule | null>(null);
 	let pendingServerId = $state('');
@@ -80,7 +75,8 @@
 	let deleting = $state(false);
 	let selected = $state<string[]>([]);
 	let error = $state('');
-	let exported = $state('');
+	let showPresetsModal = $state(false);
+	let confirmSwitchToRules = $state(false);
 
 	// Derived state
 	const serversById = $derived(
@@ -102,6 +98,20 @@
 					rule.name.toLowerCase().includes(normalizedQuery),
 				)
 			: $catalogStore.rules,
+	);
+
+	const appliedPresetIds = $derived(
+		new Set(
+			$catalogStore.rules
+				.map((r) => r.presetId)
+				.filter((id): id is string => Boolean(id)),
+		),
+	);
+	const hasActiveProxy = $derived(
+		Boolean(
+			$catalogStore.servers.length > 0 ||
+				$catalogStore.subscriptions.length > 0,
+		),
 	);
 
 	let processIcons = $state<Record<string, string>>({});
@@ -128,14 +138,16 @@
 	}
 
 	function getRuleIcon(rule: Rule): string | null {
-		if (rule.isDomain) return null;
+		const matcher =
+			rule.matcher ?? (rule.isDomain ? 'domain' : 'application');
+		if (matcher !== 'application') return null;
 		const baseName = formatRuleDisplayName(rule.name).toLowerCase();
+		if (processIcons[baseName]) return processIcons[baseName];
 		if (baseName.includes('chrome')) return chromeIcon;
 		if (baseName.includes('discord')) return discordIcon;
 		if (baseName.includes('yandex')) return yandexIcon;
 		if (baseName.includes('telegram')) return telegramIcon;
 		if (baseName.includes('steam')) return steamIcon;
-		if (processIcons[baseName]) return processIcons[baseName];
 		return null;
 	}
 
@@ -184,10 +196,33 @@
 		editing = {
 			id: crypto.randomUUID(),
 			name: '',
+			matcher: 'domain',
 			isDomain: true,
 			serverId: $catalogStore.selectedServerId || 'subscription',
 			enabled: true,
 		};
+	}
+
+	async function handleApplyPreset(presetId: string) {
+		try {
+			await catalog.applyPreset(presetId);
+			if ($catalogStore.routingMode === 'global') {
+				showPresetsModal = false;
+				confirmSwitchToRules = true;
+			}
+			error = '';
+		} catch (e) {
+			error = t('errors.' + errorCode(e));
+		}
+	}
+
+	async function handleRemovePreset(presetId: string) {
+		try {
+			await catalog.removePreset(presetId);
+			error = '';
+		} catch (e) {
+			error = t('errors.' + errorCode(e));
+		}
 	}
 
 	async function toggle(rule: Rule) {
@@ -209,17 +244,6 @@
 		}
 	}
 </script>
-
-<svelte:window
-	onclick={(e) => {
-		if (menu) {
-			const target = e.target as HTMLElement | null;
-			if (!target?.closest('.popup-menu') && !target?.closest('.icon-btn')) {
-				menu = false;
-			}
-		}
-	}}
-/>
 
 {#if editing}
 	{#if choosingProcess}
@@ -376,12 +400,12 @@
 									onclick={refresh}
 								/>
 								<IconButton
-									icon={menuIcon}
-									ariaLabel={t('common.menu')}
-									active={menu}
-									expanded={menu}
-									onclick={() => (menu = !menu)}
-								/>
+									ariaLabel={t('rules.presets') || 'Пресеты'}
+									title={t('rules.presets') || 'Пресеты'}
+									onclick={() => (showPresetsModal = true)}
+								>
+									<MaterialIcon name="tune" size={18} />
+								</IconButton>
 								<IconButton
 									icon={pencilIcon}
 									ariaLabel={t('rules.selectMode')}
@@ -427,48 +451,6 @@
 						onclick={add}
 					/>
 				</div>
-				{#if menu && !searching}
-					<PopupMenu top="68px" right="58px">
-						<MenuItem
-							icon={pencilIcon}
-							label={t('common.edit')}
-							onclick={() => {
-								selectMode = true;
-								menu = false;
-							}}
-						/>
-						<MenuItem
-							icon={reloadIcon}
-							label={t('common.reload')}
-							onclick={() => {
-								menu = false;
-								void refresh();
-							}}
-						/>
-						<MenuItem
-							icon={shareIcon}
-							label={t('common.export')}
-							disabled={!$catalogStore.rules.length}
-							onclick={() => {
-								exported = JSON.stringify(
-									{ version: 1, demo: true, rules: $catalogStore.rules },
-									null,
-									2,
-								);
-								menu = false;
-							}}
-						/>
-						<MenuItem
-							icon={trashIcon}
-							label={t('common.delete')}
-							variant="danger"
-							onclick={() => {
-								selectMode = true;
-								menu = false;
-							}}
-						/>
-					</PopupMenu>
-				{/if}
 			</div>
 		{/if}
 		{#if error}<p role="alert">{error}</p>{/if}
@@ -476,26 +458,42 @@
 			{#each filtered as rule (rule.id)}
 				{@const server = serversById.get(rule.serverId)}
 				{@const isDirect = rule.serverId === 'direct'}
+				{@const isBlock = rule.serverId === 'block'}
 				{@const isSub =
 					rule.serverId === 'subscription' ||
 					(activeSub && rule.serverId === activeSub.id)}
 				{@const serverName = isDirect
 					? t('rules.direct')
-					: isSub
-						? (activeSub?.name ?? t('rules.subscriptionServer'))
-						: server
-							? t('servers.countries.' + server.countryCode)
-							: '—'}
+					: isBlock
+						? (t('rules.block') || 'Блокировать')
+						: isSub
+							? (activeSub?.name ?? t('rules.subscriptionServer'))
+							: server
+								? t('servers.countries.' + server.countryCode)
+								: '—'}
+				{@const matcher =
+					rule.matcher ?? (rule.isDomain ? 'domain' : 'application')}
+				{@const isGeo = matcher === 'geosite' || matcher === 'geoip'}
 				{@const ruleIcon = getRuleIcon(rule)}
 				<article class="rule-row">
 					<div class="rule-left">
 						<div class="app-icon-wrapper" class:domain-icon={!ruleIcon}>
 							{#if ruleIcon}
 								<img class="app-icon" src={ruleIcon} alt="" />
+							{:else if matcher === 'geosite'}
+								<span class="globe-text" aria-hidden="true">
+									<MaterialIcon name="travel_explore" size={20} />
+								</span>
+							{:else if matcher === 'geoip'}
+								<span class="globe-text" aria-hidden="true">
+									<MaterialIcon name="pin_drop" size={20} />
+								</span>
 							{:else}
 								<span class="globe-text" aria-hidden="true">
 									<MaterialIcon
-										name={rule.isDomain ? 'public' : 'description'}
+										name={rule.isDomain || matcher === 'domain'
+											? 'public'
+											: 'description'}
 										size={20}
 									/>
 								</span>
@@ -510,7 +508,13 @@
 							aria-label={t('rules.edit', { name: rule.name })}
 						>
 							<span class="rule-name">{formatRuleDisplayName(rule.name)}</span>
-							<span class="rule-details">{serverName}</span>
+							<span class="rule-details"
+								>{isGeo
+									? matcher === 'geosite'
+										? 'GeoSite'
+										: 'GeoIP'
+									: serverName}</span
+							>
 						</button>
 					</div>
 					<div class="rule-right">
@@ -525,6 +529,10 @@
 							{#if isDirect}
 								<span class="flag-sm">
 									<MaterialIcon name="alt_route" size={16} />
+								</span>
+							{:else if isBlock}
+								<span class="flag-sm">
+									<MaterialIcon name="block" size={16} />
 								</span>
 							{:else if isSub}
 								<span class="flag-sm">
@@ -556,7 +564,19 @@
 						{/if}
 					</div>
 				</article>
-			{:else}<p class="rules-empty">{t('rules.empty')}</p>{/each}
+			{:else}
+				<div class="empty-rules-container">
+					<p class="rules-empty">{t('rules.empty')}</p>
+					<button
+						type="button"
+						class="btn-choose-preset"
+						onclick={() => (showPresetsModal = true)}
+					>
+						<MaterialIcon name="tune" size={16} />
+						<span>{t('rules.presets') || 'Пресеты'}</span>
+					</button>
+				</div>
+			{/each}
 		</div>
 		{#if selectMode}
 			<div class="select-bar">
@@ -594,18 +614,63 @@
 	/>
 {/if}
 
-{#if exported}
-	<Dialog title={t('common.export')} onClose={() => (exported = '')}>
-		<p>{t('demo.export')}</p>
-		<textarea
-			readonly
-			value={exported}
-			rows="10"
-			aria-label={t('common.export')}></textarea>
-	</Dialog>
+{#if showPresetsModal}
+	<PresetsModal
+		{appliedPresetIds}
+		{hasActiveProxy}
+		onApply={handleApplyPreset}
+		onRemove={handleRemovePreset}
+		onClose={() => (showPresetsModal = false)}
+	/>
+{/if}
+
+{#if confirmSwitchToRules}
+	<ConfirmDialog
+		title={t('presets.switchModeTitle') || 'Включить режим правил?'}
+		description={t('presets.switchModeDesc') ||
+			'Пресет применен. Для его работы рекомендуется переключить режим приложения на «Правила».'}
+		cancelLabel={t('common.cancel')}
+		confirmLabel={t('presets.switchToRules') || 'Включить'}
+		onCancel={() => (confirmSwitchToRules = false)}
+		onConfirm={async () => {
+			await catalog.setRoutingMode('rules');
+			confirmSwitchToRules = false;
+		}}
+	/>
 {/if}
 
 <style>
+	.empty-rules-container {
+		display: flex;
+		flex-direction: column;
+		align-items: center;
+		justify-content: center;
+		gap: 12px;
+		padding: 40px 16px;
+	}
+
+	.btn-choose-preset {
+		display: inline-flex;
+		align-items: center;
+		gap: 8px;
+		background: rgba(255, 255, 255, 0.08);
+		border: 1px solid rgba(255, 255, 255, 0.14);
+		border-radius: 16px;
+		padding: 8px 16px;
+		color: #ffffff;
+		font-size: 13px;
+		font-weight: 500;
+		cursor: pointer;
+		transition:
+			background 180ms ease,
+			border-color 180ms ease;
+	}
+
+	.btn-choose-preset:hover {
+		background: rgba(255, 255, 255, 0.16);
+		border-color: rgba(255, 255, 255, 0.25);
+	}
+
 	.rules-view {
 		display: flex;
 		flex-direction: column;

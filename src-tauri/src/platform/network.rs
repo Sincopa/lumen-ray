@@ -1,10 +1,95 @@
 use windows_sys::Win32::{
     NetworkManagement::{
-        IpHelper::{ConvertInterfaceAliasToLuid, FreeMibTable, GetIpForwardTable2},
-        Ndis::NET_LUID_LH,
+        IpHelper::{
+            ConvertInterfaceAliasToLuid, FreeMibTable, GetAdaptersAddresses, GetIpForwardTable2,
+            GAA_FLAG_INCLUDE_GATEWAYS, IP_ADAPTER_ADDRESSES_LH,
+        },
+        Ndis::{IfOperStatusUp, NET_LUID_LH},
     },
-    Networking::WinSock::AF_INET,
+    Networking::WinSock::{AF_INET, AF_INET6, AF_UNSPEC, SOCKADDR_IN, SOCKADDR_IN6},
 };
+
+/// DNS configured on the active physical adapter, before creating LumenTun.
+/// Do not silently replace the user's system resolver with a public provider.
+pub fn system_dns() -> crate::domain::errors::Result<Vec<String>> {
+    use crate::domain::errors::BackendError;
+    use windows_sys::Win32::Foundation::ERROR_BUFFER_OVERFLOW;
+    let error = || BackendError::new("DNS_UNAVAILABLE", "Could not read the system DNS servers");
+    let mut bytes = 16_384u32;
+    for _ in 0..3 {
+        // The Windows API returns aligned structures, so allocate in u64 units.
+        let mut buffer = vec![0u64; (bytes as usize).div_ceil(8)];
+        let mut size = (buffer.len() * 8) as u32;
+        let status = unsafe {
+            GetAdaptersAddresses(
+                AF_UNSPEC as u32,
+                GAA_FLAG_INCLUDE_GATEWAYS,
+                std::ptr::null(),
+                buffer.as_mut_ptr().cast::<IP_ADAPTER_ADDRESSES_LH>(),
+                &mut size,
+            )
+        };
+        if status == ERROR_BUFFER_OVERFLOW {
+            bytes = size;
+            continue;
+        }
+        if status != 0 {
+            return Err(error());
+        }
+        let mut adapter = buffer.as_ptr().cast::<IP_ADAPTER_ADDRESSES_LH>();
+        let mut best: Option<(u32, Vec<String>)> = None;
+        unsafe {
+            while !adapter.is_null() {
+                let entry = &*adapter;
+                let mut servers = Vec::new();
+                let mut dns = entry.FirstDnsServerAddress;
+                while !dns.is_null() {
+                    let address = (*dns).Address.lpSockaddr;
+                    if !address.is_null() {
+                        let ip = match (*address).sa_family {
+                            AF_INET => Some(std::net::IpAddr::V4(std::net::Ipv4Addr::from(
+                                (*(address.cast::<SOCKADDR_IN>()))
+                                    .sin_addr
+                                    .S_un
+                                    .S_addr
+                                    .to_ne_bytes(),
+                            ))),
+                            AF_INET6 => Some(std::net::IpAddr::V6(std::net::Ipv6Addr::from(
+                                (*(address.cast::<SOCKADDR_IN6>())).sin6_addr.u.Byte,
+                            ))),
+                            _ => None,
+                        };
+                        if let Some(ip) = ip.filter(|ip| !ip.is_unspecified()) {
+                            servers.push(ip.to_string());
+                        }
+                    }
+                    dns = (*dns).Next;
+                }
+                let name = if entry.FriendlyName.is_null() {
+                    String::new()
+                } else {
+                    let len = (0..256)
+                        .find(|&i| *entry.FriendlyName.add(i) == 0)
+                        .unwrap_or(256);
+                    String::from_utf16_lossy(std::slice::from_raw_parts(entry.FriendlyName, len))
+                };
+                if entry.OperStatus == IfOperStatusUp
+                    && !name.to_ascii_lowercase().contains("lumentun")
+                    && !entry.FirstGatewayAddress.is_null()
+                    && !servers.is_empty()
+                {
+                    let metric = entry.Ipv4Metric;
+                    if best.as_ref().is_none_or(|(previous, _)| metric < *previous) {
+                        best = Some((metric, servers));
+                    }
+                }
+                adapter = entry.Next;
+            }
+        }
+        return best.map(|(_, servers)| servers).ok_or_else(error);
+    }
+    Err(error())
+}
 /// Read-only confirmation that Xray installed the default route on its own adapter.
 pub fn tunnel_ready() -> bool {
     unsafe {
@@ -19,9 +104,9 @@ pub fn tunnel_ready() -> bool {
         }
         let entries =
             std::slice::from_raw_parts((*table).Table.as_ptr(), (*table).NumEntries as usize);
-        let found = entries.iter().any(|r| {
-            r.InterfaceLuid.Value == luid.Value && r.DestinationPrefix.PrefixLength == 0
-        });
+        let found = entries
+            .iter()
+            .any(|r| r.InterfaceLuid.Value == luid.Value && r.DestinationPrefix.PrefixLength == 0);
         FreeMibTable(table as _);
         found
     }

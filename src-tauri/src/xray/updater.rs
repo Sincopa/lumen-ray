@@ -166,6 +166,30 @@ pub async fn prepare(version: &str, directory: &Path) -> Result<PathBuf> {
     {
         return Err(error());
     }
+    // Ensure staging has wintun.dll (official Xray core zip releases do not bundle it)
+    let staging_wintun = staging.path().join("wintun.dll");
+    if !staging_wintun.is_file() {
+        let base_wintun = directory
+            .join(crate::xray::core::VERSION)
+            .join("wintun.dll");
+        if base_wintun.is_file() {
+            let _ = std::fs::copy(&base_wintun, &staging_wintun);
+        }
+    }
+    if !staging.path().join("wintun.dll").is_file() {
+        return Err(error());
+    }
+    // Ensure staging has geoip.dat and geosite.dat from data/geo so validation and routing work
+    let geo_dir = directory.parent().map(|p| p.join("geo"));
+    for name in ["geoip.dat", "geosite.dat"] {
+        let staging_file = staging.path().join(name);
+        if let Some(ref gd) = geo_dir {
+            let geo_file = gd.join(name);
+            if geo_file.is_file() && std::fs::metadata(&geo_file).is_ok_and(|m| m.len() >= 1024) {
+                let _ = std::fs::copy(&geo_file, &staging_file);
+            }
+        }
+    }
     crate::services::vpn_service::validate(
         &executable,
         br#"{"inbounds":[],"outbounds":[{"protocol":"freedom"}]}"#,
@@ -173,10 +197,15 @@ pub async fn prepare(version: &str, directory: &Path) -> Result<PathBuf> {
     .await?;
     if destination.exists() {
         // Reuse only byte-identical files; never overwrite an executable that may be running.
-        for name in ["xray.exe", "wintun.dll"] {
-            let expected = std::fs::read(staging.path().join(name)).map_err(|_| error())?;
-            if std::fs::read(destination.join(name)).map_err(|_| error())? != expected {
-                return Err(error());
+        let expected = std::fs::read(staging.path().join("xray.exe")).map_err(|_| error())?;
+        if std::fs::read(destination.join("xray.exe")).map_err(|_| error())? != expected {
+            return Err(error());
+        }
+        for name in ["wintun.dll", "geoip.dat", "geosite.dat"] {
+            let src = staging.path().join(name);
+            let dst = destination.join(name);
+            if src.is_file() && !dst.is_file() {
+                let _ = std::fs::copy(&src, &dst);
             }
         }
     } else {
@@ -192,7 +221,15 @@ fn extract(bytes: &[u8], destination: &Path) -> Result<()> {
         if entry.name().contains('\\') || enclosed.is_absolute() {
             return Err(error());
         }
-        if !["xray.exe", "wintun.dll", "LICENSE"].contains(&entry.name()) {
+        if ![
+            "xray.exe",
+            "wintun.dll",
+            "LICENSE",
+            "geoip.dat",
+            "geosite.dat",
+        ]
+        .contains(&entry.name())
+        {
             continue;
         }
         if entry.size() > 128 * 1024 * 1024 || entry.is_symlink() {
@@ -207,7 +244,7 @@ fn extract(bytes: &[u8], destination: &Path) -> Result<()> {
             .map_err(|_| error())?;
         output.sync_all().map_err(|_| error())?;
     }
-    if !destination.join("xray.exe").is_file() || !destination.join("wintun.dll").is_file() {
+    if !destination.join("xray.exe").is_file() {
         return Err(error());
     }
     Ok(())

@@ -62,7 +62,7 @@ test('server choice survives navigation, connecting and reload', async ({
 	);
 });
 
-test('routing mode stays locked for the whole VPN session', async ({
+test('routing mode is locked only while the VPN state is changing', async ({
 	page,
 }) => {
 	await page.goto('/');
@@ -71,9 +71,27 @@ test('routing mode stays locked for the whole VPN session', async ({
 	await page.locator('.central-logo-btn').click();
 	await expect(modeButtons.first()).toBeDisabled();
 	await expect(page.getByRole('status')).toHaveText(ru.home.connected);
-	await expect(modeButtons.last()).toBeDisabled();
+	await expect(modeButtons.last()).toBeEnabled();
+	await modeButtons.last().click();
+	await expect(modeButtons.last()).toHaveAttribute('aria-pressed', 'true');
 	await page.locator('.central-logo-btn').click();
 	await expect(modeButtons.first()).toBeEnabled();
+});
+
+test('server refresh fades every latency through a loading spinner', async ({
+	page,
+}) => {
+	await page.goto('/');
+	await page.getByRole('button', { name: ru.nav.servers, exact: true }).click();
+	const servers = page.locator('.servers-view');
+	await servers
+		.getByRole('button', { name: ru.servers.reloadServers, exact: true })
+		.click();
+	await expect(servers.locator('.ping-spinner')).toHaveCount(7);
+	await expect(servers.locator('.ping-spinner')).toHaveCount(0, {
+		timeout: 2000,
+	});
+	await expect(servers.locator('.ping-reading').first()).toContainText('ms');
 });
 
 test('empty home morphs the centered add button into a subscription field', async ({
@@ -160,6 +178,19 @@ test('subscription import, sharing, rename, refresh and delete work', async ({
 		.getByRole('button', { name: ru.nav.subscriptions, exact: true })
 		.click();
 	const card = page.locator('.sub-card-wrapper').filter({ hasText: 'Test' });
+	const collapsedHeight = await card
+		.locator('.sub-card')
+		.evaluate((element) => element.getBoundingClientRect().height);
+	await card.locator('.sub-card').hover();
+	await page.waitForTimeout(250);
+	await expect
+		.poll(() =>
+			card
+				.locator('.sub-card')
+				.evaluate((element) => element.getBoundingClientRect().height),
+		)
+		.toBe(collapsedHeight);
+	await expect(card.locator('.sub-card')).not.toHaveClass(/expanded/);
 	await card.locator('.title-group').click();
 	await expect(card.locator('.sub-card')).toHaveClass(/expanded/);
 	await expect(card.locator('.updated-time')).toBeVisible();
@@ -314,11 +345,29 @@ test('rules persist, validate input and do not trap navigation', async ({
 }) => {
 	await page.goto('/');
 	await page.getByRole('button', { name: ru.nav.rules, exact: true }).click();
+	await expect(
+		page
+			.getByRole('region', { name: ru.rules.title, exact: true })
+			.getByRole('button', { name: ru.common.menu, exact: true }),
+	).toHaveCount(0);
 	await page
 		.getByRole('region', { name: ru.rules.title, exact: true })
 		.getByRole('button', { name: ru.common.add, exact: true })
 		.click();
 	const editor = page.locator('.rule-editor-view');
+	await editor.locator('#domain-input').fill('');
+	await editor.locator('#domain-input').evaluate((element) => {
+		const clipboard = new DataTransfer();
+		clipboard.setData('text/plain', 'https://example.com/path?source=test');
+		element.dispatchEvent(
+			new ClipboardEvent('paste', {
+				bubbles: true,
+				cancelable: true,
+				clipboardData: clipboard,
+			}),
+		);
+	});
+	await expect(editor.locator('#domain-input')).toHaveValue('example.com');
 	await editor.locator('#domain-input').fill('');
 	await editor
 		.getByRole('button', { name: ru.common.save, exact: true })
@@ -385,6 +434,19 @@ test('settings are honest and language and animation persist', async ({
 		page.getByText('Demo mode · traffic is not protected'),
 	).toBeVisible();
 	await expect(page.locator('canvas')).toHaveClass(/disabled/);
+});
+
+test('settings expose the native live log console', async ({ page }) => {
+	await page.goto('/');
+	await page
+		.getByRole('button', { name: ru.nav.settings, exact: true })
+		.click();
+	const logConsole = page.getByText(ru.settings.logConsole, { exact: true });
+	await logConsole.scrollIntoViewIfNeeded();
+	await expect(logConsole).toBeVisible();
+	await expect(
+		page.getByRole('button', { name: ru.settings.openLogConsole, exact: true }),
+	).toBeDisabled();
 });
 
 test('interface scale applies only after the slider is released', async ({
@@ -464,9 +526,8 @@ test('updated shader links and restored cards keep their controls', async ({
 	await page.getByRole('button', { name: /Нидерланды/ }).click();
 	await expect(page.locator('.server-pill')).toHaveText('Нидерланды');
 	await page.screenshot({ path: 'artifacts/verification/rules-restored.png' });
-	await page.getByRole('button', { name: 'Меню', exact: true }).click();
 	await page
-		.getByRole('button', { name: 'Редактировать', exact: true })
+		.getByRole('button', { name: ru.rules.selectMode, exact: true })
 		.click();
 	await page
 		.getByRole('checkbox', { name: 'Выбрать example.com', exact: true })

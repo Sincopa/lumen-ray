@@ -107,6 +107,9 @@ impl CoreProcess {
         Ok(process)
     }
     fn launch(core: &Path) -> Result<(Self, std::fs::File, std::fs::File)> {
+        if let Some(parent) = core.parent() {
+            std::env::set_var("XRAY_LOCATION_ASSET", parent);
+        }
         let executable = wide(core.as_os_str());
         let directory = wide(core.parent().ok_or_else(error)?.as_os_str());
         // argv[0] is fixed; lpApplicationName selects the exact verified executable.

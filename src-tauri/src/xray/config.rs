@@ -107,7 +107,11 @@ pub fn build(
         let mut obs = balancer.outbounds.clone();
         obs.push(json!({"tag":"direct","protocol":"freedom"}));
         obs.push(json!({"tag":"block","protocol":"blackhole"}));
-        (obs, Some(balancer.tag.clone()), balancer.observatory.clone())
+        (
+            obs,
+            Some(balancer.tag.clone()),
+            balancer.observatory.clone(),
+        )
     } else {
         (
             vec![
@@ -121,7 +125,11 @@ pub fn build(
     };
 
     let target_tag = balancer_tag.as_deref().unwrap_or("proxy");
-    let target_field = if balancer_tag.is_some() { "balancerTag" } else { "outboundTag" };
+    let target_field = if balancer_tag.is_some() {
+        "balancerTag"
+    } else {
+        "outboundTag"
+    };
 
     let mut rules = vec![
         json!({"type":"field","inboundTag":["probe"], target_field: target_tag}),
@@ -134,13 +142,20 @@ pub fn build(
         for rule in repo.rules.iter().filter(|r| r.enabled) {
             let target = if ["direct", "block"].contains(&rule.server_id.as_str()) {
                 rule.server_id.clone()
-            } else if rule.server_id == "subscription" || rule.server_id == selected || rule.server_id.is_empty() {
+            } else if rule.server_id == "subscription"
+                || rule.server_id == selected
+                || rule.server_id.is_empty()
+            {
                 target_tag.to_string()
-            } else if let Some(target) = repo
-                .nodes
-                .iter()
-                .find(|n| n.id == rule.server_id)
-                .or_else(|| repo.nodes.iter().find(|n| n.subscription_id == rule.server_id))
+            } else if let Some(target) =
+                repo.nodes
+                    .iter()
+                    .find(|n| n.id == rule.server_id)
+                    .or_else(|| {
+                        repo.nodes
+                            .iter()
+                            .find(|n| n.subscription_id == rule.server_id)
+                    })
             {
                 if target.balancer.is_none() && !outbounds.iter().any(|o| o["tag"] == target.id) {
                     if let Ok(ob) = outbound(target, &target.id) {
@@ -163,34 +178,45 @@ pub fn build(
             {
                 return Err(BackendError::new("INVALID_RULE", "Invalid routing rule"));
             }
-            if rule.is_domain {
-                let value = rule.name.trim();
-                if let Some((address, prefix)) = value.split_once('/') {
-                    if let Ok(ip) = address.parse::<std::net::IpAddr>() {
-                        let prefix: u8 = prefix.parse().map_err(|_| {
-                            BackendError::new("INVALID_RULE", "Invalid network prefix")
-                        })?;
-                        if prefix > if ip.is_ipv4() { 32 } else { 128 } {
-                            return Err(BackendError::new(
-                                "INVALID_RULE",
-                                "Invalid network prefix",
-                            ));
+            match rule.matcher {
+                crate::storage::repository::RuleMatcher::Domain => {
+                    let value = rule.name.trim();
+                    if let Some((address, prefix)) = value.split_once('/') {
+                        if let Ok(ip) = address.parse::<std::net::IpAddr>() {
+                            let prefix: u8 = prefix.parse().map_err(|_| {
+                                BackendError::new("INVALID_RULE", "Invalid network prefix")
+                            })?;
+                            if prefix > if ip.is_ipv4() { 32 } else { 128 } {
+                                return Err(BackendError::new(
+                                    "INVALID_RULE",
+                                    "Invalid network prefix",
+                                ));
+                            }
+                            compiled["ip"] = json!([value]);
+                        } else {
+                            compiled["domain"] = json!([domain_rule(value)?]);
                         }
+                    } else if value.parse::<std::net::IpAddr>().is_ok() {
                         compiled["ip"] = json!([value]);
                     } else {
                         compiled["domain"] = json!([domain_rule(value)?]);
                     }
-                } else if value.parse::<std::net::IpAddr>().is_ok() {
-                    compiled["ip"] = json!([value]);
-                } else {
-                    compiled["domain"] = json!([domain_rule(value)?]);
                 }
-            } else {
-                compiled["process"] = json!(rule
-                    .name
-                    .split(',')
-                    .map(|p| p.trim().replace('\\', "/"))
-                    .collect::<Vec<_>>());
+                crate::storage::repository::RuleMatcher::Application => {
+                    compiled["process"] = json!(rule
+                        .name
+                        .split(',')
+                        .map(|p| p.trim().replace('\\', "/"))
+                        .collect::<Vec<_>>());
+                }
+                crate::storage::repository::RuleMatcher::Geosite => {
+                    let tag = crate::storage::repository::normalize_geo_tag(&rule.name, "geosite")?;
+                    compiled["domain"] = json!([format!("geosite:{tag}")]);
+                }
+                crate::storage::repository::RuleMatcher::Geoip => {
+                    let tag = crate::storage::repository::normalize_geo_tag(&rule.name, "geoip")?;
+                    compiled["ip"] = json!([format!("geoip:{tag}")]);
+                }
             }
             rules.push(compiled);
         }
@@ -198,8 +224,16 @@ pub fn build(
         // In rules mode, route unhandled DNS queries (port 53) through the VPN proxy so domain resolution doesn't fail
         rules.push(json!({"type":"field","port":"53", target_field: target_tag}));
     }
-    let default_field = if repo.routing_mode == "rules" || balancer_tag.is_none() { "outboundTag" } else { "balancerTag" };
-    let default_val = if repo.routing_mode == "rules" { "direct" } else { target_tag };
+    let default_field = if repo.routing_mode == "rules" || balancer_tag.is_none() {
+        "outboundTag"
+    } else {
+        "balancerTag"
+    };
+    let default_val = if repo.routing_mode == "rules" {
+        "direct"
+    } else {
+        target_tag
+    };
     rules.push(json!({"type":"field","network":"tcp,udp", default_field: default_val}));
     let mut inbounds = vec![
         json!({"tag":"probe","listen":"127.0.0.1","port":proxy_port,"protocol":"socks","settings":{"auth":"noauth","udp":true}}),
@@ -208,14 +242,35 @@ pub fn build(
         inbounds.push(json!({"tag":"system-proxy","listen":"127.0.0.1","port":metrics_port.checked_add(1).ok_or_else(BackendError::invalid)?,"protocol":"http","settings":{}}));
     }
     if tun {
-        let dns = match repo.settings.dns_server.trim() {
-            "" | "system" => "1.1.1.1",
-            other => other,
+        let dns = if repo.settings.dns_server == "system" {
+            #[cfg(windows)]
+            {
+                crate::platform::network::system_dns()?
+            }
+            #[cfg(not(windows))]
+            {
+                return Err(BackendError::new(
+                    "PLATFORM_UNSUPPORTED",
+                    "System DNS requires Windows",
+                ));
+            }
+        } else {
+            vec![repo.settings.dns_server.clone()]
         };
-        inbounds.push(json!({"tag":"tun","protocol":"tun","settings":{"name":"LumenTun","mtu":1500,"gateway":["172.31.255.1/30","fd42:6c75:6d65::1/126"],"dns":[dns],"autoSystemRoutingTable":["0.0.0.0/0","::/0"],"autoOutboundsInterface":"auto"},"sniffing":{"enabled":true,"destOverride":["http","tls","quic"],"routeOnly":true}}));
+        inbounds.push(json!({"tag":"tun","protocol":"tun","settings":{"name":"LumenTun","mtu":1500,"gateway":["172.31.255.1/30","fd42:6c75:6d65::1/126"],"dns":dns,"autoSystemRoutingTable":["0.0.0.0/0","::/0"],"autoOutboundsInterface":"auto"},"sniffing":{"enabled":true,"destOverride":["http","tls","quic"],"routeOnly":true}}));
     }
 
-    let mut routing = json!({"domainStrategy":"AsIs","rules":rules});
+    // Domain Resolution Strategy:
+    // We use "IPIfNonMatch" according to official Xray routing documentation:
+    // 1. "AsIs" would fail to evaluate GeoIP rules for domain/sniffed traffic because domains
+    //    are never resolved to IPs during rule evaluation.
+    // 2. "IPOnDemand" triggers immediate DNS resolution as soon as the first IP rule is reached,
+    //    causing unnecessary latency even when subsequent domain/geosite rules would have matched.
+    // 3. "IPIfNonMatch" first tests all domain and geosite rules against the SNI/domain (fast path).
+    //    If none match, Xray resolves the destination domain to an IP and tests GeoIP/IP rules (second pass).
+    // 4. In TUN mode, TLS/HTTP/QUIC sniffing with `routeOnly: true` provides the domain for matching,
+    //    while unhandled port 53 DNS queries are routed via the proxy outbound, preventing DNS leaks or breaks.
+    let mut routing = json!({"domainStrategy":"IPIfNonMatch","rules":rules});
     if let Some(balancer) = &node.balancer {
         routing["balancers"] = json!([{
             "tag": balancer.tag,

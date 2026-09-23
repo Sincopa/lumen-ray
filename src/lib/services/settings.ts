@@ -11,9 +11,16 @@ export interface NativeSettings {
 	bypassLan: boolean;
 	updateIntervalHours: number;
 	pingUrl: string;
+	autoReconnect: boolean;
+	serverSelection: 'manual' | 'best';
+	pingPolicy: 'startup' | 'list' | 'manual';
+	notifyDisconnect: boolean;
+	notifyReconnect: boolean;
+	notifyExpiry: boolean;
+	notifyUpdate: boolean;
 	coreVersion: string;
 }
-export const nativeSettings = writable<NativeSettings>({
+const defaults: NativeSettings = {
 	networkMode: 'tun',
 	autoConnect: false,
 	closeToTray: true,
@@ -23,40 +30,62 @@ export const nativeSettings = writable<NativeSettings>({
 	bypassLan: true,
 	updateIntervalHours: 1,
 	pingUrl: 'http://www.google.com/generate_204',
+	autoReconnect: false,
+	serverSelection: 'manual',
+	pingPolicy: 'startup',
+	notifyDisconnect: false,
+	notifyReconnect: false,
+	notifyExpiry: false,
+	notifyUpdate: false,
 	coreVersion: '',
-});
+};
+export const nativeSettings = writable<NativeSettings>(defaults);
 export const settingsError = writable('');
-let current: NativeSettings;
+let current: NativeSettings = defaults;
+let saved: NativeSettings = defaults;
 nativeSettings.subscribe((value) => {
 	current = value;
 });
-if (runtime.isTauri)
-	void invoke<NativeSettings>('get_settings')
-		.then((value) => nativeSettings.set(value))
-		.catch(() => settingsError.set('unavailable'));
+const ready = runtime.isTauri
+	? invoke<NativeSettings>('get_settings')
+			.then((value) => {
+				saved = value;
+				nativeSettings.set(value);
+			})
+			.catch((error: unknown) => {
+				settingsError.set('unavailable');
+				throw error;
+			})
+	: Promise.resolve();
+export const settingsReady = ready;
+void ready.catch(() => {});
+let writes: Promise<void> = Promise.resolve();
 export async function updateNativeSettings(
 	patch: Partial<Omit<NativeSettings, 'coreVersion'>>,
 ) {
-	try {
-		const settings = {
-			networkMode: current.networkMode,
-			autoConnect: current.autoConnect,
-			closeToTray: current.closeToTray,
-			startMinimized: current.startMinimized,
-			autoStart: current.autoStart,
-			dnsServer: current.dnsServer,
-			bypassLan: current.bypassLan,
-			updateIntervalHours: current.updateIntervalHours,
-			pingUrl: current.pingUrl,
-			...patch,
-		};
-		nativeSettings.set(
-			await invoke<NativeSettings>('set_settings', { settings }),
-		);
-		settingsError.set('');
-	} catch {
-		settingsError.set('unavailable');
-	}
+	if (!runtime.isTauri) return;
+	const operation = writes.then(async () => {
+		await ready;
+		const settings = { ...current, ...patch };
+		nativeSettings.set(settings);
+		try {
+			const result = await invoke<NativeSettings>('set_settings', { settings });
+			saved = result;
+			nativeSettings.set(result);
+			settingsError.set('');
+		} catch (error) {
+			try {
+				saved = await invoke<NativeSettings>('get_settings');
+			} catch {
+				// The last confirmed snapshot remains the safe local value.
+			}
+			nativeSettings.set(saved);
+			settingsError.set('unavailable');
+			throw error;
+		}
+	});
+	writes = operation.catch(() => {});
+	return writes;
 }
 
 export async function resetNetworkSettings(): Promise<void> {

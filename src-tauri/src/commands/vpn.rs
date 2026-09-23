@@ -13,6 +13,14 @@ pub async fn connect(
     service::connect(&state, &app, server_id).await
 }
 #[tauri::command]
+pub async fn connect_exact(
+    state: tauri::State<'_, Arc<AppState>>,
+    app: tauri::AppHandle,
+    server_id: String,
+) -> Result<()> {
+    service::connect_exact(&state, &app, server_id).await
+}
+#[tauri::command]
 pub async fn disconnect(
     state: tauri::State<'_, Arc<AppState>>,
     app: tauri::AppHandle,

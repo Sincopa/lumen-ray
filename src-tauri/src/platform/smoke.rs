@@ -63,9 +63,11 @@ pub async fn run() -> Result<()> {
             vec![Rule {
                 id: "smoke-curl".into(),
                 name: "curl.exe".into(),
-                is_domain: false,
+                matcher: crate::storage::repository::RuleMatcher::Application,
                 server_id: id.clone(),
                 enabled: true,
+                preset_id: None,
+                is_domain: false,
             }]
         } else {
             vec![]

@@ -19,6 +19,26 @@ try {
         if ($entry) { [IO.Compression.ZipFileExtensions]::ExtractToFile($entry, (Join-Path $destination $name), $true) }
     }
 } finally { $zip.Dispose() }
+
+# Download and verify Russian GeoIP and GeoSite database files (NetworkKeeper/v2ray-rules-ru)
+$geoVersion = '202410152325'
+$geoFiles = @{
+    'geoip.dat'   = @{ url = "https://github.com/NetworkKeeper/v2ray-rules-ru/releases/download/$geoVersion/geoip.dat";   sha256 = '9315c8677c101db1097cc16a53c47cd315e576a6b50734b6a9eed72862e32402' }
+    'geosite.dat' = @{ url = "https://github.com/NetworkKeeper/v2ray-rules-ru/releases/download/$geoVersion/geosite.dat"; sha256 = 'f404e3ef2f68a167cab0a4383bc239e9cdb831672982819d1549701263095b8f' }
+}
+foreach ($geoName in $geoFiles.Keys) {
+    $geoPath = Join-Path $destination $geoName
+    $geoExpectedSha = $geoFiles[$geoName].sha256
+    $geoCached = Join-Path $cache $geoName
+    if (!(Test-Path -LiteralPath $geoCached) -or ((Get-FileHash -LiteralPath $geoCached -Algorithm SHA256).Hash.ToLowerInvariant() -ne $geoExpectedSha)) {
+        Invoke-WebRequest $geoFiles[$geoName].url -OutFile $geoCached -UseBasicParsing
+    }
+    if ((Get-FileHash -LiteralPath $geoCached -Algorithm SHA256).Hash.ToLowerInvariant() -ne $geoExpectedSha) {
+        throw "Integrity verification failed for $geoName"
+    }
+    Copy-Item -LiteralPath $geoCached -Destination $geoPath -Force
+}
+
 $binary = Join-Path $destination 'xray.exe'
 if (!(Test-Path -LiteralPath $binary)) { throw 'Missing verified Xray executable' }
 $manifest = @{ version=$version; architecture='x86_64'; archiveSha256=$sha256; files=@{} }

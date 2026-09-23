@@ -61,7 +61,7 @@ pub async fn ping(state: &AppState, id: String) -> Result<serde_json::Value> {
         None
     };
 
-    let _ = child.kill();
+    let _ = child.kill().await;
 
     let val = match result {
         Some(elapsed) => serde_json::json!(elapsed),

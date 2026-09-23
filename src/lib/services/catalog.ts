@@ -21,12 +21,16 @@ export interface Subscription {
 	updatedMinutesAgo?: number;
 }
 
+export type RuleMatcher = 'domain' | 'application' | 'geosite' | 'geoip';
+
 export interface Rule {
 	id: string;
 	name: string;
-	isDomain: boolean;
+	matcher?: RuleMatcher;
+	isDomain?: boolean;
 	serverId: string;
 	enabled: boolean;
+	presetId?: string;
 }
 
 export interface Catalog {
@@ -46,6 +50,28 @@ export interface StoragePort {
 }
 
 const key = 'lumen_catalog_v1';
+
+export class LatencyProbeTracker {
+	private readonly active = new Map<string, number>();
+	readonly state = writable<ReadonlySet<string>>(new Set());
+
+	async track<T>(id: string, operation: () => Promise<T>): Promise<T> {
+		this.active.set(id, (this.active.get(id) ?? 0) + 1);
+		this.publish();
+		try {
+			return await operation();
+		} finally {
+			const remaining = (this.active.get(id) ?? 1) - 1;
+			if (remaining > 0) this.active.set(id, remaining);
+			else this.active.delete(id);
+			this.publish();
+		}
+	}
+
+	private publish() {
+		this.state.set(new Set(this.active.keys()));
+	}
+}
 
 export function initialCatalog(): Catalog {
 	return {
@@ -137,8 +163,11 @@ export function validCatalog(value: unknown): value is Catalog {
 			typeof r.id === 'string' &&
 			typeof r.name === 'string' &&
 			typeof r.enabled === 'boolean' &&
-			typeof r.isDomain === 'boolean' &&
+			(typeof r.isDomain === 'boolean' ||
+				(typeof r.matcher === 'string' &&
+					['domain', 'application', 'geosite', 'geoip'].includes(r.matcher))) &&
 			(r.serverId === 'direct' ||
+				r.serverId === 'block' ||
 				r.serverId === 'subscription' ||
 				subscriptionIds.has(r.serverId) ||
 				serverIds.has(r.serverId)),
@@ -233,12 +262,36 @@ export function validateSubscription(input: string): void {
 	throw new ServiceError('invalidSubscription');
 }
 
+export function normalizeGeoTag(
+	input: string,
+	expectedKind?: 'geosite' | 'geoip',
+): string {
+	let tag = input.trim();
+	const lower = tag.toLowerCase();
+	if (expectedKind === 'geosite') {
+		if (lower.startsWith('geoip:')) throw new ServiceError('invalidRule');
+		if (lower.startsWith('geosite:')) tag = tag.slice('geosite:'.length).trim();
+	} else if (expectedKind === 'geoip') {
+		if (lower.startsWith('geosite:')) throw new ServiceError('invalidRule');
+		if (lower.startsWith('geoip:')) tag = tag.slice('geoip:'.length).trim();
+	} else {
+		if (lower.startsWith('geosite:')) tag = tag.slice('geosite:'.length).trim();
+		else if (lower.startsWith('geoip:')) tag = tag.slice('geoip:'.length).trim();
+	}
+	if (!/^[a-zA-Z0-9_\-!@]+$/.test(tag) || tag.length === 0 || tag.length > 128) {
+		throw new ServiceError('invalidRule');
+	}
+	return tag;
+}
+
 export class CatalogService {
 	private current: Catalog;
 	private readonly subscriptionSources = new Map<string, string>();
+	private readonly probes = new LatencyProbeTracker();
 	private indexedServers: Server[] | undefined;
 	private serverIndex = new Map<string, Server>();
 	readonly state;
+	readonly pinging = this.probes.state;
 	readonly persistenceError = writable(false);
 
 	constructor(private storage?: StoragePort) {
@@ -336,8 +389,10 @@ export class CatalogService {
 		if (!server) {
 			throw new ServiceError('invalidServer');
 		}
-		await new Promise((resolve) => setTimeout(resolve, 500));
-		return server.latency;
+		return this.probes.track(id, async () => {
+			await new Promise((resolve) => setTimeout(resolve, 500));
+			return server.latency;
+		});
 	}
 
 	async importSubscription(input: string, name?: string) {
@@ -445,22 +500,130 @@ export class CatalogService {
 	}
 
 	private validateRule(rule: Rule): Rule {
-		const name = rule.name.trim();
-		const valid = rule.isDomain
-			? /^(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+[a-z]{2,63}$/i.test(name)
-			: /^[^<>:"\\|?*\r\n]+$/i.test(name) && name.length > 0;
+		const rawName = rule.name.trim();
+		let matcher: RuleMatcher;
+		if (rule.matcher === 'geosite' || rule.matcher === 'geoip') {
+			matcher = rule.matcher;
+		} else if (rule.isDomain !== undefined) {
+			matcher = rule.isDomain ? 'domain' : 'application';
+		} else {
+			matcher = rule.matcher ?? 'application';
+		}
+		let valid = false;
+		let normalizedName = rawName;
+
+		if (matcher === 'domain') {
+			valid =
+				/^(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+[a-z]{2,63}$/i.test(rawName) ||
+				/^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}(?:\/\d{1,2})?$/.test(rawName);
+		} else if (matcher === 'application') {
+			valid = /^[^<>:"\\|?*\r\n]+$/i.test(rawName) && rawName.length > 0;
+		} else if (matcher === 'geosite' || matcher === 'geoip') {
+			try {
+				normalizedName = normalizeGeoTag(rawName, matcher);
+				valid = true;
+			} catch {
+				valid = false;
+			}
+		}
+
 		const isSpecial =
 			rule.serverId === 'direct' ||
+			rule.serverId === 'block' ||
 			rule.serverId === 'subscription' ||
 			this.current.subscriptions.some((s) => s.id === rule.serverId);
+
 		if (
 			!valid ||
-			name.length > 253 ||
+			normalizedName.length > 253 ||
 			(!isSpecial && !this.serversById.has(rule.serverId))
 		) {
 			throw new ServiceError('invalidRule');
 		}
-		return { ...rule, name };
+
+		return {
+			...rule,
+			name: normalizedName,
+			matcher,
+			isDomain: matcher === 'domain',
+		};
+	}
+
+	async applyPreset(presetId: string) {
+		const targetServer = 'subscription';
+		let rulesToCreate: Array<{
+			matcher: RuleMatcher;
+			name: string;
+			serverId: string;
+		}>;
+
+		if (presetId === 'russia-optimized') {
+			rulesToCreate = [
+				{ matcher: 'geoip', name: 'private', serverId: 'direct' },
+				{ matcher: 'geosite', name: 'antifilter', serverId: targetServer },
+				{
+					matcher: 'geosite',
+					name: 'antifilter-community',
+					serverId: targetServer,
+				},
+				{ matcher: 'geoip', name: 'antifilter', serverId: targetServer },
+				{
+					matcher: 'geoip',
+					name: 'antifilter-community',
+					serverId: targetServer,
+				},
+				{ matcher: 'geosite', name: 'category-ru', serverId: 'direct' },
+				{ matcher: 'geoip', name: 'ru', serverId: 'direct' },
+			];
+		} else if (presetId === 'bypass-blocking') {
+			rulesToCreate = [
+				{ matcher: 'geosite', name: 'antifilter', serverId: targetServer },
+				{
+					matcher: 'geosite',
+					name: 'antifilter-community',
+					serverId: targetServer,
+				},
+				{ matcher: 'geoip', name: 'antifilter', serverId: targetServer },
+				{
+					matcher: 'geoip',
+					name: 'antifilter-community',
+					serverId: targetServer,
+				},
+			];
+		} else if (presetId === 'russia-direct') {
+			rulesToCreate = [
+				{ matcher: 'geosite', name: 'category-ru', serverId: 'direct' },
+				{ matcher: 'geoip', name: 'ru', serverId: 'direct' },
+				{ matcher: 'geoip', name: 'private', serverId: 'direct' },
+			];
+		} else {
+			throw new ServiceError('invalidRule');
+		}
+
+		const customRules = this.current.rules.filter(
+			(r) => r.presetId !== presetId,
+		);
+		const newPresetRules: Rule[] = rulesToCreate.map((r, i) => ({
+			id: `preset-${presetId}-${i + 1}`,
+			name: r.name,
+			matcher: r.matcher,
+			isDomain: r.matcher === 'domain',
+			serverId: r.serverId,
+			enabled: true,
+			presetId,
+		}));
+
+		this.commit({
+			...this.current,
+			rules: [...newPresetRules, ...customRules],
+		});
+	}
+
+	async removePreset(presetId: string) {
+		this.commit({
+			...this.current,
+			rules: this.current.rules.filter((r) => r.presetId !== presetId),
+		});
 	}
 
 	saveRule(rule: Rule) {

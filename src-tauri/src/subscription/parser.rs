@@ -49,7 +49,10 @@ pub fn parse(input: &str, subscription: &str) -> Result<ParsedSubscription> {
                 let remarks = root.get("remarks").and_then(|r| r.as_str());
                 let proxy_outbounds: Vec<serde_json::Value> = outbounds
                     .iter()
-                    .filter(|o| ![Some("freedom"), Some("blackhole"), Some("dns")].contains(&o["protocol"].as_str()))
+                    .filter(|o| {
+                        ![Some("freedom"), Some("blackhole"), Some("dns")]
+                            .contains(&o["protocol"].as_str())
+                    })
                     .cloned()
                     .collect();
 
@@ -57,7 +60,8 @@ pub fn parse(input: &str, subscription: &str) -> Result<ParsedSubscription> {
                     continue;
                 }
 
-                let has_balancers = root.get("routing")
+                let has_balancers = root
+                    .get("routing")
                     .and_then(|r| r.get("balancers"))
                     .and_then(|b| b.as_array())
                     .is_some_and(|b| !b.is_empty());
@@ -74,15 +78,25 @@ pub fn parse(input: &str, subscription: &str) -> Result<ParsedSubscription> {
                             if let Some(rem) = remarks {
                                 node.name = rem.to_string();
                             }
-                            let (b_tag, selector, strategy) = if let Some(b) = root.get("routing")
+                            let (b_tag, selector, strategy) = if let Some(b) = root
+                                .get("routing")
                                 .and_then(|r| r.get("balancers"))
                                 .and_then(|b| b.as_array())
                                 .and_then(|a| a.first())
                             {
                                 (
                                     b["tag"].as_str().unwrap_or("auto").to_string(),
-                                    b["selector"].as_array().map(|arr| arr.iter().filter_map(|s| s.as_str().map(String::from)).collect()).unwrap_or_else(|| vec!["proxy".to_string()]),
-                                    b.get("strategy").cloned().unwrap_or_else(|| serde_json::json!({"type": "leastPing"})),
+                                    b["selector"]
+                                        .as_array()
+                                        .map(|arr| {
+                                            arr.iter()
+                                                .filter_map(|s| s.as_str().map(String::from))
+                                                .collect()
+                                        })
+                                        .unwrap_or_else(|| vec!["proxy".to_string()]),
+                                    b.get("strategy").cloned().unwrap_or_else(
+                                        || serde_json::json!({"type": "leastPing"}),
+                                    ),
                                 )
                             } else {
                                 (
@@ -113,7 +127,9 @@ pub fn parse(input: &str, subscription: &str) -> Result<ParsedSubscription> {
                 }
             } else {
                 // Root is itself a single outbound
-                if ![Some("freedom"), Some("blackhole"), Some("dns")].contains(&root["protocol"].as_str()) {
+                if ![Some("freedom"), Some("blackhole"), Some("dns")]
+                    .contains(&root["protocol"].as_str())
+                {
                     parsed_entries.push(super::xray_json::parse(&root, subscription));
                 }
             }

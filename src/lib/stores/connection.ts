@@ -164,7 +164,10 @@ export class ConnectionController {
 				}
 			}
 
-			await withTimeout(this.vpn.connect(serverId), this.timeoutMs);
+			await withTimeout(
+				this.vpn.connectExact?.(serverId) ?? this.vpn.connect(serverId),
+				this.timeoutMs,
+			);
 
 			const { status, info } = await this.readConnection();
 
