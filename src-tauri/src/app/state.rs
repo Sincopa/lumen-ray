@@ -20,6 +20,8 @@ pub struct AppState {
     pub latencies: RwLock<std::collections::HashMap<String, serde_json::Value>>,
     pub desired_server: RwLock<Option<String>>,
     pub recovery_running: std::sync::atomic::AtomicBool,
+    pub device_identity: Arc<crate::platform::device_identity::DeviceIdentityManager>,
+    pub subscription_client: Arc<crate::subscription::fetcher::SubscriptionClient>,
     _instance: std::fs::File,
 }
 impl AppState {
@@ -42,6 +44,18 @@ impl AppState {
         #[cfg(windows)]
         crate::platform::proxy::SystemProxy::recover(&data)?;
         let core = crate::xray::core::prepare(&resources, &data)?;
+        let device_identity = Arc::new(
+            crate::platform::device_identity::DeviceIdentityManager::new(
+                data.join("identity.dpapi"),
+            ),
+        );
+        if let Err(e) = device_identity.get_or_init() {
+            log::warn!("Device identity initialization warning: {:?}", e);
+        }
+        let subscription_client = Arc::new(crate::subscription::fetcher::SubscriptionClient::new(
+            Arc::clone(&device_identity)
+                as Arc<dyn crate::subscription::fetcher::DeviceIdentityProvider>,
+        ));
         let (shutdown, _) = tokio::sync::watch::channel(false);
         Ok(Arc::new(Self {
             data,
@@ -58,6 +72,8 @@ impl AppState {
             latencies: RwLock::new(std::collections::HashMap::new()),
             desired_server: RwLock::new(None),
             recovery_running: std::sync::atomic::AtomicBool::new(false),
+            device_identity,
+            subscription_client,
             _instance: instance,
         }))
     }

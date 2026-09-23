@@ -340,7 +340,9 @@ pub async fn import(
         "inline"
     };
     log::info!("Subscription {operation} started ({source_kind} source)");
-    let fetched = crate::subscription::fetcher::fetch_with_metadata(&input)
+    let fetched = state
+        .subscription_client
+        .fetch_with_metadata(&input)
         .await
         .inspect_err(|error| {
             log::warn!("Subscription {operation} download failed: {}", error.code);

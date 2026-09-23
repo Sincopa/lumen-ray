@@ -7,6 +7,9 @@ export type ErrorCode =
 	| 'subscriptionFetchFailed'
 	| 'invalidRule'
 	| 'storage'
+	| 'hwidNotSupported'
+	| 'hwidDeviceLimit'
+	| 'hwidUnavailable'
 	| 'unknown';
 
 export class ServiceError extends Error {
@@ -25,6 +28,9 @@ export function errorCode(error: unknown): ErrorCode {
 		'subscriptionFetchFailed',
 		'invalidRule',
 		'storage',
+		'hwidNotSupported',
+		'hwidDeviceLimit',
+		'hwidUnavailable',
 	];
 	let code =
 		error instanceof ServiceError
@@ -40,6 +46,9 @@ export function errorCode(error: unknown): ErrorCode {
 		SUBSCRIPTION_FETCH_FAILED: 'subscriptionFetchFailed',
 		STORAGE_FAILED: 'storage',
 		STORAGE_VERSION: 'storage',
+		HWID_NOT_SUPPORTED: 'hwidNotSupported',
+		HWID_DEVICE_LIMIT: 'hwidDeviceLimit',
+		HWID_UNAVAILABLE: 'hwidUnavailable',
 		CORE_NOT_FOUND: 'unavailable',
 		CORE_START_FAILED: 'unavailable',
 		CORE_CRASHED: 'unavailable',

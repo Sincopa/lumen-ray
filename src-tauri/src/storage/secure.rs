@@ -1,5 +1,5 @@
 use crate::domain::errors::{BackendError, Result};
-pub trait SecretStore {
+pub trait SecretStore: Send + Sync {
     fn protect(&self, input: &[u8]) -> Result<Vec<u8>>;
     fn unprotect(&self, input: &[u8]) -> Result<Vec<u8>>;
 }

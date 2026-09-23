@@ -270,8 +270,9 @@ async fn private_subscription_config_validation() {
     };
     let mut nodes = Vec::new();
     let mut diagnostic_count = 0;
+    let client = crate::subscription::fetcher::SubscriptionClient::ephemeral().unwrap();
     for (index, source) in sources.into_iter().enumerate() {
-        let body = crate::subscription::fetcher::fetch(source).await.unwrap();
+        let body = client.fetch(source).await.unwrap();
         let parsed = parser::parse(&body, &format!("test-{index}")).unwrap();
         diagnostic_count += parsed.diagnostics.len();
         nodes.extend(parsed.nodes);
@@ -352,9 +353,8 @@ async fn private_proxy_traffic_smoke() {
         std::env::var_os("LUMEN_TEST_SUBSCRIPTION_FILE").expect("Set test file"),
     )
     .unwrap();
-    let body = crate::subscription::fetcher::fetch(source.trim())
-        .await
-        .unwrap();
+    let client = crate::subscription::fetcher::SubscriptionClient::ephemeral().unwrap();
+    let body = client.fetch(source.trim()).await.unwrap();
     let parsed = parser::parse(&body, "smoke").unwrap();
     let directory = tempfile::tempdir().unwrap();
     let core = core::prepare(
@@ -729,4 +729,580 @@ async fn geo_database_delivery_and_initialization() {
     assert!(geosite.is_file());
     assert!(std::fs::metadata(&geoip).unwrap().len() > 100_000);
     assert!(std::fs::metadata(&geosite).unwrap().len() > 1_000_000);
+}
+
+mod hwid_tests {
+    use crate::{
+        app::state::AppState,
+        domain::errors::{BackendError, Result},
+        platform::device_identity::{
+            generate_hwid_from_seed, is_safe_header_value, is_valid_hwid, mask_hwid,
+            read_device_model, read_machine_seed, read_os_version, DeviceIdentity,
+            DeviceIdentityManager, DeviceIdentityStore,
+        },
+        services::catalog_service,
+        storage::secure::SecretStore,
+        subscription::fetcher::{build_user_agent, fetch, fetch_with_metadata, SubscriptionClient},
+    };
+    use std::{collections::BTreeMap, net::SocketAddr, sync::Arc};
+    use tokio::sync::Mutex;
+
+    #[derive(Clone, Debug)]
+    struct RecordedRequest {
+        #[allow(dead_code)]
+        method: String,
+        #[allow(dead_code)]
+        path: String,
+        headers: BTreeMap<String, String>,
+    }
+
+    struct MockHttpServer {
+        addr: SocketAddr,
+        shutdown: Option<tokio::sync::oneshot::Sender<()>>,
+        requests: Arc<Mutex<Vec<RecordedRequest>>>,
+    }
+
+    impl MockHttpServer {
+        async fn start<F>(handler: F) -> Self
+        where
+            F: Fn(&str, &BTreeMap<String, String>) -> (u16, Vec<(&'static str, String)>, String)
+                + Send
+                + Sync
+                + 'static,
+        {
+            use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+            let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let addr = listener.local_addr().unwrap();
+            let (shutdown_tx, mut shutdown_rx) = tokio::sync::oneshot::channel::<()>();
+            let requests = Arc::new(Mutex::new(Vec::new()));
+            let requests_clone = Arc::clone(&requests);
+            let handler = Arc::new(handler);
+
+            tokio::spawn(async move {
+                loop {
+                    tokio::select! {
+                        _ = &mut shutdown_rx => break,
+                        Ok((mut stream, _)) = listener.accept() => {
+                            let requests = Arc::clone(&requests_clone);
+                            let handler = Arc::clone(&handler);
+                            tokio::spawn(async move {
+                                let mut buf = vec![0u8; 8192];
+                                let n = match stream.read(&mut buf).await {
+                                    Ok(n) if n > 0 => n,
+                                    _ => return,
+                                };
+                                let req_str = String::from_utf8_lossy(&buf[..n]);
+                                let mut lines = req_str.lines();
+                                let first_line = lines.next().unwrap_or("");
+                                let mut parts = first_line.split_whitespace();
+                                let method = parts.next().unwrap_or("GET").to_string();
+                                let path = parts.next().unwrap_or("/").to_string();
+
+                                let mut headers = BTreeMap::new();
+                                for line in lines {
+                                    if line.is_empty() || line == "\r" {
+                                        break;
+                                    }
+                                    if let Some((k, v)) = line.split_once(':') {
+                                        headers.insert(
+                                            k.trim().to_ascii_lowercase(),
+                                            v.trim().to_string(),
+                                        );
+                                    }
+                                }
+
+                                requests.lock().await.push(RecordedRequest {
+                                    method,
+                                    path: path.clone(),
+                                    headers: headers.clone(),
+                                });
+
+                                let (status, resp_headers, body) = handler(&path, &headers);
+                                let status_text = match status {
+                                    200 => "OK",
+                                    302 => "Found",
+                                    400 => "Bad Request",
+                                    403 => "Forbidden",
+                                    404 => "Not Found",
+                                    _ => "Unknown",
+                                };
+
+                                let mut resp = format!(
+                                    "HTTP/1.1 {status} {status_text}\r\nContent-Length: {}\r\nConnection: close\r\n",
+                                    body.len()
+                                );
+                                for (k, v) in resp_headers {
+                                    resp.push_str(&format!("{k}: {v}\r\n"));
+                                }
+                                resp.push_str("\r\n");
+                                resp.push_str(&body);
+
+                                let _ = stream.write_all(resp.as_bytes()).await;
+                                let _ = stream.flush().await;
+                            });
+                        }
+                    }
+                }
+            });
+
+            Self {
+                addr,
+                shutdown: Some(shutdown_tx),
+                requests,
+            }
+        }
+
+        fn url(&self, path: &str) -> String {
+            format!("http://{}{path}", self.addr)
+        }
+
+        async fn recorded_requests(&self) -> Vec<RecordedRequest> {
+            self.requests.lock().await.clone()
+        }
+    }
+
+    impl Drop for MockHttpServer {
+        fn drop(&mut self) {
+            if let Some(shutdown) = self.shutdown.take() {
+                let _ = shutdown.send(());
+            }
+        }
+    }
+
+    struct FailingSecretStore;
+    impl SecretStore for FailingSecretStore {
+        fn protect(&self, _input: &[u8]) -> Result<Vec<u8>> {
+            Err(BackendError::new(
+                "STORAGE_FAILED",
+                "Simulated encryption failure",
+            ))
+        }
+        fn unprotect(&self, _input: &[u8]) -> Result<Vec<u8>> {
+            Err(BackendError::new(
+                "STORAGE_FAILED",
+                "Simulated decryption failure",
+            ))
+        }
+    }
+
+    const VALID_SUB_BASE64: &str =
+        "dmxlc3M6Ly8wMDAwMDAwMC0wMDAwLTQwMDAtODAwMC0wMDAwMDAwMDAwMDFAMjAzLjAuMTEzLjEwOjQ0Mz9lbmNyeXB0aW9uPW5vbmUmc2VjdXJpdHk9bm9uZSZ0eXBlPXRjcCNQbGFpbi1WTEVTUw==";
+
+    #[test]
+    fn first_run_hwid_generation_and_valid_format() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let manager = DeviceIdentityManager::new(temp_dir.path().join("identity.dpapi"));
+        let identity = manager.get_or_init().unwrap();
+
+        assert!(is_valid_hwid(&identity.hwid));
+        assert!(identity.hwid.starts_with("win-"));
+        assert_eq!(identity.hwid.len(), 36);
+        assert_eq!(identity.device_os, "Windows");
+        assert!(is_safe_header_value(&identity.ver_os));
+
+        // Format validation edge cases
+        assert!(is_valid_hwid("win-0123456789abcdef0123456789abcdef"));
+        assert!(is_valid_hwid("win-ABCDEF-1234=test"));
+        assert!(!is_valid_hwid("linux-0123456789abcdef"));
+        assert!(!is_valid_hwid("win-123")); // too short (< 10)
+        assert!(!is_valid_hwid(&format!("win-{}", "a".repeat(65)))); // too long (> 64)
+        assert!(!is_valid_hwid("win-invalid!char"));
+    }
+
+    #[test]
+    fn same_hwid_across_repeated_calls_and_service_recreation() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let path = temp_dir.path().join("identity.dpapi");
+
+        let manager1 = DeviceIdentityManager::new(path.clone());
+        let id1 = manager1.get_or_init().unwrap();
+        let id2 = manager1.get_or_init().unwrap();
+        assert_eq!(id1.hwid, id2.hwid);
+
+        // Recreate service from disk
+        drop(manager1);
+        let manager2 = DeviceIdentityManager::new(path);
+        let id3 = manager2.get_or_init().unwrap();
+        assert_eq!(id1.hwid, id3.hwid);
+    }
+
+    #[test]
+    fn encrypted_persistence_and_no_raw_machine_guid_stored() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let path = temp_dir.path().join("identity.dpapi");
+        let manager = DeviceIdentityManager::new(path.clone());
+        let identity = manager.get_or_init().unwrap();
+
+        let raw_bytes = std::fs::read(&path).unwrap();
+        assert!(!raw_bytes.is_empty());
+        assert!(raw_bytes.len() <= 4096);
+
+        // Ciphertext must NOT match or contain plaintext HWID
+        let raw_str = String::from_utf8_lossy(&raw_bytes);
+        assert!(!raw_str.contains(&identity.hwid));
+
+        // Must not contain raw MachineGuid
+        if let Some(seed) = read_machine_seed() {
+            assert!(!identity.hwid.contains(&seed));
+            assert!(!raw_str.contains(&seed));
+        }
+
+        // Test synthetic machine seed
+        let dummy_guid = "550e8400-e29b-41d4-a716-446655440000";
+        let synthetic_hwid = generate_hwid_from_seed(dummy_guid);
+        assert!(!synthetic_hwid.contains(dummy_guid));
+        assert!(is_valid_hwid(&synthetic_hwid));
+
+        // Test masked log output
+        let masked = mask_hwid(&identity.hwid);
+        assert!(masked.starts_with("win-"));
+        assert!(masked.contains("..."));
+        assert_ne!(masked, identity.hwid);
+    }
+
+    #[test]
+    fn corrupted_identity_storage_and_decryption_failure() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let path = temp_dir.path().join("identity.dpapi");
+
+        // 1. Oversized file (> 4096 bytes)
+        std::fs::write(&path, vec![0x42; 5000]).unwrap();
+        let store = DeviceIdentityStore::new(path.clone());
+        let err = store.load().unwrap_err();
+        assert_eq!(err.code, "HWID_UNAVAILABLE");
+
+        // 2. Zero-byte file
+        std::fs::write(&path, []).unwrap();
+        let err = store.load().unwrap_err();
+        assert_eq!(err.code, "HWID_UNAVAILABLE");
+
+        // 3. Simulated decryption failure
+        std::fs::write(&path, b"some-encrypted-data").unwrap();
+        let failing_store =
+            DeviceIdentityStore::with_store(path.clone(), Box::new(FailingSecretStore));
+        let err = failing_store.load().unwrap_err();
+        assert_eq!(err.code, "HWID_UNAVAILABLE");
+    }
+
+    #[test]
+    fn actual_application_version_in_user_agent() {
+        let ua = build_user_agent();
+        let expected_prefix = format!("Lumen/{}", env!("CARGO_PKG_VERSION"));
+        let expected_xray = format!("Xray/{}", crate::xray::core::VERSION);
+
+        assert!(ua.starts_with(&expected_prefix));
+        assert!(ua.contains(&expected_xray));
+        assert!(ua.contains("Clash/1.19"));
+    }
+
+    #[test]
+    fn os_version_and_device_model_safety() {
+        let os_ver = read_os_version();
+        assert!(is_safe_header_value(&os_ver));
+        assert!(!os_ver.contains('\r') && !os_ver.contains('\n'));
+
+        if let Some(model) = read_device_model() {
+            assert!(is_safe_header_value(&model));
+            assert!(!model.contains('\r') && !model.contains('\n'));
+        }
+    }
+
+    #[tokio::test]
+    async fn headers_sent_during_initial_import_and_refresh() {
+        let server = MockHttpServer::start(|path, headers| {
+            if path == "/sub" {
+                assert_eq!(
+                    headers.get("x-device-os").map(String::as_str),
+                    Some("Windows")
+                );
+                assert!(headers.contains_key("x-hwid"));
+                assert!(headers.contains_key("x-ver-os"));
+                assert!(headers.get("user-agent").unwrap().starts_with("Lumen/"));
+                (
+                    200,
+                    vec![("content-type", "text/plain".into())],
+                    VALID_SUB_BASE64.into(),
+                )
+            } else {
+                (404, vec![], "Not Found".into())
+            }
+        })
+        .await;
+
+        let temp_dir = tempfile::tempdir().unwrap();
+        let resources = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("resources/core");
+        let state = AppState::open(temp_dir.path().to_path_buf(), resources).unwrap();
+
+        // 1. Initial subscription import
+        let import_url = server.url("/sub");
+        let res =
+            catalog_service::import(&state, import_url.clone(), Some("Test Sub".into()), None)
+                .await
+                .unwrap();
+        assert_eq!(res.diagnostics.len(), 0);
+
+        let requests = server.recorded_requests().await;
+        assert_eq!(requests.len(), 1);
+        let first_hwid = requests[0].headers.get("x-hwid").unwrap().clone();
+        assert!(is_valid_hwid(&first_hwid));
+
+        // 2. Refresh subscription
+        let sub_id = state.repository.read().await.subscriptions[0].id.clone();
+        let res_refresh =
+            catalog_service::import(&state, import_url, Some("Test Sub".into()), Some(sub_id))
+                .await
+                .unwrap();
+        assert_eq!(res_refresh.diagnostics.len(), 0);
+
+        let requests_after = server.recorded_requests().await;
+        assert_eq!(requests_after.len(), 2);
+        let second_hwid = requests_after[1].headers.get("x-hwid").unwrap().clone();
+        assert_eq!(first_hwid, second_hwid, "HWID must be identical on refresh");
+    }
+
+    #[tokio::test]
+    async fn no_http_headers_for_inline_subscriptions() {
+        let client = SubscriptionClient::ephemeral().unwrap();
+        let inline = "vless://00000000-0000-4000-8000-000000000001@example.com:443?type=tcp#Inline";
+        let fetched = fetch_with_metadata(inline, &client).await.unwrap();
+        assert_eq!(fetched.body, inline);
+    }
+
+    #[tokio::test]
+    async fn no_hwid_headers_on_unrelated_http_clients() {
+        let server = MockHttpServer::start(|_path, headers| {
+            assert!(!headers.contains_key("x-hwid"));
+            assert!(!headers.contains_key("x-device-os"));
+            assert!(!headers.contains_key("x-ver-os"));
+            assert!(!headers.contains_key("x-device-model"));
+            (200, vec![], "ip=1.2.3.4".into())
+        })
+        .await;
+
+        let client = reqwest::Client::builder().build().unwrap();
+        let resp = client.get(server.url("/trace")).send().await.unwrap();
+        assert_eq!(resp.status(), 200);
+
+        let requests = server.recorded_requests().await;
+        assert_eq!(requests.len(), 1);
+        assert!(!requests[0].headers.contains_key("x-hwid"));
+    }
+
+    #[tokio::test]
+    async fn same_origin_redirect_preserves_hwid_headers() {
+        let server = MockHttpServer::start(|path, headers| {
+            if path == "/redirect-source" {
+                assert!(headers.contains_key("x-hwid"));
+                (
+                    302,
+                    vec![("location", "/redirect-target".into())],
+                    "".into(),
+                )
+            } else if path == "/redirect-target" {
+                assert!(headers.contains_key("x-hwid"));
+                assert_eq!(
+                    headers.get("x-device-os").map(String::as_str),
+                    Some("Windows")
+                );
+                (200, vec![], VALID_SUB_BASE64.into())
+            } else {
+                (404, vec![], "".into())
+            }
+        })
+        .await;
+
+        let client = SubscriptionClient::ephemeral().unwrap();
+        let body = fetch(&server.url("/redirect-source"), &client)
+            .await
+            .unwrap();
+        assert_eq!(body, VALID_SUB_BASE64);
+
+        let requests = server.recorded_requests().await;
+        assert_eq!(requests.len(), 2);
+        assert!(requests[0].headers.contains_key("x-hwid"));
+        assert!(requests[1].headers.contains_key("x-hwid"));
+    }
+
+    #[tokio::test]
+    async fn no_hwid_leakage_through_cross_origin_redirects() {
+        let server_b = MockHttpServer::start(|_path, headers| {
+            // Target server B must NOT receive any HWID or device headers
+            assert!(
+                !headers.contains_key("x-hwid"),
+                "x-hwid must not leak across origins"
+            );
+            assert!(
+                !headers.contains_key("x-device-os"),
+                "x-device-os must not leak across origins"
+            );
+            assert!(
+                !headers.contains_key("x-ver-os"),
+                "x-ver-os must not leak across origins"
+            );
+            assert!(
+                !headers.contains_key("x-device-model"),
+                "x-device-model must not leak across origins"
+            );
+            assert!(
+                headers.contains_key("user-agent"),
+                "user-agent must be preserved"
+            );
+            (200, vec![], VALID_SUB_BASE64.into())
+        })
+        .await;
+
+        let target_url = server_b.url("/final-sub");
+        let server_a = MockHttpServer::start(move |_path, headers| {
+            // Origin A receives HWID
+            assert!(headers.contains_key("x-hwid"));
+            (302, vec![("location", target_url.clone())], "".into())
+        })
+        .await;
+
+        let client = SubscriptionClient::ephemeral().unwrap();
+        let body = fetch(&server_a.url("/entry"), &client).await.unwrap();
+        assert_eq!(body, VALID_SUB_BASE64);
+
+        let reqs_a = server_a.recorded_requests().await;
+        let reqs_b = server_b.recorded_requests().await;
+        assert_eq!(reqs_a.len(), 1);
+        assert_eq!(reqs_b.len(), 1);
+        assert!(reqs_a[0].headers.contains_key("x-hwid"));
+        assert!(!reqs_b[0].headers.contains_key("x-hwid"));
+    }
+
+    #[tokio::test]
+    async fn remnawave_error_headers_mapping() {
+        // 1. x-hwid-not-supported: true (even with 404 or 403 or empty body)
+        let s1 = MockHttpServer::start(|_path, _headers| {
+            (
+                404,
+                vec![("x-hwid-not-supported", "true".into())],
+                "".into(),
+            )
+        })
+        .await;
+        let client = SubscriptionClient::ephemeral().unwrap();
+        let err1 = fetch(&s1.url("/sub"), &client).await.unwrap_err();
+        assert_eq!(err1.code, "HWID_NOT_SUPPORTED");
+
+        // 2. x-hwid-max-devices-reached: true
+        let s2 = MockHttpServer::start(|_path, _headers| {
+            (
+                403,
+                vec![("x-hwid-max-devices-reached", "true".into())],
+                "".into(),
+            )
+        })
+        .await;
+        let err2 = fetch(&s2.url("/sub"), &client).await.unwrap_err();
+        assert_eq!(err2.code, "HWID_DEVICE_LIMIT");
+
+        // 3. x-hwid-limit: true
+        let s3 = MockHttpServer::start(|_path, _headers| {
+            (400, vec![("x-hwid-limit", "true".into())], "".into())
+        })
+        .await;
+        let err3 = fetch(&s3.url("/sub"), &client).await.unwrap_err();
+        assert_eq!(err3.code, "HWID_DEVICE_LIMIT");
+
+        // 4. Case-insensitive header inspection
+        let s4 = MockHttpServer::start(|_path, _headers| {
+            (
+                200,
+                vec![("X-HWID-NOT-SUPPORTED", "TRUE".into())],
+                "".into(),
+            )
+        })
+        .await;
+        let err4 = fetch(&s4.url("/sub"), &client).await.unwrap_err();
+        assert_eq!(err4.code, "HWID_NOT_SUPPORTED");
+
+        let s5 = MockHttpServer::start(|_path, _headers| {
+            (200, vec![("X-Hwid-Limit", "1".into())], "".into())
+        })
+        .await;
+        let err5 = fetch(&s5.url("/sub"), &client).await.unwrap_err();
+        assert_eq!(err5.code, "HWID_DEVICE_LIMIT");
+    }
+
+    #[tokio::test]
+    async fn ordinary_subscription_and_metadata_preservation() {
+        let server = MockHttpServer::start(|_path, _headers| {
+            (
+                200,
+                vec![
+                    ("x-hwid-active", "true".into()),
+                    (
+                        "subscription-userinfo",
+                        "upload=1000; download=2000; total=5000; expire=1800000000".into(),
+                    ),
+                    ("profile-title", "MySecureVPN".into()),
+                ],
+                VALID_SUB_BASE64.into(),
+            )
+        })
+        .await;
+
+        let client = SubscriptionClient::ephemeral().unwrap();
+        let fetched = fetch_with_metadata(&server.url("/sub"), &client)
+            .await
+            .unwrap();
+
+        assert_eq!(fetched.body, VALID_SUB_BASE64);
+        assert_eq!(fetched.suggested_name, Some("MySecureVPN".into()));
+
+        let user_info = fetched.user_info.unwrap();
+        assert_eq!(user_info.upload, Some(1000));
+        assert_eq!(user_info.download, Some(2000));
+        assert_eq!(user_info.total, Some(5000));
+        assert_eq!(user_info.expire, Some(1800000000));
+    }
+
+    #[tokio::test]
+    async fn optional_device_model_header() {
+        let server = MockHttpServer::start(|_path, headers| {
+            if let Some(model) = headers.get("x-device-model") {
+                assert_eq!(model, "Custom-Laptop-Pro");
+            }
+            (200, vec![], VALID_SUB_BASE64.into())
+        })
+        .await;
+
+        // Identity with device model
+        let id_with_model = DeviceIdentity {
+            hwid: "win-0123456789abcdef0123456789abcdef".into(),
+            device_os: "Windows".into(),
+            ver_os: "10.0.22631".into(),
+            device_model: Some("Custom-Laptop-Pro".into()),
+        };
+        let client_model = SubscriptionClient::with_identity(id_with_model);
+        fetch(&server.url("/with-model"), &client_model)
+            .await
+            .unwrap();
+
+        let reqs = server.recorded_requests().await;
+        assert_eq!(reqs.len(), 1);
+        assert_eq!(
+            reqs[0].headers.get("x-device-model").map(String::as_str),
+            Some("Custom-Laptop-Pro")
+        );
+
+        // Identity without device model
+        let id_no_model = DeviceIdentity {
+            hwid: "win-0123456789abcdef0123456789abcdef".into(),
+            device_os: "Windows".into(),
+            ver_os: "10.0.22631".into(),
+            device_model: None,
+        };
+        let client_no_model = SubscriptionClient::with_identity(id_no_model);
+        fetch(&server.url("/no-model"), &client_no_model)
+            .await
+            .unwrap();
+
+        let reqs_after = server.recorded_requests().await;
+        assert_eq!(reqs_after.len(), 2);
+        assert!(!reqs_after[1].headers.contains_key("x-device-model"));
+    }
 }

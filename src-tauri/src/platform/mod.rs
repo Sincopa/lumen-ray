@@ -1,3 +1,4 @@
+pub mod device_identity;
 #[cfg(windows)]
 pub mod helper;
 #[cfg(windows)]
