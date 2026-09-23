@@ -238,6 +238,9 @@
 		"invalidRule": "Enter a domain without a path or an application name ending in .exe, and select a server.",
 		"storage": "Could not read or save settings. Check storage access.",
 		"unknown": "The action failed. Please retry.",
+		"geoDataMissing": "GeoIP/GeoSite databases are missing or corrupted.",
+		"invalidGeoTag": "Invalid tag. Use Latin letters, digits, _, -, !, @",
+		"invalidPreset": "Unknown rule preset.",
 		"GEO_DATA_MISSING": "GeoIP/GeoSite databases are missing or corrupted.",
 		"INVALID_GEO_TAG": "Invalid tag. Use Latin letters, digits, _, -, !, @"
 	},

@@ -252,20 +252,22 @@ impl DeviceIdentityStore {
             return Ok(None);
         }
 
-        let metadata = std::fs::metadata(&self.path).map_err(|_| {
-            hwid_error("Failed to read device identity metadata")
-        })?;
+        let metadata = std::fs::metadata(&self.path)
+            .map_err(|_| hwid_error("Failed to read device identity metadata"))?;
 
         if metadata.len() > MAX_IDENTITY_FILE_SIZE as u64 || metadata.len() == 0 {
-            return Err(hwid_error("Device identity storage is invalid or corrupted"));
+            return Err(hwid_error(
+                "Device identity storage is invalid or corrupted",
+            ));
         }
 
-        let encrypted = std::fs::read(&self.path).map_err(|_| {
-            hwid_error("Failed to read device identity storage")
-        })?;
+        let encrypted = std::fs::read(&self.path)
+            .map_err(|_| hwid_error("Failed to read device identity storage"))?;
 
         if encrypted.len() > MAX_IDENTITY_FILE_SIZE || encrypted.is_empty() {
-            return Err(hwid_error("Device identity storage is invalid or corrupted"));
+            return Err(hwid_error(
+                "Device identity storage is invalid or corrupted",
+            ));
         }
 
         let decrypted = self
@@ -273,9 +275,8 @@ impl DeviceIdentityStore {
             .unprotect(&encrypted)
             .map_err(|_| hwid_error("Windows DPAPI failed to decrypt device identity"))?;
 
-        let hwid = String::from_utf8(decrypted).map_err(|_| {
-            hwid_error("Decrypted device identity is not valid UTF-8")
-        })?;
+        let hwid = String::from_utf8(decrypted)
+            .map_err(|_| hwid_error("Decrypted device identity is not valid UTF-8"))?;
 
         let trimmed = hwid.trim();
         if !is_valid_hwid(trimmed) {
@@ -291,30 +292,27 @@ impl DeviceIdentityStore {
             return Err(hwid_error("Cannot persist invalid HWID format"));
         }
 
-        let parent = self.path.parent().ok_or_else(|| {
-            hwid_error("Invalid device identity path directory")
-        })?;
-        std::fs::create_dir_all(parent).map_err(|_| {
-            hwid_error("Failed to create device identity directory")
-        })?;
+        let parent = self
+            .path
+            .parent()
+            .ok_or_else(|| hwid_error("Invalid device identity path directory"))?;
+        std::fs::create_dir_all(parent)
+            .map_err(|_| hwid_error("Failed to create device identity directory"))?;
 
         let encrypted = self
             .secret_store
             .protect(hwid.as_bytes())
             .map_err(|_| hwid_error("Windows DPAPI failed to protect device identity"))?;
 
-        let mut temp = tempfile::NamedTempFile::new_in(parent).map_err(|_| {
-            hwid_error("Failed to create temporary identity file")
-        })?;
-        temp.write_all(&encrypted).map_err(|_| {
-            hwid_error("Failed to write encrypted device identity")
-        })?;
-        temp.as_file().sync_all().map_err(|_| {
-            hwid_error("Failed to sync encrypted device identity")
-        })?;
-        temp.persist(&self.path).map_err(|_| {
-            hwid_error("Failed to persist device identity atomically")
-        })?;
+        let mut temp = tempfile::NamedTempFile::new_in(parent)
+            .map_err(|_| hwid_error("Failed to create temporary identity file"))?;
+        temp.write_all(&encrypted)
+            .map_err(|_| hwid_error("Failed to write encrypted device identity"))?;
+        temp.as_file()
+            .sync_all()
+            .map_err(|_| hwid_error("Failed to sync encrypted device identity"))?;
+        temp.persist(&self.path)
+            .map_err(|_| hwid_error("Failed to persist device identity atomically"))?;
 
         Ok(())
     }
@@ -386,7 +384,10 @@ impl DeviceIdentityManager {
             }
 
             self.store.save(&new_hwid)?;
-            log::info!("Generated and secured new device HWID: {}", mask_hwid(&new_hwid));
+            log::info!(
+                "Generated and secured new device HWID: {}",
+                mask_hwid(&new_hwid)
+            );
             new_hwid
         };
 

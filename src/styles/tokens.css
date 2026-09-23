@@ -21,8 +21,7 @@
 
 	/* Typography */
 	--font-family-base:
-		'Finlandica Text', 'Finlandica', -apple-system, BlinkMacSystemFont,
-		'Segoe UI', Roboto, sans-serif;
+		'Geist', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
 
 	/* Spacing */
 	--spacing-xs: 4px;
@@ -36,7 +35,7 @@
 	--radius-md: 24px;
 	--radius-pill: 124px;
 	--radius-window: 24px;
-	--radius-window-bottom: 24px;
+	--radius-window-bottom: 48px;
 
 	/* Motion */
 	--ease-spring: cubic-bezier(0.22, 1, 0.36, 1);

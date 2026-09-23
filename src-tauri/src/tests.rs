@@ -702,6 +702,27 @@ fn preset_application_idempotency_and_preservation() {
         crate::storage::repository::normalize_geo_tag("GEOIP:private", "geoip").unwrap(),
         "private"
     );
+
+    // Test frontend IPC deserialization of Mutation::ApplyPreset and Mutation::RemovePreset
+    let json_str = r#"{"kind":"applyPreset","presetId":"russia-optimized"}"#;
+    let mutation: crate::services::catalog_service::Mutation =
+        serde_json::from_str(json_str).unwrap();
+    match mutation {
+        crate::services::catalog_service::Mutation::ApplyPreset { preset_id } => {
+            assert_eq!(preset_id, "russia-optimized");
+        }
+        _ => panic!("Expected ApplyPreset"),
+    }
+
+    let json_rm = r#"{"kind":"removePreset","presetId":"russia-optimized"}"#;
+    let mutation_rm: crate::services::catalog_service::Mutation =
+        serde_json::from_str(json_rm).unwrap();
+    match mutation_rm {
+        crate::services::catalog_service::Mutation::RemovePreset { preset_id } => {
+            assert_eq!(preset_id, "russia-optimized");
+        }
+        _ => panic!("Expected RemovePreset"),
+    }
 }
 
 #[tokio::test]

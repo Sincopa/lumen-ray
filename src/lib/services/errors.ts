@@ -10,6 +10,9 @@ export type ErrorCode =
 	| 'hwidNotSupported'
 	| 'hwidDeviceLimit'
 	| 'hwidUnavailable'
+	| 'geoDataMissing'
+	| 'invalidGeoTag'
+	| 'invalidPreset'
 	| 'unknown';
 
 export class ServiceError extends Error {
@@ -31,6 +34,9 @@ export function errorCode(error: unknown): ErrorCode {
 		'hwidNotSupported',
 		'hwidDeviceLimit',
 		'hwidUnavailable',
+		'geoDataMissing',
+		'invalidGeoTag',
+		'invalidPreset',
 	];
 	let code =
 		error instanceof ServiceError
@@ -49,6 +55,10 @@ export function errorCode(error: unknown): ErrorCode {
 		HWID_NOT_SUPPORTED: 'hwidNotSupported',
 		HWID_DEVICE_LIMIT: 'hwidDeviceLimit',
 		HWID_UNAVAILABLE: 'hwidUnavailable',
+		GEO_DATA_MISSING: 'geoDataMissing',
+		GEO_DATA_CORRUPTED: 'geoDataMissing',
+		INVALID_GEO_TAG: 'invalidGeoTag',
+		INVALID_PRESET: 'invalidPreset',
 		CORE_NOT_FOUND: 'unavailable',
 		CORE_START_FAILED: 'unavailable',
 		CORE_CRASHED: 'unavailable',

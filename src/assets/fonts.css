@@ -1,16 +1,7 @@
 @font-face {
-	font-family: 'Finlandica Text';
-	src: url('./fonts/FinlandicaText-VariableFont_wght.ttf') format('truetype');
+	font-family: 'Geist';
+	src: url('./fonts/Geist-VariableFont_wght.ttf') format('truetype');
 	font-weight: 100 900;
 	font-style: normal;
 	font-display: swap;
 }
-
-@font-face {
-	font-family: 'Finlandica';
-	src: url('./fonts/FinlandicaText-VariableFont_wght.ttf') format('truetype');
-	font-weight: 100 900;
-	font-style: normal;
-	font-display: swap;
-}
-

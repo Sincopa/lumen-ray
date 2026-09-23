@@ -24,6 +24,8 @@ pub async fn mutate_catalog(
         service::Mutation::SetRoutingMode { .. }
             | service::Mutation::SaveRules { .. }
             | service::Mutation::RemoveRules { .. }
+            | service::Mutation::ApplyPreset { .. }
+            | service::Mutation::RemovePreset { .. }
     );
     let value = service::mutate(&state, mutation).await?;
     disconnect_removed_server(&state, &app).await?;

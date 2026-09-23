@@ -131,7 +131,12 @@ fn country(name: &str) -> String {
     result
 }
 #[derive(Deserialize)]
-#[serde(tag = "kind", rename_all = "camelCase", deny_unknown_fields)]
+#[serde(
+    tag = "kind",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase",
+    deny_unknown_fields
+)]
 pub enum Mutation {
     SelectServer { id: String },
     SelectSubscription { id: String },
@@ -243,10 +248,7 @@ pub async fn mutate(state: &AppState, mutation: Mutation) -> Result<Value> {
         }
         Mutation::RemoveRules { ids } => next.rules.retain(|r| !ids.contains(&r.id)),
         Mutation::ApplyPreset { preset_id } => {
-            let target = next
-                .selected_subscription_id
-                .as_deref()
-                .unwrap_or("subscription");
+            let target = "subscription";
             if ["russia-optimized", "bypass-blocking"].contains(&preset_id.as_str())
                 && next.subscriptions.is_empty()
                 && next.nodes.is_empty()
