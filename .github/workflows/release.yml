@@ -34,13 +34,9 @@ jobs:
         shell: pwsh
         env:
           PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-          PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: |
           if ([string]::IsNullOrWhiteSpace($env:PRIVATE_KEY)) {
             throw "Repository secret TAURI_SIGNING_PRIVATE_KEY is missing"
-          }
-          if ([string]::IsNullOrWhiteSpace($env:PRIVATE_KEY_PASSWORD)) {
-            throw "Repository secret TAURI_SIGNING_PRIVATE_KEY_PASSWORD is missing"
           }
 
           $config = Get-Content -Raw src-tauri/tauri.conf.json | ConvertFrom-Json
@@ -69,6 +65,15 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Verify updater signing key
+        shell: pwsh
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+        run: |
+          $probe = Join-Path $env:RUNNER_TEMP "lumen-updater-signing-check.txt"
+          Set-Content -LiteralPath $probe -Value "lumen updater signing check" -NoNewline
+          node node_modules/@tauri-apps/cli/tauri.js signer sign --password= $probe
+
       - name: Prepare verified Xray core
         shell: pwsh
         run: powershell -NoProfile -File scripts/prepare-core.ps1
@@ -86,7 +91,6 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           tagName: v__VERSION__
           releaseName: Lumen v__VERSION__
