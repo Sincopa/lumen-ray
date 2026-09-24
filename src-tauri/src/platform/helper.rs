@@ -205,32 +205,8 @@ fn verify_parent(pid: u32) -> Result<ProcessHandle> {
         Ok(handle)
     }
 }
-fn resolve_resources() -> Result<std::path::PathBuf> {
-    let mut candidates = Vec::new();
-    if let Ok(exe) = std::env::current_exe() {
-        if let Some(parent) = exe.parent() {
-            candidates.push(parent.join("resources/core"));
-            candidates.push(parent.join("../src-tauri/resources/core"));
-        }
-    }
-    if let Some(local_app_data) = std::env::var_os("LOCALAPPDATA") {
-        candidates.push(
-            std::path::PathBuf::from(local_app_data)
-                .join("app.lumen.desktop")
-                .join("core")
-                .join(crate::xray::core::VERSION),
-        );
-    }
-    if cfg!(debug_assertions) {
-        candidates
-            .push(std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("resources/core"));
-    }
-    for candidate in candidates {
-        if candidate.join("xray.exe").is_file() {
-            return Ok(candidate);
-        }
-    }
-    Err(error())
+fn resolve_resources() -> Result<crate::runtime::RuntimePaths> {
+    crate::runtime::resolve()
 }
 pub async fn run(id: &str, parent: u32) -> Result<()> {
     let worker_started = Instant::now();
@@ -266,15 +242,15 @@ pub async fn run(id: &str, parent: u32) -> Result<()> {
     )?;
     let bytes = serde_json::to_vec(&config).map_err(|_| error())?;
     let config_ready = worker_started.elapsed().as_millis() as u32;
-    let resources = resolve_resources()?;
+    let runtime = resolve_resources()?;
     let staging = super::staging::Directory::create()?;
     let data = tempfile::tempdir_in(staging.path()).map_err(|_| error())?;
     // The authenticated pipe supplies the Geo snapshot; avoid initializing bundled Geo here.
     let bundled_core = if request.core_version == crate::xray::core::VERSION {
-        crate::xray::core::prepare_for_tunnel(&resources, data.path())?
+        crate::xray::core::prepare_for_tunnel(&runtime, data.path())?
     } else {
         // Updated cores are still validated against a complete bundled fallback.
-        crate::xray::core::prepare(&resources, data.path())?
+        crate::xray::core::prepare(&runtime, data.path())?
     };
     let core = if request.core_version == crate::xray::core::VERSION {
         bundled_core

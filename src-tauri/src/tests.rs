@@ -125,11 +125,8 @@ fn encrypted_repository_roundtrip() {
 #[tokio::test]
 async fn bundled_core_validation() {
     let directory = tempfile::tempdir().unwrap();
-    let path = core::prepare(
-        &std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("resources/core"),
-        directory.path(),
-    )
-    .unwrap();
+    let runtime = crate::runtime::RuntimePaths::new(std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("runtime"));
+    let path = core::prepare(&runtime, directory.path()).unwrap();
     let version = vpn_service::command(&path)
         .arg("version")
         .output()
@@ -173,11 +170,8 @@ async fn bundled_core_validation() {
 #[tokio::test]
 async fn core_readiness_does_not_wait_for_external_ip() {
     let directory = tempfile::tempdir().unwrap();
-    let path = core::prepare(
-        &std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("resources/core"),
-        directory.path(),
-    )
-    .unwrap();
+    let runtime = crate::runtime::RuntimePaths::new(std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("runtime"));
+    let path = core::prepare(&runtime, directory.path()).unwrap();
     let (proxy_port, metrics_port) = vpn_service::ports().unwrap();
     let bytes = serde_json::to_vec(&serde_json::json!({
         "log": { "loglevel": "none" },
@@ -552,9 +546,9 @@ async fn geo_presets_real_xray_outbound_selection_and_dns_priority() {
         let ordered: Vec<_> = ordered_rules(&repo.rules).into_iter().cloned().collect();
         if let Some(expected) = &expected { assert_eq!(&ordered, expected); } else { expected = Some(ordered); }
     }
-    let resources = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("resources/core");
+    let runtime = crate::runtime::RuntimePaths::new(std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("runtime"));
     let data = tempfile::tempdir().unwrap();
-    let core = core::prepare(&resources, data.path()).unwrap();
+    let core = core::prepare(&runtime, data.path()).unwrap();
     let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let port = listener.local_addr().unwrap().port();
     let mut config = serde_json::to_value(config::build(&repo, &node.id, 10808, 10809, false).unwrap()).unwrap();
@@ -606,7 +600,7 @@ async fn geo_presets_real_xray_outbound_selection_and_dns_priority() {
 
 #[tokio::test]
 async fn geo_database_delivery_and_initialization() {
-    let resources = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("resources/core");
+    let runtime = crate::runtime::RuntimePaths::new(std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("runtime"));
     let temp_data = tempfile::tempdir().unwrap();
 
     // Verify initial state is missing
@@ -614,7 +608,7 @@ async fn geo_database_delivery_and_initialization() {
     assert_eq!(info.status, "missing");
 
     // Initialize from bundled resources
-    crate::xray::geo::ensure_initialized(&resources, temp_data.path()).unwrap();
+    crate::xray::geo::ensure_initialized(&runtime, temp_data.path()).unwrap();
 
     // Verify initialized status is ready
     let info = crate::xray::geo::info(temp_data.path());
@@ -931,8 +925,8 @@ mod hwid_tests {
         .await;
 
         let temp_dir = tempfile::tempdir().unwrap();
-        let resources = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("resources/core");
-        let state = AppState::open(temp_dir.path().to_path_buf(), resources).unwrap();
+        let runtime = crate::runtime::RuntimePaths::new(std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("runtime"));
+        let state = AppState::open(temp_dir.path().to_path_buf(), runtime).unwrap();
 
         // 1. Initial subscription import
         let import_url = server.url("/sub");
@@ -1275,8 +1269,8 @@ mod hwid_tests {
             MockHttpServer::start(|_path, _headers| (200, vec![], VALID_SUB_BASE64.into())).await;
 
         let temp_dir = tempfile::tempdir().unwrap();
-        let resources = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("resources/core");
-        let state = AppState::open(temp_dir.path().to_path_buf(), resources).unwrap();
+        let runtime = crate::runtime::RuntimePaths::new(std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("runtime"));
+        let state = AppState::open(temp_dir.path().to_path_buf(), runtime).unwrap();
 
         // 1. URL fragment name
         let url_with_fragment = format!(

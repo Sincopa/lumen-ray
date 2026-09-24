@@ -40,7 +40,7 @@
 	},
 	"bundle": {
 		"resources": [
-			"resources/core/*"
+			"runtime/**/*"
 		],
 		"active": true,
 		"targets": [

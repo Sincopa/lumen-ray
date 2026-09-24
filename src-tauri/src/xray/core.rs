@@ -1,31 +1,39 @@
-use crate::domain::errors::{BackendError, Result};
+use crate::{
+    domain::errors::{BackendError, Result},
+    runtime::RuntimePaths,
+};
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
 use std::{
     collections::BTreeMap,
     path::{Path, PathBuf},
 };
+
 #[derive(Deserialize)]
 struct Manifest {
     version: String,
     architecture: String,
     files: BTreeMap<String, String>,
 }
+
 pub const VERSION: &str = "26.9.9";
-pub fn prepare(resources: &Path, data: &Path) -> Result<PathBuf> {
-    crate::xray::geo::ensure_initialized(resources, data)?;
-    prepare_files(resources, data, false)
+
+pub fn prepare(runtime: &RuntimePaths, data: &Path) -> Result<PathBuf> {
+    crate::xray::geo::ensure_initialized(runtime, data)?;
+    prepare_files(runtime, data, false)
 }
+
 /// The elevated helper receives a verified Geo snapshot over its authenticated pipe.
 /// It only needs the bundled executable and Wintun in its protected staging directory.
 #[cfg(windows)]
-pub fn prepare_for_tunnel(resources: &Path, data: &Path) -> Result<PathBuf> {
-    prepare_files(resources, data, true)
+pub fn prepare_for_tunnel(runtime: &RuntimePaths, data: &Path) -> Result<PathBuf> {
+    prepare_files(runtime, data, true)
 }
-fn prepare_files(resources: &Path, data: &Path, tunnel: bool) -> Result<PathBuf> {
+
+fn prepare_files(runtime: &RuntimePaths, data: &Path, tunnel: bool) -> Result<PathBuf> {
     // Trust anchor is compiled into the application, never a mutable runtime manifest.
     let manifest: Manifest =
-        serde_json::from_str(include_str!("../../resources/core/manifest.json"))
+        serde_json::from_str(include_str!("../../runtime/xray/manifest.json"))
             .map_err(|_| error())?;
     if manifest.architecture != std::env::consts::ARCH || manifest.version != VERSION {
         return Err(error());
@@ -37,6 +45,7 @@ fn prepare_files(resources: &Path, data: &Path, tunnel: bool) -> Result<PathBuf>
             "xray.exe",
             "wintun.dll",
             "LICENSE",
+            "xray.txt",
             "geoip.dat",
             "geosite.dat",
         ]
@@ -60,7 +69,15 @@ fn prepare_files(resources: &Path, data: &Path, tunnel: bool) -> Result<PathBuf>
         let valid = std::fs::read(&dest)
             .is_ok_and(|bytes| format!("{:x}", Sha256::digest(bytes)) == hash);
         if !valid {
-            let bytes = std::fs::read(resources.join(&name)).map_err(|_| error())?;
+            let source = match name.as_str() {
+                "xray.exe" => runtime.xray_binary(),
+                "wintun.dll" => runtime.wintun_path(),
+                "xray.txt" | "LICENSE" => runtime.xray_license_path(),
+                "geoip.dat" => runtime.geoip_path(),
+                "geosite.dat" => runtime.geosite_path(),
+                _ => return Err(error()),
+            };
+            let bytes = std::fs::read(source).map_err(|_| error())?;
             if format!("{:x}", Sha256::digest(&bytes)) != hash {
                 return Err(error());
             }
@@ -69,16 +86,19 @@ fn prepare_files(resources: &Path, data: &Path, tunnel: bool) -> Result<PathBuf>
     }
     if !directory.join("xray.exe").is_file()
         || !directory.join("wintun.dll").is_file()
-        || (!tunnel && (!directory.join("geoip.dat").is_file()
-            || !directory.join("geosite.dat").is_file()))
+        || (!tunnel
+            && (!directory.join("geoip.dat").is_file()
+                || !directory.join("geosite.dat").is_file()))
     {
         return Err(error());
     }
     Ok(directory.join("xray.exe"))
 }
+
 fn error() -> BackendError {
     BackendError::new(
         "CORE_NOT_FOUND",
         "Verified bundled Xray runtime is missing or invalid",
     )
 }
+

@@ -182,23 +182,24 @@ pub fn install_trusted_snapshot(data: &Path, meta: GeoDatabaseMetadata, ip: &[u8
     verify_pair(staging.path(), &meta)?;
     commit(data, staging, meta)
 }
-pub fn ensure_initialized(resources: &Path, data: &Path) -> Result<()> {
+pub fn ensure_initialized(runtime: impl Into<crate::runtime::RuntimePaths>, data: &Path) -> Result<()> {
+    let runtime = runtime.into();
     let _lock = lock(data)?;
     if info(data).valid { return Ok(()); }
-    let core = resources.join("xray.exe");
+    let core = runtime.xray_binary();
     let staging = tempfile::tempdir_in(geo_dir(data)).map_err(|_| error())?;
     let legacy = metadata(data).ok().and_then(|m| {
         let pair = verify_pair(&active_dir(data).ok()?, &m).ok()?;
         Some((m, pair))
     });
     let (meta, (ip, site)) = if let Some(legacy) = legacy { legacy } else {
-        let manifest: serde_json::Value = serde_json::from_str(include_str!("../../resources/core/manifest.json")).map_err(|_| error())?;
+        let manifest: serde_json::Value = serde_json::from_str(include_str!("../../runtime/xray/manifest.json")).map_err(|_| error())?;
         let meta = GeoDatabaseMetadata {
             version:BUNDLED_GEO_VERSION.into(), source:GEO_SOURCE_NAME.into(), updated_at:now_ms(),
             geoip_sha256:manifest["files"]["geoip.dat"].as_str().ok_or_else(error)?.into(),
             geosite_sha256:manifest["files"]["geosite.dat"].as_str().ok_or_else(error)?.into(), generation:None,
         };
-        let pair = verify_pair(resources, &meta)?;
+        let pair = verify_pair(&runtime.xray_dir(), &meta)?;
         (meta, pair)
     };
     crate::xray::updater::atomic_write(&staging.path().join("geoip.dat"), &ip)?;
@@ -272,7 +273,7 @@ pub async fn update(data: &Path, core_path: &Path) -> Result<GeoDatabaseInfo> {
 // Old NetworkKeeper releases predate GitHub asset digests. Only the exact bundled
 // release is accepted without a published digest, using the compiled trust anchor.
 fn verify_download(asset: &Asset, actual: &str) -> Result<()> {
-    let manifest: serde_json::Value = serde_json::from_str(include_str!("../../resources/core/manifest.json")).map_err(|_| error())?;
+    let manifest: serde_json::Value = serde_json::from_str(include_str!("../../runtime/xray/manifest.json")).map_err(|_| error())?;
     let expected = asset.digest.as_deref().and_then(|s| s.strip_prefix("sha256:"))
         .or_else(|| manifest["files"][&asset.name].as_str()).ok_or_else(error)?;
     if expected != actual { return Err(error()); }
@@ -351,28 +352,29 @@ pub fn validate_geo_files_sync(core_path: &Path, asset_dir: &Path) -> Result<()>
 #[cfg(test)]
 mod tests {
     use super::*;
-    fn resources() -> PathBuf {
-        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("resources/core")
+    fn runtime() -> crate::runtime::RuntimePaths {
+        crate::runtime::RuntimePaths::new(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("runtime"))
     }
     #[test]
     fn interrupted_invalid_and_concurrent_updates_preserve_last_good_pair() {
         let data = tempfile::tempdir().unwrap();
-        ensure_initialized(&resources(), data.path()).unwrap();
+        let rt = runtime();
+        ensure_initialized(&rt, data.path()).unwrap();
         let previous = std::fs::read(metadata_path(data.path())).unwrap();
         let (meta, ip, site) = snapshot(data.path()).unwrap();
         // Crash after one staged file: published metadata and both active files stay intact.
         let interrupted = tempfile::tempdir_in(geo_dir(data.path())).unwrap();
         std::fs::write(interrupted.path().join("geoip.dat"), b"partial").unwrap();
-        ensure_initialized(&resources(), data.path()).unwrap();
+        ensure_initialized(&rt, data.path()).unwrap();
         assert_eq!(std::fs::read(metadata_path(data.path())).unwrap(), previous);
         assert!(info(data.path()).valid);
-        assert!(install_snapshot(data.path(), &resources().join("xray.exe"), meta.clone(), &ip, b"invalid").is_err());
-        assert!(install_snapshot(data.path(), &resources().join("absent.exe"), meta.clone(), &ip, &site).is_err());
+        assert!(install_snapshot(data.path(), &rt.xray_binary(), meta.clone(), &ip, b"invalid").is_err());
+        assert!(install_snapshot(data.path(), &rt.xray_dir().join("absent.exe"), meta.clone(), &ip, &site).is_err());
         let guard = lock(data.path()).unwrap();
-        assert!(install_snapshot(data.path(), &resources().join("xray.exe"), meta.clone(), &ip, &site).is_err());
+        assert!(install_snapshot(data.path(), &rt.xray_binary(), meta.clone(), &ip, &site).is_err());
         drop(guard);
         assert_eq!(std::fs::read(metadata_path(data.path())).unwrap(), previous);
-        install_snapshot(data.path(), &resources().join("xray.exe"), meta, &ip, &site).unwrap();
+        install_snapshot(data.path(), &rt.xray_binary(), meta, &ip, &site).unwrap();
         assert_ne!(std::fs::read(metadata_path(data.path())).unwrap(), previous);
         restore_metadata(data.path(), &previous).unwrap();
         assert!(info(data.path()).valid);
@@ -380,7 +382,8 @@ mod tests {
     #[test]
     fn bundled_and_updated_assets_are_verified_and_resolved_from_same_generation() {
         let data = tempfile::tempdir().unwrap();
-        let core = crate::xray::core::prepare(&resources(), data.path()).unwrap();
+        let rt = runtime();
+        let core = crate::xray::core::prepare(&rt, data.path()).unwrap();
         assert_eq!(assets_for_core(&core), active_dir(data.path()).unwrap());
         let (meta, ip, site) = snapshot(data.path()).unwrap();
         install_snapshot(data.path(), &core, meta, &ip, &site).unwrap();

@@ -174,6 +174,10 @@ pub async fn prepare(version: &str, directory: &Path) -> Result<PathBuf> {
             .join("wintun.dll");
         if base_wintun.is_file() {
             let _ = std::fs::copy(&base_wintun, &staging_wintun);
+        } else if let Ok(runtime_wintun) = crate::runtime::resolve().map(|r| r.wintun_path()) {
+            if runtime_wintun.is_file() {
+                let _ = std::fs::copy(&runtime_wintun, &staging_wintun);
+            }
         }
     }
     if !staging.path().join("wintun.dll").is_file() {
