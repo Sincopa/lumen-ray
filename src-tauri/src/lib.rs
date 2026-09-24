@@ -251,13 +251,13 @@ pub fn run() {
                 let app = app.clone();
                 let exiting = exiting.clone();
                 tauri::async_runtime::spawn(async move {
-                    if services::vpn_service::disconnect(&state, &app)
-                        .await
-                        .is_err()
-                    {
-                        log::error!("Network cleanup failed; recovery journal retained");
-                        exiting.store(0, std::sync::atomic::Ordering::SeqCst);
-                        return;
+                    let _ = tokio::time::timeout(
+                        std::time::Duration::from_millis(2000),
+                        services::vpn_service::disconnect(&state, &app),
+                    )
+                    .await;
+                    if let Ok(mut session) = state.session.try_lock() {
+                        let _ = services::vpn_service::stop(&mut session).await;
                     }
                     let _ = state.shutdown.send(true);
                     exiting.store(2, std::sync::atomic::Ordering::SeqCst);

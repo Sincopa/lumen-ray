@@ -144,7 +144,7 @@
 		let unlistenNavigate: (() => void) | undefined;
 		if (runtime.isTauri) {
 			listen('navigate:settings', () => {
-				currentTab = 'settings';
+				goToTab('settings');
 			}).then((unlisten) => {
 				unlistenNavigate = unlisten;
 			});
@@ -236,7 +236,7 @@
 	async function chooseServer(server: { id: string }) {
 		try {
 			await catalog.selectServer(server.id);
-			currentTab = 'home';
+			goToTab('home');
 			if (connectionState === 'connected' || connectionState === 'connecting') {
 				void connection.switchServer(server.id);
 			}
@@ -254,7 +254,8 @@
 		}
 	}
 
-	function handleTabChange(tab: TabName) {
+	function goToTab(tab: TabName) {
+		if (tab === currentTab) return;
 		prevTab = currentTab;
 		currentTab = tab;
 		if (tab !== 'rules') {
@@ -284,11 +285,11 @@
 			darkSurface={currentTab !== 'home' || !hasSubscriptions || importing}
 			isSettingsOpen={currentTab === 'settings'}
 			onOpenSettings={() => {
-				currentTab = currentTab === 'settings' ? 'home' : 'settings';
+				goToTab(currentTab === 'settings' ? 'home' : 'settings');
 			}}
 			updateVersion={$applicationUpdateState.version}
 			onOpenUpdate={() => {
-				currentTab = 'settings';
+				goToTab('settings');
 			}}
 		/>
 
@@ -309,18 +310,22 @@
 					onClose={() => (importing = false)}
 					onSuccess={() => {
 						importing = false;
-						currentTab = 'home';
+						goToTab('home');
 					}}
 				/>
-			{:else if currentTab === 'rules'}
-				<RulesView onChromeChange={(mode) => (ruleChrome = mode)} />
 			{:else}
 				{#key currentTab}
 					<div
 						class="tab-view"
 						in:fly={{
 							x: getDir(currentTab, prevTab) * 24,
-							duration: 260,
+							duration: 220,
+							easing: cubicOut,
+							opacity: 0,
+						}}
+						out:fly={{
+							x: -getDir(currentTab, prevTab) * 24,
+							duration: 220,
 							easing: cubicOut,
 							opacity: 0,
 						}}
@@ -338,7 +343,7 @@
 									error={$connectionStore.error}
 									onRetry={() => connection.initialize()}
 									onToggle={toggleConnection}
-									onSelectServer={() => (currentTab = 'servers')}
+								onSelectServer={() => goToTab('servers')}
 								/>
 							{/if}
 						{:else if currentTab === 'subscriptions'}
@@ -348,10 +353,12 @@
 								selectedId={$catalogStore.selectedServerId ?? ''}
 								disabled={$connectionStore.busy}
 								onSelect={chooseServer}
-								onManageSubscription={() => handleTabChange('subscriptions')}
+								onManageSubscription={() => goToTab('subscriptions')}
 							/>
 						{:else if currentTab === 'settings'}
 							<SettingsView />
+						{:else if currentTab === 'rules'}
+							<RulesView onChromeChange={(mode) => (ruleChrome = mode)} />
 						{/if}
 					</div>
 				{/key}
@@ -365,7 +372,7 @@
 				{routingMode}
 				{hasSubscriptions}
 				modeDisabled={$connectionStore.busy}
-				onTabChange={handleTabChange}
+				onTabChange={goToTab}
 				onModeChange={changeMode}
 				onActionClick={() => (importing = true)}
 			/>

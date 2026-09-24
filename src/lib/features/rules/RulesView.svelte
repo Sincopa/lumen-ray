@@ -6,6 +6,7 @@
 	import { catalog } from '../../services';
 	import { errorCode } from '../../services/errors';
 	import { t } from '../../i18n';
+	import { serverDisplayName } from '../../utils/serverDisplayName';
 	import type { Rule } from '../../services/catalog';
 	import ConfirmDialog from '../../components/ConfirmDialog.svelte';
 	import CountryFlag from '../../components/CountryFlag.svelte';
@@ -110,7 +111,7 @@
 	const hasActiveProxy = $derived(
 		Boolean(
 			$catalogStore.servers.length > 0 ||
-				$catalogStore.subscriptions.length > 0,
+			$catalogStore.subscriptions.length > 0,
 		),
 	);
 
@@ -138,8 +139,7 @@
 	}
 
 	function getRuleIcon(rule: Rule): string | null {
-		const matcher =
-			rule.matcher ?? (rule.isDomain ? 'domain' : 'application');
+		const matcher = rule.matcher ?? (rule.isDomain ? 'domain' : 'application');
 		if (matcher !== 'application') return null;
 		const baseName = formatRuleDisplayName(rule.name).toLowerCase();
 		if (processIcons[baseName]) return processIcons[baseName];
@@ -465,11 +465,11 @@
 				{@const serverName = isDirect
 					? t('rules.direct')
 					: isBlock
-						? (t('rules.block') || 'Блокировать')
+						? t('rules.block') || 'Блокировать'
 						: isSub
 							? (activeSub?.name ?? t('rules.subscriptionServer'))
 							: server
-								? t('servers.countries.' + server.countryCode)
+								? serverDisplayName(server)
 								: '—'}
 				{@const matcher =
 					rule.matcher ?? (rule.isDomain ? 'domain' : 'application')}
@@ -508,13 +508,13 @@
 							aria-label={t('rules.edit', { name: rule.name })}
 						>
 							<span class="rule-name">{formatRuleDisplayName(rule.name)}</span>
-							<span class="rule-details"
-								>{isGeo
+							<span class="rule-details">
+								{isGeo
 									? matcher === 'geosite'
 										? 'GeoSite'
 										: 'GeoIP'
-									: serverName}</span
-							>
+									: serverName}
+							</span>
 						</button>
 					</div>
 					<div class="rule-right">
@@ -995,7 +995,7 @@
 		white-space: nowrap;
 	}
 	.rule-details {
-		font-size: 11px;
+		font-size: 12px;
 		color: #ffffff80;
 	}
 	.rule-right {

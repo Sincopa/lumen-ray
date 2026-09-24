@@ -611,7 +611,7 @@
 		gap: 2px;
 	}
 	.metric-label {
-		font-size: 10px;
+		font-size: 11px;
 		color: #ffffff80;
 	}
 	.metric-val {
@@ -619,7 +619,7 @@
 		font-weight: 600;
 	}
 	.updated-time {
-		font-size: 10px;
+		font-size: 11px;
 		color: #ffffff8c;
 		max-width: 50%;
 		text-align: right;

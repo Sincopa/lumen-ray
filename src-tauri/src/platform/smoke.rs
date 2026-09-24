@@ -55,6 +55,9 @@ pub async fn run() -> Result<()> {
         nodes: parsed.nodes,
         ..Default::default()
     };
+    let data = tempfile::tempdir().map_err(|_| error())?;
+    let resources = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("resources/core");
+    crate::xray::geo::ensure_initialized(&resources, data.path())?;
     let original = public_ip().await?;
     for rules in [false, true] {
         repo.routing_mode = if rules { "rules" } else { "global" }.into();
@@ -79,7 +82,7 @@ pub async fn run() -> Result<()> {
             selected: id.clone(),
             proxy_port,
             metrics_port,
-        })
+        }, data.path())
         .await?;
         let result = async {
             for _ in 0..100 {

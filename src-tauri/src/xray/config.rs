@@ -15,6 +15,8 @@ pub struct XrayConfig {
     inbounds: Vec<Value>,
     outbounds: Vec<Value>,
     routing: Value,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    dns: Option<Value>,
     stats: Value,
     policy: Value,
     metrics: Value,
@@ -135,11 +137,37 @@ pub fn build(
         json!({"type":"field","inboundTag":["probe"], target_field: target_tag}),
         json!({"type":"field","process":["self/"],"outboundTag":"direct"}),
     ];
+    let dns_servers = if tun || repo.routing_mode == "rules" {
+        if repo.settings.dns_server == "system" {
+            #[cfg(windows)] { crate::platform::network::system_dns()? }
+            #[cfg(not(windows))] { return Err(BackendError::new("PLATFORM_UNSUPPORTED", "System DNS requires Windows")); }
+        } else { vec![repo.settings.dns_server.clone()] }
+    } else { vec![] };
+    // System/private resolvers stay reachable on the physical network. Explicit public
+    // resolvers use the selected VPN, including balancers. This tag precedes self/LAN.
+    let dns = if repo.routing_mode == "rules" {
+        let local = repo.settings.dns_server == "system" || dns_servers.iter().any(|s| {
+            s.parse::<std::net::IpAddr>().is_ok_and(|ip| match ip {
+                std::net::IpAddr::V4(ip) => ip.is_private() || ip.is_loopback() || ip.is_link_local(),
+                std::net::IpAddr::V6(ip) => ip.is_loopback() || ip.is_unique_local() || ip.is_unicast_link_local(),
+            })
+        });
+        rules.insert(0, if local {
+            json!({"type":"field","inboundTag":["dns-query"],"outboundTag":"direct"})
+        } else { json!({"type":"field","inboundTag":["dns-query"],target_field:target_tag}) });
+        let servers: Vec<_> = dns_servers.iter().map(|s| if s.contains(':') { format!("tcp://[{s}]") } else { format!("tcp://{s}") }).collect();
+        Some(json!({"tag":"dns-query","servers":servers}))
+    } else { None };
+    // Hijack A/AAAA before LAN bypass, including queries originally sent to a local router.
+    if repo.routing_mode == "rules" {
+        outbounds.push(json!({"tag":"dns","protocol":"dns"}));
+        rules.push(json!({"type":"field","port":"53","outboundTag":"dns"}));
+    }
     if repo.settings.bypass_lan {
         rules.push(json!({"type":"field","ip":["127.0.0.0/8","10.0.0.0/8","172.16.0.0/12","192.168.0.0/16","169.254.0.0/16","::1/128","fc00::/7","fe80::/10"],"outboundTag":"direct"}));
     }
     if repo.routing_mode == "rules" {
-        for rule in repo.rules.iter().filter(|r| r.enabled) {
+        for rule in crate::services::catalog_service::ordered_rules(&repo.rules).into_iter().filter(|r| r.enabled) {
             let target = if ["direct", "block"].contains(&rule.server_id.as_str()) {
                 rule.server_id.clone()
             } else if rule.server_id == "subscription"
@@ -221,8 +249,6 @@ pub fn build(
             rules.push(compiled);
         }
 
-        // In rules mode, route unhandled DNS queries (port 53) through the VPN proxy so domain resolution doesn't fail
-        rules.push(json!({"type":"field","port":"53", target_field: target_tag}));
     }
     let default_field = if repo.routing_mode == "rules" || balancer_tag.is_none() {
         "outboundTag"
@@ -242,35 +268,12 @@ pub fn build(
         inbounds.push(json!({"tag":"system-proxy","listen":"127.0.0.1","port":metrics_port.checked_add(1).ok_or_else(BackendError::invalid)?,"protocol":"http","settings":{}}));
     }
     if tun {
-        let dns = if repo.settings.dns_server == "system" {
-            #[cfg(windows)]
-            {
-                crate::platform::network::system_dns()?
-            }
-            #[cfg(not(windows))]
-            {
-                return Err(BackendError::new(
-                    "PLATFORM_UNSUPPORTED",
-                    "System DNS requires Windows",
-                ));
-            }
-        } else {
-            vec![repo.settings.dns_server.clone()]
-        };
-        inbounds.push(json!({"tag":"tun","protocol":"tun","settings":{"name":"LumenTun","mtu":1500,"gateway":["172.31.255.1/30","fd42:6c75:6d65::1/126"],"dns":dns,"autoSystemRoutingTable":["0.0.0.0/0","::/0"],"autoOutboundsInterface":"auto"},"sniffing":{"enabled":true,"destOverride":["http","tls","quic"],"routeOnly":true}}));
+        inbounds.push(json!({"tag":"tun","protocol":"tun","settings":{"name":"LumenTun","mtu":1500,"gateway":["172.31.255.1/30","fd42:6c75:6d65::1/126"],"dns":dns_servers,"autoSystemRoutingTable":["0.0.0.0/0","::/0"],"autoOutboundsInterface":"auto"},"sniffing":{"enabled":true,"destOverride":["http","tls","quic"],"routeOnly":true}}));
     }
 
-    // Domain Resolution Strategy:
-    // We use "IPIfNonMatch" according to official Xray routing documentation:
-    // 1. "AsIs" would fail to evaluate GeoIP rules for domain/sniffed traffic because domains
-    //    are never resolved to IPs during rule evaluation.
-    // 2. "IPOnDemand" triggers immediate DNS resolution as soon as the first IP rule is reached,
-    //    causing unnecessary latency even when subsequent domain/geosite rules would have matched.
-    // 3. "IPIfNonMatch" first tests all domain and geosite rules against the SNI/domain (fast path).
-    //    If none match, Xray resolves the destination domain to an IP and tests GeoIP/IP rules (second pass).
-    // 4. In TUN mode, TLS/HTTP/QUIC sniffing with `routeOnly: true` provides the domain for matching,
-    //    while unhandled port 53 DNS queries are routed via the proxy outbound, preventing DNS leaks or breaks.
-    let mut routing = json!({"domainStrategy":"IPIfNonMatch","rules":rules});
+    // IPIfNonMatch never reaches its DNS pass when the catch-all matches.
+    // Keep global mode unchanged; in rules mode resolve when an IP matcher needs it.
+    let mut routing = json!({"domainStrategy":if repo.routing_mode == "rules" { "IPOnDemand" } else { "IPIfNonMatch" },"rules":rules});
     if let Some(balancer) = &node.balancer {
         routing["balancers"] = json!([{
             "tag": balancer.tag,
@@ -284,6 +287,7 @@ pub fn build(
         inbounds,
         outbounds,
         routing,
+        dns,
         stats: json!({}),
         policy: json!({"system":{"statsOutboundUplink":true,"statsOutboundDownlink":true}}),
         metrics: json!({"tag":"metrics","listen":format!("127.0.0.1:{metrics_port}")}),

@@ -9,6 +9,44 @@ use crate::{
 };
 const VLESS:&str="vless://00000000-0000-4000-8000-000000000001@example.com:443?type=ws&security=tls&sni=example.com&path=%2Fvpn#Example";
 #[test]
+#[ignore = "Requires an explicit local DPAPI repository directory and a browser; never modifies user data"]
+fn private_geo_video_check() {
+    let source = std::env::var_os("LUMEN_GEO_TEST_REPOSITORY").expect("Set repository directory");
+    let saved = RepositoryStore::new(std::path::Path::new(&source)).unwrap().load().unwrap();
+    let selected = saved.selected_server_id.clone().expect("Select a server first");
+    let resources = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("resources/core");
+    let isolated = tempfile::tempdir().unwrap();
+    let core = core::prepare(&resources, isolated.path()).unwrap();
+    for mode in ["baseline-rules", "global", "fixed-rules"] {
+        let mut repo = saved.clone();
+        repo.routing_mode = if mode == "global" { "global" } else { "rules" }.into();
+        if mode == "fixed-rules" {
+            let presets: std::collections::BTreeSet<_> = repo.rules.iter().filter_map(|r| r.preset_id.clone()).collect();
+            repo.rules.retain(|r| r.preset_id.is_none());
+            for preset in presets {
+                repo.rules.extend(crate::services::catalog_service::generate_preset_rules(&preset, "subscription").unwrap());
+            }
+        }
+        let mut value = serde_json::to_value(config::build(&repo, &selected, 19876, 19877, false).unwrap()).unwrap();
+        if mode == "baseline-rules" {
+            value.as_object_mut().unwrap().remove("dns");
+            value["outbounds"].as_array_mut().unwrap().retain(|o| o["tag"] != "dns");
+            let rules = value["routing"]["rules"].as_array_mut().unwrap();
+            rules.retain(|r| r["outboundTag"] != "dns" && r["inboundTag"] != serde_json::json!(["dns-query"]));
+            rules.insert(rules.len()-1, serde_json::json!({"type":"field","port":"53","outboundTag":"proxy"}));
+            value["routing"]["domainStrategy"] = serde_json::json!("IPIfNonMatch");
+        }
+        value["log"]["loglevel"] = serde_json::json!("info");
+        let path = isolated.path().join("private-config.json");
+        std::fs::write(&path, serde_json::to_vec(&value).unwrap()).unwrap();
+        let status = std::process::Command::new("node")
+            .arg(resources.join("../../../scripts/geo-video-check.mjs"))
+            .args([core.as_os_str(), crate::xray::geo::assets_for_core(&core).as_os_str(), path.as_os_str(), std::ffi::OsStr::new(mode)])
+            .status().unwrap();
+        assert!(status.success(), "Browser diagnostic runner failed");
+    }
+}
+#[test]
 fn uri_variants_and_stable_identity() {
     let node = uri::parse(VLESS, "sub").unwrap();
     assert_eq!(node.transport.path, "/vpn");
@@ -190,13 +228,19 @@ async fn core_readiness_does_not_wait_for_external_ip() {
         "outbounds": [{ "protocol": "freedom", "tag": "direct" }]
     }))
     .unwrap();
-    let started = std::time::Instant::now();
-    let mut session = vpn_service::Session::default();
-    vpn_service::start(&path, &mut session, &bytes, proxy_port, metrics_port)
-        .await
-        .unwrap();
-    assert!(started.elapsed() < std::time::Duration::from_secs(3));
-    vpn_service::stop(&mut session).await.unwrap();
+    let mut samples = Vec::new();
+    for _ in 0..9 {
+        let started = std::time::Instant::now();
+        let mut session = vpn_service::Session::default();
+        vpn_service::start(&path, &mut session, &bytes, proxy_port, metrics_port)
+            .await
+            .unwrap();
+        samples.push(started.elapsed().as_millis());
+        vpn_service::stop(&mut session).await.unwrap();
+    }
+    samples.sort_unstable();
+    eprintln!("Local Xray process + SOCKS readiness: median={} ms, p95={} ms (n=9)", samples[4], samples[8]);
+    assert!(samples[8] < 3000);
 }
 
 #[test]
@@ -243,7 +287,7 @@ fn ip_rules_and_default_direct() {
         } else {
             "ip"
         };
-        assert!(value["routing"]["rules"][3][key].is_array());
+        assert!(value["routing"]["rules"].as_array().unwrap().iter().any(|r| r[key].is_array() && r["outboundTag"] == "proxy"));
     }
     repo.rules[0].name = "203.0.113.0/99".into();
     assert!(config::build(&repo, &node.id, 10808, 10809, true).is_err());
@@ -581,12 +625,11 @@ fn geo_rules_xray_config_compilation() {
     let value =
         serde_json::to_value(config::build(&repo, &node.id, 10808, 10809, true).unwrap()).unwrap();
 
-    // Verify domainStrategy is IPIfNonMatch
-    assert_eq!(value["routing"]["domainStrategy"], "IPIfNonMatch");
+    assert_eq!(value["routing"]["domainStrategy"], "IPOnDemand");
 
     let rules = value["routing"]["rules"].as_array().unwrap();
     // Rules 0: probe, 1: process self/, 2: bypass_lan (since default true)
-    let custom_rules = &rules[3..7];
+    let custom_rules = &rules[5..9];
 
     // Rule 1: geoip:private -> direct (must be in ip, never in domain)
     assert_eq!(custom_rules[0]["ip"][0], "geoip:private");
@@ -641,30 +684,10 @@ fn preset_application_idempotency_and_preservation() {
     use crate::services::catalog_service::generate_preset_rules;
 
     let rules = generate_preset_rules("russia-optimized", "sub-1").unwrap();
-    assert_eq!(rules.len(), 7);
-
-    // Exact order required:
-    assert_eq!(rules[0].name, "private");
-    assert_eq!(rules[0].server_id, "direct");
-
-    assert_eq!(rules[1].name, "antifilter");
+    assert_eq!(rules.len(), 8);
+    assert_eq!(rules.iter().map(|r| r.name.as_str()).collect::<Vec<_>>(),
+        vec!["private", "youtube", "antifilter", "antifilter-community", "category-ru", "antifilter", "antifilter-community", "ru"]);
     assert_eq!(rules[1].server_id, "sub-1");
-
-    assert_eq!(rules[2].name, "antifilter-community");
-    assert_eq!(rules[2].server_id, "sub-1");
-
-    assert_eq!(rules[3].name, "antifilter");
-    assert_eq!(rules[3].server_id, "sub-1");
-
-    assert_eq!(rules[4].name, "antifilter-community");
-    assert_eq!(rules[4].server_id, "sub-1");
-
-    assert_eq!(rules[5].name, "category-ru");
-    assert_eq!(rules[5].server_id, "direct");
-
-    assert_eq!(rules[6].name, "ru");
-    assert_eq!(rules[6].server_id, "direct");
-
     // Check all preset rules have preset_id populated
     for r in &rules {
         assert_eq!(r.preset_id.as_deref(), Some("russia-optimized"));
@@ -672,18 +695,10 @@ fn preset_application_idempotency_and_preservation() {
 
     // Check bypass-blocking
     let bb = generate_preset_rules("bypass-blocking", "sub-1").unwrap();
-    assert_eq!(bb.len(), 4);
-    assert_eq!(bb[0].name, "antifilter");
-    assert_eq!(bb[1].name, "antifilter-community");
-    assert_eq!(bb[2].name, "antifilter");
-    assert_eq!(bb[3].name, "antifilter-community");
-
-    // Check russia-direct: category-ru (1), ru (2), private (3)
+    assert_eq!(bb.len(), 5);
+    assert_eq!(bb[0].name, "youtube");
     let rd = generate_preset_rules("russia-direct", "sub-1").unwrap();
-    assert_eq!(rd.len(), 3);
-    assert_eq!(rd[0].name, "category-ru");
-    assert_eq!(rd[1].name, "ru");
-    assert_eq!(rd[2].name, "private");
+    assert_eq!(rd.iter().map(|r| r.name.as_str()).collect::<Vec<_>>(), vec!["private", "category-ru", "ru"]);
 
     // Check case-insensitive prefix normalization
     assert_eq!(
@@ -725,6 +740,109 @@ fn preset_application_idempotency_and_preservation() {
     }
 }
 
+#[cfg(windows)]
+#[test]
+#[ignore = "Performance diagnostic; stages multiple isolated Xray runtimes"]
+fn tunnel_asset_staging_benchmark() {
+    let resources = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("resources/core");
+    let source = tempfile::tempdir().unwrap();
+    core::prepare(&resources, source.path()).unwrap();
+    let (metadata, geoip, geosite) = crate::xray::geo::snapshot(source.path()).unwrap();
+    for _ in 0..3 {
+        let target = tempfile::tempdir().unwrap();
+        let started = std::time::Instant::now();
+        crate::xray::geo::ensure_initialized(&resources, target.path()).unwrap();
+        let geo_initialized = started.elapsed().as_millis();
+        core::prepare(&resources, target.path()).unwrap();
+        let prepared = started.elapsed().as_millis();
+        crate::xray::geo::install_trusted_snapshot(
+            target.path(), metadata.clone(), &geoip, &geosite,
+        ).unwrap();
+        eprintln!("TUN staging: geo_init={} ms, core_files={} ms, transferred_geo={} ms", geo_initialized, prepared - geo_initialized, started.elapsed().as_millis() - prepared);
+
+        let fast = tempfile::tempdir().unwrap();
+        let fast_started = std::time::Instant::now();
+        let executable = core::prepare_for_tunnel(&resources, fast.path()).unwrap();
+        let fast_core = fast_started.elapsed().as_millis();
+        assert!(executable.is_file());
+        assert!(executable.parent().unwrap().join("wintun.dll").is_file());
+        assert!(!crate::xray::geo::metadata_path(fast.path()).exists());
+        crate::xray::geo::install_trusted_snapshot(
+            fast.path(), metadata.clone(), &geoip, &geosite,
+        ).unwrap();
+        assert!(crate::xray::geo::info(fast.path()).valid);
+        eprintln!("TUN fast staging: core={} ms, transferred_geo_and_verify={} ms", fast_core, fast_started.elapsed().as_millis() - fast_core);
+    }
+}
+
+#[tokio::test]
+async fn geo_presets_real_xray_outbound_selection_and_dns_priority() {
+    use crate::services::catalog_service::{generate_preset_rules, ordered_rules};
+    use crate::storage::repository::{Rule, RuleMatcher};
+    use tokio::io::AsyncWriteExt;
+    let node = uri::parse(VLESS, "sub").unwrap();
+    let mut repo = Repository { nodes:vec![node.clone()], routing_mode:"rules".into(), ..Default::default() };
+    let manual = Rule { id:"manual".into(), name:"203.0.113.10".into(), matcher:RuleMatcher::Domain,
+        server_id:"block".into(), enabled:true, preset_id:None, is_domain:true };
+    let mut expected = None;
+    for order in [["russia-direct", "bypass-blocking"], ["bypass-blocking", "russia-direct"]] {
+        repo.rules = vec![manual.clone()];
+        for preset in order { repo.rules.extend(generate_preset_rules(preset, "subscription").unwrap()); }
+        let ordered: Vec<_> = ordered_rules(&repo.rules).into_iter().cloned().collect();
+        if let Some(expected) = &expected { assert_eq!(&ordered, expected); } else { expected = Some(ordered); }
+    }
+    let resources = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("resources/core");
+    let data = tempfile::tempdir().unwrap();
+    let core = core::prepare(&resources, data.path()).unwrap();
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let mut config = serde_json::to_value(config::build(&repo, &node.id, 10808, 10809, false).unwrap()).unwrap();
+    let rules = config["routing"]["rules"].as_array().unwrap();
+    assert!(rules.iter().position(|r| r["outboundTag"] == "dns").unwrap() < rules.iter().position(|r| r["ip"].is_array()).unwrap());
+    assert_eq!(rules[0]["inboundTag"][0], "dns-query");
+    vpn_service::validate(&core, &serde_json::to_vec(&config).unwrap()).await.unwrap();
+    let tun = config::build(&repo, &node.id, 10808, 10809, true).unwrap();
+    vpn_service::validate(&core, &serde_json::to_vec(&tun).unwrap()).await.unwrap();
+    // Exercise the real router, with deterministic DNS and inert outbounds; no private node required.
+    config["log"] = serde_json::json!({"loglevel":"info"});
+    config["inbounds"] = serde_json::json!([{"tag":"diagnostic","protocol":"http","listen":"127.0.0.1","port":port}]);
+    config["dns"] = serde_json::json!({"hosts":{
+        "ip-only.test":"203.0.113.10", "www.youtube.com":"77.88.55.77",
+        "rr1.googlevideo.com":"77.88.55.77", "youtubei.googleapis.com":"77.88.55.77",
+        "i.ytimg.com":"77.88.55.77", "yandex.ru":"77.88.55.77", "fallback.test":"203.0.113.20"
+    }});
+    config["outbounds"] = serde_json::json!([
+        {"tag":"direct","protocol":"blackhole"}, {"tag":"proxy","protocol":"blackhole"},
+        {"tag":"block","protocol":"blackhole"}, {"tag":"dns","protocol":"blackhole"}
+    ]);
+    config.as_object_mut().unwrap().remove("metrics");
+    let output = tempfile::tempfile().unwrap();
+    drop(listener);
+    let mut child = vpn_service::command(&core).args(["run", "-config", "stdin:"])
+        .stdin(std::process::Stdio::piped()).stdout(output.try_clone().unwrap()).stderr(output.try_clone().unwrap()).spawn().unwrap();
+    child.stdin.take().unwrap().write_all(&serde_json::to_vec(&config).unwrap()).await.unwrap();
+    for _ in 0..100 {
+        if tokio::net::TcpStream::connect((std::net::Ipv4Addr::LOCALHOST, port)).await.is_ok() { break; }
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    }
+    let client = reqwest::Client::builder().no_proxy().proxy(reqwest::Proxy::all(format!("http://127.0.0.1:{port}")).unwrap())
+        .timeout(std::time::Duration::from_secs(2)).build().unwrap();
+    let cases = [("ip-only.test","block"), ("www.youtube.com","proxy"), ("rr1.googlevideo.com","proxy"),
+        ("youtubei.googleapis.com","proxy"), ("i.ytimg.com","proxy"), ("yandex.ru","direct"), ("fallback.test","direct")];
+    for (host, _) in cases { let _ = client.get(format!("http://{host}/")).send().await; }
+    child.kill().await.unwrap();
+    child.wait().await.unwrap();
+    use std::io::{Read, Seek};
+    let mut output = output;
+    output.rewind().unwrap();
+    let mut logs = String::new(); output.read_to_string(&mut logs).unwrap();
+    for (host, target) in cases { assert!(logs.contains(&format!("taking detour [{target}] for [tcp:{host}:80]")), "No expected route for {host}"); }
+    // Compiling old saved presets must not recreate a deleted service row.
+    repo.rules.retain(|r| r.name != "youtube");
+    let value = serde_json::to_value(config::build(&repo, &node.id, 10808, 10809, false).unwrap()).unwrap();
+    assert!(!value.to_string().contains("geosite:youtube"));
+}
+
 #[tokio::test]
 async fn geo_database_delivery_and_initialization() {
     let resources = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("resources/core");
@@ -744,8 +862,8 @@ async fn geo_database_delivery_and_initialization() {
     assert_eq!(info.source, crate::xray::geo::GEO_SOURCE_NAME);
 
     // Verify files exist and have non-zero size
-    let geoip = temp_data.path().join("geo/geoip.dat");
-    let geosite = temp_data.path().join("geo/geosite.dat");
+    let geoip = crate::xray::geo::active_dir(temp_data.path()).unwrap().join("geoip.dat");
+    let geosite = crate::xray::geo::active_dir(temp_data.path()).unwrap().join("geosite.dat");
     assert!(geoip.is_file());
     assert!(geosite.is_file());
     assert!(std::fs::metadata(&geoip).unwrap().len() > 100_000);

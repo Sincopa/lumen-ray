@@ -3,7 +3,7 @@ use crate::{
     domain::errors::{BackendError, Result},
     storage::repository::Repository,
 };
-use std::{os::windows::io::AsRawHandle, time::Duration};
+use std::{os::windows::io::AsRawHandle, time::{Duration, Instant}};
 use tokio::{
     io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt},
     net::windows::named_pipe::{ClientOptions, NamedPipeServer, ServerOptions},
@@ -27,6 +27,12 @@ pub struct StartTunnel {
     pub selected: String,
     pub proxy_port: u16,
     pub metrics_port: u16,
+}
+#[derive(serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct StartRequest {
+    tunnel: StartTunnel,
+    geo: crate::xray::geo::GeoDatabaseMetadata,
 }
 pub struct Helper {
     pipe: NamedPipeServer,
@@ -89,7 +95,11 @@ fn launch(id: String) -> Result<ProcessHandle> {
         Ok(ProcessHandle(info.hProcess))
     }
 }
-pub async fn start(request: StartTunnel) -> Result<Helper> {
+pub async fn start(request: StartTunnel, data: &std::path::Path) -> Result<Helper> {
+    let started_at = std::time::Instant::now();
+    let (geo, geoip, geosite) = crate::xray::geo::snapshot(data)?;
+    log::info!("VPN timing: TUN assets verified {} ms", started_at.elapsed().as_millis());
+    let request = StartRequest { tunnel: request, geo };
     let id = uuid::Uuid::new_v4().to_string();
     let mut pipe = ServerOptions::new()
         .first_pipe_instance(true)
@@ -99,10 +109,12 @@ pub async fn start(request: StartTunnel) -> Result<Helper> {
     let process = tokio::task::spawn_blocking(move || launch(id))
         .await
         .map_err(|_| error())??;
+    log::info!("VPN timing: TUN helper launched {} ms", started_at.elapsed().as_millis());
     tokio::time::timeout(Duration::from_secs(30), pipe.connect())
         .await
         .map_err(|_| error())?
         .map_err(|_| error())?;
+    log::info!("VPN timing: TUN pipe connected {} ms", started_at.elapsed().as_millis());
     let mut pid = 0;
     unsafe {
         if GetNamedPipeClientProcessId(pipe.as_raw_handle() as _, &mut pid) == 0
@@ -116,6 +128,9 @@ pub async fn start(request: StartTunnel) -> Result<Helper> {
         &serde_json::to_vec(&request).map_err(|_| error())?,
     )
     .await?;
+    write_asset(&mut pipe, &geoip, crate::xray::geo::MAX_GEOIP_SIZE).await?;
+    write_asset(&mut pipe, &geosite, crate::xray::geo::MAX_GEOSITE_SIZE).await?;
+    log::info!("VPN timing: TUN assets transferred {} ms", started_at.elapsed().as_millis());
     let ready = tokio::time::timeout(Duration::from_secs(120), pipe.read_u8())
         .await
         .map_err(|_| error())?
@@ -123,7 +138,33 @@ pub async fn start(request: StartTunnel) -> Result<Helper> {
     if ready != 1 {
         return Err(error());
     }
+    let mut stages = [0u32; 7];
+    tokio::time::timeout(Duration::from_secs(5), async {
+        for stage in &mut stages {
+            *stage = pipe.read_u32().await.map_err(|_| error())?;
+        }
+        Ok::<(), BackendError>(())
+    })
+    .await
+    .map_err(|_| error())??;
+    log::info!(
+        "VPN timing: TUN worker request={} assets={} config={} core={} geo={} xray={} routes={} ms",
+        stages[0], stages[1], stages[2], stages[3], stages[4], stages[5], stages[6]
+    );
+    log::info!("VPN timing: TUN helper acknowledged {} ms", started_at.elapsed().as_millis());
     Ok(Helper { pipe, process })
+}
+async fn write_asset<W: AsyncWrite + Unpin>(writer: &mut W, bytes: &[u8], limit: usize) -> Result<()> {
+    if bytes.len() > limit { return Err(error()); }
+    writer.write_u32(bytes.len() as u32).await.map_err(|_| error())?;
+    writer.write_all(bytes).await.map_err(|_| error())
+}
+async fn read_asset<R: AsyncRead + Unpin>(reader: &mut R, limit: usize) -> Result<Vec<u8>> {
+    let size = reader.read_u32().await.map_err(|_| error())? as usize;
+    if size < 1024 || size > limit { return Err(error()); }
+    let mut bytes = vec![0; size];
+    reader.read_exact(&mut bytes).await.map_err(|_| error())?;
+    Ok(bytes)
 }
 async fn write_frame<W: AsyncWrite + Unpin>(writer: &mut W, bytes: &[u8]) -> Result<()> {
     if bytes.len() > 8 * 1024 * 1024 {
@@ -192,6 +233,7 @@ fn resolve_resources() -> Result<std::path::PathBuf> {
     Err(error())
 }
 pub async fn run(id: &str, parent: u32) -> Result<()> {
+    let worker_started = Instant::now();
     uuid::Uuid::parse_str(id).map_err(|_| error())?;
     let _parent = verify_parent(parent)?;
     let mut pipe = ClientOptions::new()
@@ -206,7 +248,15 @@ pub async fn run(id: &str, parent: u32) -> Result<()> {
     let bytes = tokio::time::timeout(Duration::from_secs(15), read_frame(&mut pipe))
         .await
         .map_err(|_| error())??;
-    let request: StartTunnel = serde_json::from_slice(&bytes).map_err(|_| error())?;
+    let envelope: StartRequest = serde_json::from_slice(&bytes).map_err(|_| error())?;
+    let request_ready = worker_started.elapsed().as_millis() as u32;
+    let (geoip, geosite) = tokio::time::timeout(Duration::from_secs(30), async {
+        let ip = read_asset(&mut pipe, crate::xray::geo::MAX_GEOIP_SIZE).await?;
+        let site = read_asset(&mut pipe, crate::xray::geo::MAX_GEOSITE_SIZE).await?;
+        Ok::<_, BackendError>((ip, site))
+    }).await.map_err(|_| error())??;
+    let assets_ready = worker_started.elapsed().as_millis() as u32;
+    let request = envelope.tunnel;
     let config = crate::xray::config::build(
         &request.repository,
         &request.selected,
@@ -215,22 +265,30 @@ pub async fn run(id: &str, parent: u32) -> Result<()> {
         true,
     )?;
     let bytes = serde_json::to_vec(&config).map_err(|_| error())?;
+    let config_ready = worker_started.elapsed().as_millis() as u32;
     let resources = resolve_resources()?;
     let staging = super::staging::Directory::create()?;
     let data = tempfile::tempdir_in(staging.path()).map_err(|_| error())?;
-    let core = if request.core_version == crate::xray::core::VERSION {
+    // The authenticated pipe supplies the Geo snapshot; avoid initializing bundled Geo here.
+    let bundled_core = if request.core_version == crate::xray::core::VERSION {
+        crate::xray::core::prepare_for_tunnel(&resources, data.path())?
+    } else {
+        // Updated cores are still validated against a complete bundled fallback.
         crate::xray::core::prepare(&resources, data.path())?
+    };
+    let core = if request.core_version == crate::xray::core::VERSION {
+        bundled_core
     } else {
         crate::xray::updater::prepare(&request.core_version, &data.path().join("core")).await?
     };
-    if let Some(parent) = core.parent() {
-        std::env::set_var("XRAY_LOCATION_ASSET", parent);
-    }
-    crate::services::vpn_service::validate(&core, &bytes).await?;
+    let core_ready = worker_started.elapsed().as_millis() as u32;
+    crate::xray::geo::install_trusted_snapshot(data.path(), envelope.geo, &geoip, &geosite)?;
+    let geo_ready = worker_started.elapsed().as_millis() as u32;
     let mut child = super::process::CoreProcess::spawn(&core, &bytes).await?;
+    let xray_spawned = worker_started.elapsed().as_millis() as u32;
     // Closing the authenticated pipe (including parent crash) tears down the child and Wintun.
     let mut ready = false;
-    for _ in 0..200 {
+    for _ in 0..400 {
         if child.try_wait().map_err(|_| error())?.is_some() {
             return Err(error());
         }
@@ -238,12 +296,16 @@ pub async fn run(id: &str, parent: u32) -> Result<()> {
             ready = true;
             break;
         }
-        tokio::time::sleep(Duration::from_millis(100)).await;
+        tokio::time::sleep(Duration::from_millis(25)).await;
     }
     if !ready {
         return Err(error());
     }
+    let routes_ready = worker_started.elapsed().as_millis() as u32;
     pipe.write_u8(1).await.map_err(|_| error())?;
+    for stage in [request_ready, assets_ready, config_ready, core_ready, geo_ready, xray_spawned, routes_ready] {
+        pipe.write_u32(stage).await.map_err(|_| error())?;
+    }
     tokio::select! {_=pipe.read_u8()=>{},_=child.wait()=>{}}
     if child.try_wait().map_err(|_| error())?.is_none() {
         child.kill().await.map_err(|_| error())?;

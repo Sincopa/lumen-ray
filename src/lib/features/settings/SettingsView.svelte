@@ -700,7 +700,7 @@
 							t('settings.geoDataCorrupted') ||
 							'Базы GeoIP/GeoSite отсутствуют или повреждены'
 						: geoInfo
-							? `${geoInfo.source}${geoInfo.lastUpdated ? ' · ' + new Date(geoInfo.lastUpdated).toLocaleDateString() : ''}`
+							? `${geoInfo.source}${geoInfo.updatedAt ? ' · ' + new Date(geoInfo.updatedAt).toLocaleDateString() : ''}`
 							: undefined}
 				>
 					<div class="version-badge-container">

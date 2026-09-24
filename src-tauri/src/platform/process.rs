@@ -107,9 +107,27 @@ impl CoreProcess {
         Ok(process)
     }
     fn launch(core: &Path) -> Result<(Self, std::fs::File, std::fs::File)> {
-        if let Some(parent) = core.parent() {
-            std::env::set_var("XRAY_LOCATION_ASSET", parent);
+        // Each child gets one immutable geo snapshot; do not race through process-global env.
+        let mut vars: Vec<_> = std::env::vars_os()
+            .filter(|(key, _)| {
+                let k = key.to_string_lossy();
+                !k.eq_ignore_ascii_case("XRAY_LOCATION_ASSET")
+                    && !k.eq_ignore_ascii_case("GOMEMLIMIT")
+                    && !k.eq_ignore_ascii_case("GODEBUG")
+            })
+            .collect();
+        vars.push(("XRAY_LOCATION_ASSET".into(), crate::xray::geo::assets_for_core(core).into_os_string()));
+        vars.push(("GOMEMLIMIT".into(), "100MiB".into()));
+        vars.push(("GODEBUG".into(), "madvdontneed=1".into()));
+        vars.sort_by_key(|(key, _)| key.to_string_lossy().to_uppercase());
+        let mut environment = Vec::<u16>::new();
+        for (key, value) in vars {
+            environment.extend(key.encode_wide());
+            environment.push('=' as u16);
+            environment.extend(value.encode_wide());
+            environment.push(0);
         }
+        environment.push(0);
         let executable = wide(core.as_os_str());
         let directory = wide(core.parent().ok_or_else(error)?.as_os_str());
         // argv[0] is fixed; lpApplicationName selects the exact verified executable.
@@ -146,8 +164,9 @@ impl CoreProcess {
                 CREATE_NEW_CONSOLE
                     | CREATE_NEW_PROCESS_GROUP
                     | CREATE_SUSPENDED
+                    | CREATE_UNICODE_ENVIRONMENT
                     | EXTENDED_STARTUPINFO_PRESENT,
-                std::ptr::null(),
+                environment.as_ptr().cast(),
                 directory.as_ptr(),
                 &startup.StartupInfo,
                 &mut info,

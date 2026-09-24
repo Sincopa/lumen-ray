@@ -179,17 +179,16 @@ pub async fn prepare(version: &str, directory: &Path) -> Result<PathBuf> {
     if !staging.path().join("wintun.dll").is_file() {
         return Err(error());
     }
-    // Ensure staging has geoip.dat and geosite.dat from data/geo so validation and routing work
-    let geo_dir = directory.parent().map(|p| p.join("geo"));
-    for name in ["geoip.dat", "geosite.dat"] {
-        let staging_file = staging.path().join(name);
-        if let Some(ref gd) = geo_dir {
-            let geo_file = gd.join(name);
-            if geo_file.is_file() && std::fs::metadata(&geo_file).is_ok_and(|m| m.len() >= 1024) {
-                let _ = std::fs::copy(&geo_file, &staging_file);
+    // Use one committed geo generation, never a mixture of files from the core archive.
+    if let Some(data) = directory.parent() {
+        if crate::xray::geo::metadata_path(data).exists() {
+            let assets = crate::xray::geo::active_dir(data)?;
+            for name in ["geoip.dat", "geosite.dat"] {
+                std::fs::copy(assets.join(name), staging.path().join(name)).map_err(|_| error())?;
             }
         }
     }
+    crate::xray::geo::validate_geo_files_sync(&executable, staging.path())?;
     crate::services::vpn_service::validate(
         &executable,
         br#"{"inbounds":[],"outbounds":[{"protocol":"freedom"}]}"#,
@@ -205,7 +204,7 @@ pub async fn prepare(version: &str, directory: &Path) -> Result<PathBuf> {
             let src = staging.path().join(name);
             let dst = destination.join(name);
             if src.is_file() && !dst.is_file() {
-                let _ = std::fs::copy(&src, &dst);
+                std::fs::copy(&src, &dst).map_err(|_| error())?;
             }
         }
     } else {

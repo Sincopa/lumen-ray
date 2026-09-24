@@ -1,6 +1,7 @@
 <script lang="ts">
 	import type { Rule, RuleMatcher, Server } from '../../services/catalog';
 	import { t } from '../../i18n';
+	import { serverDisplayName } from '../../utils/serverDisplayName';
 	import CountryFlag from '../../components/CountryFlag.svelte';
 	import MaterialIcon from '../../components/MaterialIcon.svelte';
 	import IconButton from '../../components/IconButton.svelte';
@@ -163,7 +164,8 @@
 					t('rules.mismatchedPrefixError', {
 						expected: expectedPrefix,
 						wrong: wrongPrefix,
-					}) || `Неверный префикс: для ${matcher} используйте ${expectedPrefix}`;
+					}) ||
+					`Неверный префикс: для ${matcher} используйте ${expectedPrefix}`;
 				return;
 			}
 
@@ -306,14 +308,13 @@
 		{:else}
 			<div class="field-group">
 				<label class="field-label" for="geo-input">
-					{matcher === 'geosite' ? 'GeoSite' : 'GeoIP'} ({t(
-						'rules.category',
-					) || 'Категория'})
+					{matcher === 'geosite' ? 'GeoSite' : 'GeoIP'} ({t('rules.category') ||
+						'Категория'})
 				</label>
 				<div class="input-pill" class:active-pill={name.length > 0}>
-					<span class="domain-prefix"
-						>{matcher === 'geosite' ? 'geosite:' : 'geoip:'}</span
-					>
+					<span class="domain-prefix">
+						{matcher === 'geosite' ? 'geosite:' : 'geoip:'}
+					</span>
 					<input
 						id="geo-input"
 						class="text-input"
@@ -327,9 +328,7 @@
 					/>
 				</div>
 				<div class="geo-examples">
-					<span class="example-label"
-						>{t('rules.examples') || 'Примеры'}:</span
-					>
+					<span class="example-label">{t('rules.examples') || 'Примеры'}:</span>
 					<div class="example-chips">
 						{#each matcher === 'geosite' ? ['category-ru', 'antifilter', 'antifilter-community'] : ['ru', 'private', 'antifilter'] as ex (ex)}
 							<button
@@ -363,9 +362,9 @@
 						<span class="selector-value">{t('rules.direct')}</span>
 					{:else if serverId === 'block'}
 						<MaterialIcon name="block" size={20} />
-						<span class="selector-value"
-							>{t('rules.block') || 'Блокировать'}</span
-						>
+						<span class="selector-value">
+							{t('rules.block') || 'Блокировать'}
+						</span>
 					{:else if serverId === 'subscription' || (subscriptionName && serverId === subscriptionName)}
 						<MaterialIcon name="sync_alt" size={20} />
 						<span class="selector-value">
@@ -374,7 +373,7 @@
 					{:else if server}
 						<CountryFlag countryCode={server.countryCode} size={20} />
 						<span class="selector-value">
-							{server.name ?? t('servers.countries.' + server.countryCode)}
+							{serverDisplayName(server)}
 						</span>
 					{:else}
 						<span class="selector-value placeholder-val">

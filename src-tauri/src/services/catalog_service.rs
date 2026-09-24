@@ -285,9 +285,9 @@ pub async fn mutate(state: &AppState, mutation: Mutation) -> Result<Value> {
                 .into_iter()
                 .filter(|r| r.preset_id.as_deref() != Some(&preset_id))
                 .collect();
-            let mut updated_rules = preset_rules;
-            updated_rules.extend(custom_rules);
-            next.rules = updated_rules;
+            let mut updated_rules = custom_rules;
+            updated_rules.extend(preset_rules);
+            next.rules = ordered_rules(&updated_rules).into_iter().cloned().collect();
         }
         Mutation::RemovePreset { preset_id } => {
             next.rules
@@ -461,7 +461,7 @@ pub async fn import(
 
 pub fn generate_preset_rules(preset_id: &str, target_proxy: &str) -> Result<Vec<Rule>> {
     use crate::storage::repository::{Rule, RuleMatcher};
-    match preset_id {
+    let mut rules = match preset_id {
         "russia-optimized" => Ok(vec![
             Rule {
                 id: format!("{preset_id}-geoip-private"),
@@ -595,5 +595,34 @@ pub fn generate_preset_rules(preset_id: &str, target_proxy: &str) -> Result<Vec<
             },
         ]),
         _ => Err(BackendError::new("INVALID_PRESET", "Unknown rule preset")),
+    }?;
+    if matches!(preset_id, "russia-optimized" | "bypass-blocking") {
+        rules.push(Rule {
+            id: format!("{preset_id}-geosite-youtube"),
+            name: "youtube".into(),
+            matcher: RuleMatcher::Geosite,
+            server_id: target_proxy.into(),
+            enabled: true,
+            preset_id: Some(preset_id.into()),
+            is_domain: false,
+        });
     }
+    Ok(ordered_rules(&rules).into_iter().cloned().collect())
+}
+
+/// Only built-in preset rows are sorted. Manual rows retain their relative order and priority.
+/// Compile saved rows as-is: do not recreate deleted/disabled rows when loading or connecting.
+pub fn ordered_rules(rules: &[Rule]) -> Vec<&Rule> {
+    use crate::storage::repository::RuleMatcher;
+    let mut rows: Vec<_> = rules.iter().collect();
+    rows.sort_by_key(|r| {
+        let builtin = matches!(r.preset_id.as_deref(), Some("russia-optimized" | "bypass-blocking" | "russia-direct"));
+        let rank = if !builtin { 0 } else if r.matcher == RuleMatcher::Geoip && r.name == "private" { 1 }
+        else if r.matcher == RuleMatcher::Geosite && r.name == "youtube" { 2 }
+        else if r.matcher == RuleMatcher::Geosite && r.server_id != "direct" { 3 }
+        else if r.matcher == RuleMatcher::Geosite { 4 }
+        else if r.server_id != "direct" { 5 } else { 6 };
+        (rank, if builtin { r.id.as_str() } else { "" })
+    });
+    rows
 }

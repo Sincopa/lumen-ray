@@ -87,11 +87,12 @@
 			],
 			tags: [
 				{ type: 'geoip', tag: 'private', target: 'direct' },
+				{ type: 'geosite', tag: 'youtube', target: 'vpn' },
 				{ type: 'geosite', tag: 'antifilter', target: 'vpn' },
 				{ type: 'geosite', tag: 'antifilter-community', target: 'vpn' },
+				{ type: 'geosite', tag: 'category-ru', target: 'direct' },
 				{ type: 'geoip', tag: 'antifilter', target: 'vpn' },
 				{ type: 'geoip', tag: 'antifilter-community', target: 'vpn' },
-				{ type: 'geosite', tag: 'category-ru', target: 'direct' },
 				{ type: 'geoip', tag: 'ru', target: 'direct' },
 			],
 		},
@@ -119,6 +120,7 @@
 				},
 			],
 			tags: [
+				{ type: 'geosite', tag: 'youtube', target: 'vpn' },
 				{ type: 'geosite', tag: 'antifilter', target: 'vpn' },
 				{ type: 'geosite', tag: 'antifilter-community', target: 'vpn' },
 				{ type: 'geoip', tag: 'antifilter', target: 'vpn' },
@@ -149,9 +151,9 @@
 				},
 			],
 			tags: [
+				{ type: 'geoip', tag: 'private', target: 'direct' },
 				{ type: 'geosite', tag: 'category-ru', target: 'direct' },
 				{ type: 'geoip', tag: 'ru', target: 'direct' },
-				{ type: 'geoip', tag: 'private', target: 'direct' },
 			],
 		},
 	];

@@ -13,6 +13,16 @@ struct Manifest {
 }
 pub const VERSION: &str = "26.9.9";
 pub fn prepare(resources: &Path, data: &Path) -> Result<PathBuf> {
+    crate::xray::geo::ensure_initialized(resources, data)?;
+    prepare_files(resources, data, false)
+}
+/// The elevated helper receives a verified Geo snapshot over its authenticated pipe.
+/// It only needs the bundled executable and Wintun in its protected staging directory.
+#[cfg(windows)]
+pub fn prepare_for_tunnel(resources: &Path, data: &Path) -> Result<PathBuf> {
+    prepare_files(resources, data, true)
+}
+fn prepare_files(resources: &Path, data: &Path, tunnel: bool) -> Result<PathBuf> {
     // Trust anchor is compiled into the application, never a mutable runtime manifest.
     let manifest: Manifest =
         serde_json::from_str(include_str!("../../resources/core/manifest.json"))
@@ -34,41 +44,33 @@ pub fn prepare(resources: &Path, data: &Path) -> Result<PathBuf> {
         {
             return Err(error());
         }
+        if tunnel && matches!(name.as_str(), "geoip.dat" | "geosite.dat") {
+            continue;
+        }
         let dest = directory.join(&name);
-        if name == "geoip.dat" || name == "geosite.dat" {
-            let geo_src = data.join("geo").join(&name);
-            let dest_valid = std::fs::metadata(&dest).is_ok_and(|m| m.len() >= 1024);
-            let geo_valid = std::fs::metadata(&geo_src).is_ok_and(|m| m.len() >= 1024);
-
-            if geo_valid {
-                let geo_bytes = std::fs::read(&geo_src).map_err(|_| error())?;
-                let need_copy =
-                    !dest_valid || std::fs::read(&dest).map_or(true, |b| b != geo_bytes);
-                if need_copy {
-                    crate::xray::updater::atomic_write(&dest, &geo_bytes)?;
-                }
-            } else if !dest_valid {
-                let bytes = std::fs::read(resources.join(&name)).map_err(|_| error())?;
-                if format!("{:x}", Sha256::digest(&bytes)) != hash {
-                    return Err(error());
-                }
-                crate::xray::updater::atomic_write(&dest, &bytes)?;
-            }
-        } else {
-            let valid = std::fs::read(&dest)
-                .is_ok_and(|bytes| format!("{:x}", Sha256::digest(bytes)) == hash);
+        if matches!(name.as_str(), "geoip.dat" | "geosite.dat") {
+            let source = crate::xray::geo::active_dir(data)?.join(&name);
+            let bytes = std::fs::read(source).map_err(|_| error())?;
+            let valid = std::fs::read(&dest).is_ok_and(|existing| existing == bytes);
             if !valid {
-                let bytes = std::fs::read(resources.join(&name)).map_err(|_| error())?;
-                if format!("{:x}", Sha256::digest(&bytes)) != hash {
-                    return Err(error());
-                }
                 crate::xray::updater::atomic_write(&dest, &bytes)?;
             }
+            continue;
+        }
+        let valid = std::fs::read(&dest)
+            .is_ok_and(|bytes| format!("{:x}", Sha256::digest(bytes)) == hash);
+        if !valid {
+            let bytes = std::fs::read(resources.join(&name)).map_err(|_| error())?;
+            if format!("{:x}", Sha256::digest(&bytes)) != hash {
+                return Err(error());
+            }
+            crate::xray::updater::atomic_write(&dest, &bytes)?;
         }
     }
     if !directory.join("xray.exe").is_file()
-        || !directory.join("geoip.dat").is_file()
-        || !directory.join("geosite.dat").is_file()
+        || !directory.join("wintun.dll").is_file()
+        || (!tunnel && (!directory.join("geoip.dat").is_file()
+            || !directory.join("geosite.dat").is_file()))
     {
         return Err(error());
     }

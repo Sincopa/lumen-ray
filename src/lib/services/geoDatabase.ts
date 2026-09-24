@@ -4,7 +4,8 @@ import { runtime } from '../runtime';
 export interface GeoDatabaseInfo {
 	version: string;
 	source: string;
-	lastUpdated: string | null;
+	updatedAt: number;
+	status: string;
 	geoipSize: number;
 	geositeSize: number;
 	valid: boolean;
@@ -16,9 +17,10 @@ export async function getGeoDatabaseInfo(): Promise<GeoDatabaseInfo> {
 		return {
 			version: '202410152325',
 			source: 'NetworkKeeper/v2ray-rules-ru',
-			lastUpdated: new Date().toISOString(),
-			geoipSize: 2200000,
-			geositeSize: 4500000,
+			updatedAt: Date.now(),
+			status: 'ready',
+			geoipSize: 536598,
+			geositeSize: 17015282,
 			valid: true,
 			error: null,
 		};
@@ -31,9 +33,10 @@ export async function updateGeoDatabases(): Promise<GeoDatabaseInfo> {
 		return {
 			version: '202410152325',
 			source: 'NetworkKeeper/v2ray-rules-ru',
-			lastUpdated: new Date().toISOString(),
-			geoipSize: 2200000,
-			geositeSize: 4500000,
+			updatedAt: Date.now(),
+			status: 'ready',
+			geoipSize: 536598,
+			geositeSize: 17015282,
 			valid: true,
 			error: null,
 		};

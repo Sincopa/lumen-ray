@@ -54,10 +54,12 @@ pub fn command(core: &std::path::Path) -> Command {
     let mut command = Command::new(core);
     if let Some(parent) = core.parent() {
         command.current_dir(parent);
-        command.env("XRAY_LOCATION_ASSET", parent);
+        command.env("XRAY_LOCATION_ASSET", crate::xray::geo::assets_for_core(core));
     } else {
         command.current_dir(core);
     }
+    command.env("GOMEMLIMIT", "100MiB");
+    command.env("GODEBUG", "madvdontneed=1");
     command.kill_on_drop(true);
     #[cfg(windows)]
     command.creation_flags(0x08000000);
@@ -170,19 +172,26 @@ async fn connect_with_selection(
     id: String,
     best: bool,
 ) -> Result<()> {
+    let requested_at = Instant::now();
     let _operation = state
         .connection_operation
         .try_acquire()
         .map_err(|_| BackendError::new("BUSY", "A connection operation is already running"))?;
+    publish(
+        state,
+        app,
+        Snapshot { status: "connecting".into(), info: None, error: None },
+    ).await;
     let mut session = std::mem::take(&mut *state.session.lock().await);
     let candidates = if best {
         connection_candidates(state, &id).await
     } else {
         vec![id]
     };
+    log::info!("VPN timing: candidate selection {} ms", requested_at.elapsed().as_millis());
     let mut result = Err(BackendError::new("INVALID_SERVER", "No available server"));
     for candidate in candidates {
-        result = connect_session(state, app, candidate.clone(), &mut session, best).await;
+        result = connect_session(state, app, candidate.clone(), &mut session).await;
         if result.is_ok() {
             *state.desired_server.write().await = Some(candidate.clone());
             let selected = state.repository.read().await.selected_server_id.clone();
@@ -205,6 +214,12 @@ async fn connect_with_selection(
         }
     }
     *state.session.lock().await = session;
+    if let Err(error) = &result {
+        publish(state, app, Snapshot {
+            status: "error".into(), info: None, error: Some(error.clone()),
+        }).await;
+    }
+    log::info!("VPN timing: connection result {} ms", requested_at.elapsed().as_millis());
     result
 }
 async fn connection_candidates(state: &Arc<AppState>, selected: &str) -> Vec<String> {
@@ -227,33 +242,6 @@ async fn connection_candidates(state: &Arc<AppState>, selected: &str) -> Vec<Str
         choices.pop();
         choices.push(selected.to_owned());
     }
-    let missing: Vec<_> = {
-        let latencies = state.latencies.read().await;
-        choices
-            .iter()
-            .filter(|id| {
-                latencies
-                    .get(*id)
-                    .and_then(serde_json::Value::as_u64)
-                    .is_none()
-            })
-            .cloned()
-            .collect()
-    };
-    if !missing.is_empty() {
-        let mut probes = tokio::task::JoinSet::new();
-        let permits = Arc::new(tokio::sync::Semaphore::new(4));
-        for id in missing {
-            let state = state.clone();
-            let permits = permits.clone();
-            probes.spawn(async move {
-                if let Ok(_permit) = permits.acquire_owned().await {
-                    let _ = super::latency_service::ping(&state, id).await;
-                }
-            });
-        }
-        while probes.join_next().await.is_some() {}
-    }
     rank_candidates(choices, selected, &*state.latencies.read().await)
 }
 fn rank_candidates(
@@ -271,6 +259,10 @@ fn rank_candidates(
         )
     });
     choices.truncate(8);
+    if !choices.iter().any(|id| id == selected) {
+        choices.pop();
+        choices.push(selected.to_owned());
+    }
     choices
 }
 async fn connect_session(
@@ -278,58 +270,16 @@ async fn connect_session(
     app: &tauri::AppHandle,
     id: String,
     session: &mut Session,
-    verify_best: bool,
 ) -> Result<()> {
+    let session_at = Instant::now();
     let repo = state.repository.read().await.clone();
-    let core = state.core.read().await.clone();
-    if repo.routing_mode == "rules" {
-        let has_geo = repo.rules.iter().any(|r| {
-            r.enabled
-                && matches!(
-                    r.matcher,
-                    crate::storage::repository::RuleMatcher::Geosite
-                        | crate::storage::repository::RuleMatcher::Geoip
-                )
-        });
-        if has_geo {
-            if let Some(core_dir) = core.parent() {
-                let geoip = core_dir.join("geoip.dat");
-                let geosite = core_dir.join("geosite.dat");
-                let geo_dir = state.data.join("geo");
-
-                // Self-healing: if files are missing in core_dir but present in data/geo/, restore them
-                if (!geoip.is_file() || std::fs::metadata(&geoip).is_ok_and(|m| m.len() < 1024))
-                    && geo_dir.join("geoip.dat").is_file()
-                {
-                    let _ = std::fs::copy(geo_dir.join("geoip.dat"), &geoip);
-                }
-                if (!geosite.is_file() || std::fs::metadata(&geosite).is_ok_and(|m| m.len() < 1024))
-                    && geo_dir.join("geosite.dat").is_file()
-                {
-                    let _ = std::fs::copy(geo_dir.join("geosite.dat"), &geosite);
-                }
-
-                if !geoip.is_file() || !geosite.is_file() {
-                    return Err(BackendError::new(
-                        "GEO_DATA_MISSING",
-                        "GeoIP/GeoSite databases are missing. Please update databases in Settings.",
-                    ));
-                }
-                if std::fs::metadata(&geoip)
-                    .map(|m| m.len() < 1024)
-                    .unwrap_or(true)
-                    || std::fs::metadata(&geosite)
-                        .map(|m| m.len() < 1024)
-                        .unwrap_or(true)
-                {
-                    return Err(BackendError::new(
-                        "GEO_DATA_CORRUPTED",
-                        "GeoIP/GeoSite databases are corrupted. Please update databases in Settings.",
-                    ));
-                }
-                std::env::set_var("XRAY_LOCATION_ASSET", core_dir);
-            }
-        }
+    let uses_geo = repo.routing_mode == "rules" && repo.rules.iter().any(|rule| {
+        rule.enabled && matches!(rule.matcher,
+            crate::storage::repository::RuleMatcher::Geosite |
+            crate::storage::repository::RuleMatcher::Geoip)
+    });
+    if uses_geo && !crate::xray::geo::info(&state.data).valid {
+        return Err(BackendError::new("GEO_DATA_CORRUPTED", "Geo databases must pass validation before connecting"));
     }
     let (proxy_port, metrics_port) = ports()?;
     let config = crate::xray::config::build(
@@ -342,20 +292,13 @@ async fn connect_session(
     let bytes = serde_json::to_vec(&config)
         .map_err(|_| BackendError::new("INVALID_CONFIG", "Could not serialize Xray config"))?;
     let core = state.core.read().await.clone();
+    log::info!("VPN timing: config prepared {} ms", session_at.elapsed().as_millis());
     stop(session).await?;
-    publish(
-        state,
-        app,
-        Snapshot {
-            status: "connecting".into(),
-            info: None,
-            error: None,
-        },
-    )
-    .await;
+    log::info!("VPN timing: previous session stopped {} ms", session_at.elapsed().as_millis());
     let mut result = if repo.settings.network_mode == "tun" {
         start_tunnel(
             session,
+            &state.data,
             repo.clone(),
             id.clone(),
             proxy_port,
@@ -370,16 +313,7 @@ async fn connect_session(
     } else {
         start(&core, session, &bytes, proxy_port, metrics_port).await
     };
-    if result.is_ok()
-        && verify_best
-        && repo.settings.server_selection == "best"
-        && public_ip(proxy_port).await.is_err()
-    {
-        result = Err(BackendError::new(
-            "SERVER_UNREACHABLE",
-            "Selected server did not pass the connectivity check",
-        ));
-    }
+    log::info!("VPN timing: local route startup completed {} ms", session_at.elapsed().as_millis());
     #[cfg(windows)]
     if result.is_ok() && repo.settings.network_mode == "proxy" {
         match crate::platform::proxy::SystemProxy::enable(&state.data, metrics_port + 1) {
@@ -387,6 +321,7 @@ async fn connect_session(
             Err(error) => result = Err(error),
         }
     }
+    log::info!("VPN timing: system proxy stage completed {} ms", session_at.elapsed().as_millis());
     match result {
         Ok(()) => {
             let node = repo
@@ -418,21 +353,12 @@ async fn connect_session(
                 },
             )
             .await;
+            log::info!("VPN timing: connected published {} ms", session_at.elapsed().as_millis());
             refresh_public_ip(state.clone(), app.clone(), id, proxy_port);
             Ok(())
         }
         Err(error) => {
             let cleanup = stop(session).await;
-            publish(
-                state,
-                app,
-                Snapshot {
-                    status: "error".into(),
-                    info: None,
-                    error: Some(error.clone()),
-                },
-            )
-            .await;
             cleanup?;
             Err(error)
         }
@@ -440,6 +366,7 @@ async fn connect_session(
 }
 async fn start_tunnel(
     session: &mut Session,
+    data: &std::path::Path,
     mut repository: crate::storage::repository::Repository,
     selected: String,
     proxy_port: u16,
@@ -447,6 +374,7 @@ async fn start_tunnel(
     core_version: String,
 ) -> Result<()> {
     repository.sources.clear();
+    let tunnel_at = Instant::now();
     #[cfg(windows)]
     {
         session.helper = Some(
@@ -456,12 +384,13 @@ async fn start_tunnel(
                 selected,
                 proxy_port,
                 metrics_port,
-            })
+            }, data)
             .await?,
         );
         session.proxy_port = proxy_port;
         session.metrics_port = metrics_port;
         session.started = Some(Instant::now());
+        log::info!("VPN timing: TUN helper ready {} ms", tunnel_at.elapsed().as_millis());
         for _ in 0..100 {
             if session.helper.as_ref().is_some_and(|h| h.exited()) {
                 return Err(BackendError::new("TUN_FAILED", "Tunnel helper exited"));
@@ -471,6 +400,7 @@ async fn start_tunnel(
                 .is_ok()
             {
                 crate::platform::network::verify_tunnel_routes()?;
+                log::info!("VPN timing: TUN local port and routes ready {} ms", tunnel_at.elapsed().as_millis());
                 return Ok(());
             }
             tokio::time::sleep(Duration::from_millis(25)).await;
@@ -485,9 +415,11 @@ pub(crate) async fn start(
     proxy_port: u16,
     metrics_port: u16,
 ) -> Result<()> {
+    let core_at = Instant::now();
     #[cfg(windows)]
     {
         session.child = Some(crate::platform::process::CoreProcess::spawn(core, bytes).await?);
+        log::info!("VPN timing: Xray spawned {} ms", core_at.elapsed().as_millis());
     }
     #[cfg(not(windows))]
     return Err(BackendError::new(
@@ -515,6 +447,7 @@ pub(crate) async fn start(
             .await
             .is_ok()
         {
+            log::info!("VPN timing: Xray local port ready {} ms", core_at.elapsed().as_millis());
             return Ok(());
         }
         tokio::time::sleep(Duration::from_millis(25)).await;
@@ -532,9 +465,12 @@ fn refresh_public_ip(
     proxy_port: u16,
 ) {
     tauri::async_runtime::spawn(async move {
+        let network_at = Instant::now();
         let Ok(ip) = public_ip(proxy_port).await else {
+            log::info!("VPN timing: public network probe failed after {} ms", network_at.elapsed().as_millis());
             return;
         };
+        log::info!("VPN timing: public network probe ready {} ms", network_at.elapsed().as_millis());
         let mut snapshot = state.snapshot.read().await.clone();
         let Some(info) = snapshot.info.as_mut() else {
             return;
@@ -726,23 +662,26 @@ pub fn monitor(state: Arc<AppState>, app: tauri::AppHandle) {
                             publish(&state,&app,Snapshot{status:"error".into(),info:None,error:Some(BackendError::new("CORE_CRASHED","Xray stopped unexpectedly"))}).await;
                         }
                     }
-                    let active=session.started.map(|s|(session.metrics_port,s.elapsed().as_secs()));
+                    let active=session.started.map(|s|(session.metrics_port,session.proxy_port,s.elapsed().as_secs()));
                     *state.session.lock().await=session;
                     drop(operation);
                     if let Some(id) = failed_id {
                         schedule_recovery(state.clone(), app.clone(), id);
                     }
-                    if let Some((port,duration))=active{
+                    if let Some((port,proxy_port,duration))=active{
                         if last_health.elapsed() >= Duration::from_secs(30) {
                             last_health = Instant::now();
                             if state.repository.read().await.settings.auto_reconnect {
-                                if public_ip(port).await.is_ok() { unhealthy = 0; }
+                                if public_ip(proxy_port).await.is_ok() { unhealthy = 0; }
                                 else { unhealthy = unhealthy.saturating_add(1); }
                                 if unhealthy >= 3 {
                                     let Ok(operation) = state.connection_operation.try_acquire() else { continue };
                                     let mut current = state.session.lock().await;
-                                    if current.started.is_some() && current.proxy_port == port {
+                                    if current.started.is_some() && current.proxy_port == proxy_port {
                                         let id = state.snapshot.read().await.info.as_ref().map(|info| info.server_id.clone());
+                                        if let Some(id) = &id {
+                                            state.latencies.write().await.insert(id.clone(), serde_json::json!("timeout"));
+                                        }
                                         let _ = stop(&mut current).await;
                                         *state.traffic.write().await = Default::default();
                                         publish(&state, &app, Snapshot { status: "error".into(), info: None, error: Some(BackendError::new("SERVER_UNREACHABLE", "Connection health check failed")) }).await;
@@ -791,6 +730,15 @@ mod selection_tests {
         assert_eq!(
             super::rank_candidates(choices, "selected", &latencies),
             ["fast", "slow", "selected", "down"]
+        );
+    }
+
+    #[test]
+    fn missing_latency_cache_keeps_selected_first_without_probing() {
+        let choices = vec!["other".to_owned(), "selected".to_owned()];
+        assert_eq!(
+            super::rank_candidates(choices, "selected", &Default::default()),
+            ["selected", "other"]
         );
     }
 }

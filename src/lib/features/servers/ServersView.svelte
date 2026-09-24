@@ -11,6 +11,7 @@
 	import { catalog } from '../../services';
 	import { errorCode } from '../../services/errors';
 	import { t } from '../../i18n';
+	import { serverDisplayName } from '../../utils/serverDisplayName';
 	import type { Server } from '../../services/catalog';
 	import MaterialIcon from '../../components/MaterialIcon.svelte';
 	import reloadIcon from '../../../assets/reload.svg';
@@ -88,7 +89,7 @@
 	const searchableServers = $derived(
 		subscriptionServers.map((server) => ({
 			server,
-			text: `${server.name ?? t('servers.countries.' + server.countryCode)} ${server.protocol} ${subscriptionsById.get(server.subscriptionId)?.name ?? ''}`.toLowerCase(),
+			text: `${serverDisplayName(server)} ${server.protocol} ${subscriptionsById.get(server.subscriptionId)?.name ?? ''}`.toLowerCase(),
 		})),
 	);
 	const normalizedQuery = $derived(query.toLowerCase());
@@ -169,7 +170,7 @@
 		onSelect?.({
 			id: server.id,
 			countryCode: server.countryCode,
-			name: server.name ?? t('servers.countries.' + server.countryCode),
+			name: serverDisplayName(server),
 		});
 	}
 
@@ -423,7 +424,7 @@
 				<span class="server-text">
 					<span class="protocol">{server.protocol}</span>
 					<span>
-						{server.name ?? t('servers.countries.' + server.countryCode)}
+						{serverDisplayName(server)}
 					</span>
 				</span>
 				<span class="ping">
@@ -686,7 +687,7 @@
 		font-size: 14px;
 	}
 	.protocol {
-		font-size: 10px;
+		font-size: 11px;
 		line-height: 1;
 		color: #ffffff70;
 		text-transform: uppercase;

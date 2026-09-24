@@ -6,8 +6,30 @@ import {
 	initialCatalog,
 	validCatalog,
 	validateSubscription,
+	orderedRules,
 	type StoragePort,
 } from '../../src/lib/services/catalog';
+
+it('combines presets in either order and preserves manual priority and deleted rows', async () => {
+	const results = [];
+	for (const order of [['russia-direct', 'bypass-blocking'], ['bypass-blocking', 'russia-direct']]) {
+		const service = new CatalogService();
+		service.saveRule({ id: 'manual', name: 'googlevideo.com', matcher: 'domain', serverId: 'block', enabled: true });
+		for (const id of order) await service.applyPreset(id);
+		const rules = get(service.state).rules;
+		expect(rules[0].id).toBe('manual');
+		expect(rules.findIndex((r) => r.name === 'youtube')).toBeLessThan(rules.findIndex((r) => r.name === 'ru'));
+		results.push(rules);
+		await service.applyPreset(order[0]);
+		expect(get(service.state).rules).toEqual(rules);
+		const deleted = rules.filter((r) => r.name !== 'youtube');
+		expect(orderedRules(deleted).some((r) => r.name === 'youtube')).toBe(false);
+		await service.removePreset('bypass-blocking');
+		expect(get(service.state).rules.some((r) => r.name === 'youtube')).toBe(false);
+		expect(get(service.state).rules[0].id).toBe('manual');
+	}
+	expect(results[0]).toEqual(results[1]);
+});
 
 function storage(): StoragePort {
 	const data = new Map<string, string>();
@@ -394,43 +416,19 @@ describe('catalog', () => {
 		await service.applyPreset('russia-optimized');
 		let rules = get(service.state).rules;
 
-		// 7 preset rules + 1 custom user rule = 8 rules
-		expect(rules.length).toBe(8);
-		expect(rules.some((r) => r.id === 'user-custom-rule')).toBe(true);
-
-		// Verify exact order of preset rules
-		const presetRules = rules.filter(
-			(r) => r.presetId === 'russia-optimized',
-		);
-		expect(presetRules.length).toBe(7);
-		expect(presetRules[0].name).toBe('private');
-		expect(presetRules[0].matcher).toBe('geoip');
-		expect(presetRules[0].serverId).toBe('direct');
-
-		expect(presetRules[1].name).toBe('antifilter');
-		expect(presetRules[1].matcher).toBe('geosite');
-
-		expect(presetRules[2].name).toBe('antifilter-community');
-		expect(presetRules[2].matcher).toBe('geosite');
-
-		expect(presetRules[3].name).toBe('antifilter');
-		expect(presetRules[3].matcher).toBe('geoip');
-
-		expect(presetRules[4].name).toBe('antifilter-community');
-		expect(presetRules[4].matcher).toBe('geoip');
-
-		expect(presetRules[5].name).toBe('category-ru');
-		expect(presetRules[5].matcher).toBe('geosite');
-		expect(presetRules[5].serverId).toBe('direct');
-
-		expect(presetRules[6].name).toBe('ru');
-		expect(presetRules[6].matcher).toBe('geoip');
-		expect(presetRules[6].serverId).toBe('direct');
+        expect(rules.length).toBe(9);
+        expect(rules[0].id).toBe('user-custom-rule');
+        const presetRules = rules.filter((r) => r.presetId === 'russia-optimized');
+        expect(presetRules.map((r) => r.name)).toEqual([
+            'private', 'youtube', 'antifilter', 'antifilter-community',
+            'category-ru', 'antifilter', 'antifilter-community', 'ru',
+        ]);
+        expect(presetRules[1].serverId).toBe('subscription');
 
 		// Idempotency: applying again must not duplicate rules
 		await service.applyPreset('russia-optimized');
 		rules = get(service.state).rules;
-		expect(rules.length).toBe(8);
+		expect(rules.length).toBe(9);
 
 		// Remove preset: custom user rule must remain intact
 		await service.removePreset('russia-optimized');
@@ -443,13 +441,7 @@ describe('catalog', () => {
 		const directPresetRules = get(service.state).rules.filter(
 			(r) => r.presetId === 'russia-direct',
 		);
-		expect(directPresetRules.length).toBe(3);
-		expect(directPresetRules[0].name).toBe('category-ru');
-		expect(directPresetRules[0].matcher).toBe('geosite');
-		expect(directPresetRules[1].name).toBe('ru');
-		expect(directPresetRules[1].matcher).toBe('geoip');
-		expect(directPresetRules[2].name).toBe('private');
-		expect(directPresetRules[2].matcher).toBe('geoip');
+        expect(directPresetRules.map((r) => r.name)).toEqual(['private', 'category-ru', 'ru']);
 
 		// Verify custom rule with block target
 		service.saveRule({

@@ -20,6 +20,8 @@ pub struct GeoDatabaseMetadata {
     pub updated_at: u64,
     pub geoip_sha256: String,
     pub geosite_sha256: String,
+    #[serde(default)]
+    pub generation: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -30,6 +32,9 @@ pub struct GeoDatabaseInfo {
     pub updated_at: u64,
     pub status: String,
     pub error: Option<String>,
+    pub valid: bool,
+    pub geoip_size: u64,
+    pub geosite_size: u64,
 }
 
 #[derive(Deserialize)]
@@ -37,6 +42,7 @@ struct Asset {
     name: String,
     browser_download_url: String,
     size: usize,
+    digest: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -77,99 +83,133 @@ pub fn metadata_path(data: &Path) -> PathBuf {
     geo_dir(data).join("metadata.json")
 }
 
-pub fn info(data: &Path) -> GeoDatabaseInfo {
-    let dir = geo_dir(data);
-    let meta_file = metadata_path(data);
-    let geoip_file = dir.join("geoip.dat");
-    let geosite_file = dir.join("geosite.dat");
-
-    if !geoip_file.is_file() || !geosite_file.is_file() {
-        return GeoDatabaseInfo {
-            version: "none".into(),
-            source: GEO_SOURCE_NAME.into(),
-            updated_at: 0,
-            status: "missing".into(),
-            error: Some("Geo databases not found".into()),
-        };
-    }
-
-    let meta: Option<GeoDatabaseMetadata> = std::fs::read(&meta_file)
-        .ok()
-        .and_then(|bytes| serde_json::from_slice(&bytes).ok());
-
-    let (version, source, updated_at) = if let Some(m) = meta {
-        (m.version, m.source, m.updated_at)
-    } else {
-        (BUNDLED_GEO_VERSION.into(), GEO_SOURCE_NAME.into(), 0)
-    };
-
-    let geoip_size = std::fs::metadata(&geoip_file).map(|m| m.len()).unwrap_or(0);
-    let geosite_size = std::fs::metadata(&geosite_file)
-        .map(|m| m.len())
-        .unwrap_or(0);
-
-    if geoip_size < 1024 || geosite_size < 1024 {
-        return GeoDatabaseInfo {
-            version,
-            source,
-            updated_at,
-            status: "corrupted".into(),
-            error: Some("Database files are corrupted or zero size".into()),
-        };
-    }
-
-    GeoDatabaseInfo {
-        version,
-        source,
-        updated_at,
-        status: "ready".into(),
-        error: None,
+// Each committed metadata file points to an immutable, fully validated pair.
+// A crash before the single metadata rename leaves the previous generation active.
+fn metadata(data: &Path) -> Result<GeoDatabaseMetadata> {
+    serde_json::from_slice(&std::fs::read(metadata_path(data)).map_err(|_| error())?)
+        .map_err(|_| error())
+}
+pub fn active_dir(data: &Path) -> Result<PathBuf> {
+    let meta = metadata(data)?;
+    match meta.generation {
+        Some(id) if uuid::Uuid::parse_str(&id).is_ok() => Ok(geo_dir(data).join(id)),
+        None => Ok(geo_dir(data)), // Read legacy installations without changing their rules.
+        _ => Err(error()),
     }
 }
-
-pub fn ensure_initialized(resources: &Path, data: &Path) -> Result<()> {
-    let dir = geo_dir(data);
-    std::fs::create_dir_all(&dir).map_err(|_| error())?;
-
-    let geoip_dst = dir.join("geoip.dat");
-    let geosite_dst = dir.join("geosite.dat");
-    let meta_dst = metadata_path(data);
-
-    let needs_copy = !geoip_dst.is_file() || !geosite_dst.is_file() || !meta_dst.is_file();
-    if needs_copy {
-        let geoip_src = resources.join("geoip.dat");
-        let geosite_src = resources.join("geosite.dat");
-        if !geoip_src.is_file() || !geosite_src.is_file() {
-            return Err(BackendError::new(
-                "CORE_NOT_FOUND",
-                "Bundled GeoIP/GeoSite database files are missing",
-            ));
+pub fn assets_for_core(core: &Path) -> PathBuf {
+    let parent = core.parent().unwrap_or(Path::new("."));
+    if let Some(data) = parent.parent().and_then(Path::parent) {
+        if metadata_path(data).is_file() {
+            // Invalid metadata must fail closed, never silently load older bundled files.
+            return active_dir(data).unwrap_or_else(|_| geo_dir(data).join("invalid"));
         }
-
-        let geoip_bytes = std::fs::read(&geoip_src).map_err(|_| error())?;
-        let geosite_bytes = std::fs::read(&geosite_src).map_err(|_| error())?;
-
-        let geoip_hash = format!("{:x}", Sha256::digest(&geoip_bytes));
-        let geosite_hash = format!("{:x}", Sha256::digest(&geosite_bytes));
-
-        crate::xray::updater::atomic_write(&geoip_dst, &geoip_bytes)?;
-        crate::xray::updater::atomic_write(&geosite_dst, &geosite_bytes)?;
-
-        let meta = GeoDatabaseMetadata {
-            version: BUNDLED_GEO_VERSION.into(),
-            source: GEO_SOURCE_NAME.into(),
-            updated_at: now_ms(),
-            geoip_sha256: geoip_hash,
-            geosite_sha256: geosite_hash,
-        };
-        let meta_bytes = serde_json::to_vec(&meta).map_err(|_| error())?;
-        crate::xray::updater::atomic_write(&meta_dst, &meta_bytes)?;
     }
-
-    Ok(())
+    parent.to_path_buf()
+}
+fn verify_pair(dir: &Path, meta: &GeoDatabaseMetadata) -> Result<(Vec<u8>, Vec<u8>)> {
+    let ip = std::fs::read(dir.join("geoip.dat")).map_err(|_| error())?;
+    let site = std::fs::read(dir.join("geosite.dat")).map_err(|_| error())?;
+    if ip.len() < 1024 || ip.len() > MAX_GEOIP_SIZE || site.len() < 1024 || site.len() > MAX_GEOSITE_SIZE
+        || format!("{:x}", Sha256::digest(&ip)) != meta.geoip_sha256
+        || format!("{:x}", Sha256::digest(&site)) != meta.geosite_sha256 {
+        return Err(error());
+    }
+    Ok((ip, site))
+}
+pub fn info(data: &Path) -> GeoDatabaseInfo {
+    let verified = snapshot(data).map(|(m, ip, site)| (m, ip.len() as u64, site.len() as u64));
+    match verified {
+        Ok((m, ip, site)) => GeoDatabaseInfo {
+            version:m.version, source:m.source, updated_at:m.updated_at,
+            status:"ready".into(), error:None, valid:true, geoip_size:ip, geosite_size:site,
+        },
+        Err(_) => GeoDatabaseInfo {
+            version:"none".into(), source:GEO_SOURCE_NAME.into(), updated_at:0,
+            status:if metadata_path(data).exists() { "corrupted" } else { "missing" }.into(),
+            error:Some("Geo databases are missing or have not passed validation".into()),
+            valid:false, geoip_size:0, geosite_size:0,
+        },
+    }
+}
+fn lock(data: &Path) -> Result<std::fs::File> {
+    std::fs::create_dir_all(geo_dir(data)).map_err(|_| error())?;
+    let file = std::fs::OpenOptions::new().create(true).truncate(false).read(true).write(true)
+        .open(geo_dir(data).join("update.lock")).map_err(|_| error())?;
+    fs2::FileExt::try_lock_exclusive(&file).map_err(|_| BackendError::new("GEO_UPDATE_BUSY", "A geo database update is already running"))?;
+    Ok(file)
+}
+fn commit(data: &Path, staging: tempfile::TempDir, mut meta: GeoDatabaseMetadata) -> Result<()> {
+    let id = uuid::Uuid::new_v4().to_string();
+    let destination = geo_dir(data).join(&id);
+    std::fs::rename(staging.path(), &destination).map_err(|_| error())?;
+    meta.generation = Some(id);
+    let bytes = serde_json::to_vec(&meta).map_err(|_| error())?;
+    crate::xray::updater::atomic_write(&metadata_path(data), &bytes)
+}
+pub fn restore_metadata(data: &Path, bytes: &[u8]) -> Result<()> {
+    let _lock = lock(data)?;
+    let meta: GeoDatabaseMetadata = serde_json::from_slice(bytes).map_err(|_| error())?;
+    let id = meta.generation.as_ref().ok_or_else(error)?;
+    if uuid::Uuid::parse_str(id).is_err() { return Err(error()); }
+    verify_pair(&geo_dir(data).join(id), &meta)?;
+    crate::xray::updater::atomic_write(&metadata_path(data), bytes)
+}
+pub fn snapshot(data: &Path) -> Result<(GeoDatabaseMetadata, Vec<u8>, Vec<u8>)> {
+    let meta = metadata(data)?;
+    let dir = match &meta.generation {
+        Some(id) if uuid::Uuid::parse_str(id).is_ok() => geo_dir(data).join(id),
+        _ => return Err(error()),
+    };
+    let (ip, site) = verify_pair(&dir, &meta)?;
+    Ok((meta, ip, site))
+}
+#[allow(dead_code)]
+pub fn install_snapshot(data: &Path, core: &Path, meta: GeoDatabaseMetadata, ip: &[u8], site: &[u8]) -> Result<()> {
+    let _lock = lock(data)?;
+    let staging = tempfile::tempdir_in(geo_dir(data)).map_err(|_| error())?;
+    crate::xray::updater::atomic_write(&staging.path().join("geoip.dat"), ip)?;
+    crate::xray::updater::atomic_write(&staging.path().join("geosite.dat"), site)?;
+    verify_pair(staging.path(), &meta)?;
+    validate_geo_files_sync(core, staging.path())?;
+    commit(data, staging, meta)
+}
+pub fn install_trusted_snapshot(data: &Path, meta: GeoDatabaseMetadata, ip: &[u8], site: &[u8]) -> Result<()> {
+    let _lock = lock(data)?;
+    let staging = tempfile::tempdir_in(geo_dir(data)).map_err(|_| error())?;
+    crate::xray::updater::atomic_write(&staging.path().join("geoip.dat"), ip)?;
+    crate::xray::updater::atomic_write(&staging.path().join("geosite.dat"), site)?;
+    verify_pair(staging.path(), &meta)?;
+    commit(data, staging, meta)
+}
+pub fn ensure_initialized(resources: &Path, data: &Path) -> Result<()> {
+    let _lock = lock(data)?;
+    if info(data).valid { return Ok(()); }
+    let core = resources.join("xray.exe");
+    let staging = tempfile::tempdir_in(geo_dir(data)).map_err(|_| error())?;
+    let legacy = metadata(data).ok().and_then(|m| {
+        let pair = verify_pair(&active_dir(data).ok()?, &m).ok()?;
+        Some((m, pair))
+    });
+    let (meta, (ip, site)) = if let Some(legacy) = legacy { legacy } else {
+        let manifest: serde_json::Value = serde_json::from_str(include_str!("../../resources/core/manifest.json")).map_err(|_| error())?;
+        let meta = GeoDatabaseMetadata {
+            version:BUNDLED_GEO_VERSION.into(), source:GEO_SOURCE_NAME.into(), updated_at:now_ms(),
+            geoip_sha256:manifest["files"]["geoip.dat"].as_str().ok_or_else(error)?.into(),
+            geosite_sha256:manifest["files"]["geosite.dat"].as_str().ok_or_else(error)?.into(), generation:None,
+        };
+        let pair = verify_pair(resources, &meta)?;
+        (meta, pair)
+    };
+    crate::xray::updater::atomic_write(&staging.path().join("geoip.dat"), &ip)?;
+    crate::xray::updater::atomic_write(&staging.path().join("geosite.dat"), &site)?;
+    validate_geo_files_sync(&core, staging.path())?;
+    commit(data, staging, meta)
 }
 
 pub async fn update(data: &Path, core_path: &Path) -> Result<GeoDatabaseInfo> {
+    let _lock = lock(data)?;
+    if !core_path.is_file() { return Err(error()); }
     let release_url = format!("{GEO_REPOSITORY}/releases/latest");
     let release: Release = client()?
         .get(&release_url)
@@ -217,43 +257,26 @@ pub async fn update(data: &Path, core_path: &Path) -> Result<GeoDatabaseInfo> {
     let staging_geosite = staging.path().join("geosite.dat");
     std::fs::write(&staging_geosite, &geosite_bytes).map_err(|_| error())?;
 
-    // Validate using Xray validator test config with staging directory
-    if core_path.is_file() {
-        validate_geo_files(core_path, staging.path()).await?;
-    }
-
-    // Atomically persist to geo directory
-    let geoip_dest = dir.join("geoip.dat");
-    let geosite_dest = dir.join("geosite.dat");
-    crate::xray::updater::atomic_write(&geoip_dest, &geoip_bytes)?;
-    crate::xray::updater::atomic_write(&geosite_dest, &geosite_bytes)?;
+    verify_download(geoip_asset, &geoip_hash)?;
+    verify_download(geosite_asset, &geosite_hash)?;
+    validate_geo_files_sync(core_path, staging.path())?;
 
     let meta = GeoDatabaseMetadata {
-        version: release.tag_name.clone(),
-        source: GEO_SOURCE_NAME.into(),
-        updated_at: now_ms(),
-        geoip_sha256: geoip_hash,
-        geosite_sha256: geosite_hash,
+        version:release.tag_name, source:GEO_SOURCE_NAME.into(), updated_at:now_ms(),
+        geoip_sha256:geoip_hash, geosite_sha256:geosite_hash, generation:None,
     };
-    let meta_bytes = serde_json::to_vec(&meta).map_err(|_| error())?;
-    crate::xray::updater::atomic_write(&metadata_path(data), &meta_bytes)?;
+    commit(data, staging, meta)?;
+    Ok(info(data))
+}
 
-    // Also update files in the active core directory so Xray finds them immediately
-    if let Some(core_dir) = core_path.parent() {
-        if core_dir.is_dir() {
-            let _ = crate::xray::updater::atomic_write(&core_dir.join("geoip.dat"), &geoip_bytes);
-            let _ =
-                crate::xray::updater::atomic_write(&core_dir.join("geosite.dat"), &geosite_bytes);
-        }
-    }
-
-    Ok(GeoDatabaseInfo {
-        version: release.tag_name,
-        source: GEO_SOURCE_NAME.into(),
-        updated_at: meta.updated_at,
-        status: "ready".into(),
-        error: None,
-    })
+// Old NetworkKeeper releases predate GitHub asset digests. Only the exact bundled
+// release is accepted without a published digest, using the compiled trust anchor.
+fn verify_download(asset: &Asset, actual: &str) -> Result<()> {
+    let manifest: serde_json::Value = serde_json::from_str(include_str!("../../resources/core/manifest.json")).map_err(|_| error())?;
+    let expected = asset.digest.as_deref().and_then(|s| s.strip_prefix("sha256:"))
+        .or_else(|| manifest["files"][&asset.name].as_str()).ok_or_else(error)?;
+    if expected != actual { return Err(error()); }
+    Ok(())
 }
 
 async fn download_file(url: &str, max_size: usize) -> Result<Vec<u8>> {
@@ -281,16 +304,16 @@ async fn download_file(url: &str, max_size: usize) -> Result<Vec<u8>> {
     Ok(bytes)
 }
 
-async fn validate_geo_files(core_path: &Path, asset_dir: &Path) -> Result<()> {
+pub fn validate_geo_files_sync(core_path: &Path, asset_dir: &Path) -> Result<()> {
     let test_config = serde_json::json!({
         "log": { "loglevel": "none" },
-        "inbounds": [{ "port": 10808, "protocol": "socks" }],
+        "inbounds": [{ "port": std::net::TcpListener::bind("127.0.0.1:0").ok().and_then(|l| l.local_addr().ok()).map(|a| a.port()).unwrap_or(10808), "protocol": "socks" }],
         "outbounds": [{ "tag": "direct", "protocol": "freedom" }],
         "routing": {
             "domainStrategy": "IPIfNonMatch",
             "rules": [
                 { "type": "field", "ip": ["geoip:private"], "outboundTag": "direct" },
-                { "type": "field", "domain": ["geosite:antifilter"], "outboundTag": "direct" },
+                { "type": "field", "domain": ["geosite:youtube", "geosite:antifilter"], "outboundTag": "direct" },
                 { "type": "field", "domain": ["geosite:antifilter-community"], "outboundTag": "direct" },
                 { "type": "field", "ip": ["geoip:antifilter"], "outboundTag": "direct" },
                 { "type": "field", "ip": ["geoip:antifilter-community"], "outboundTag": "direct" },
@@ -301,36 +324,70 @@ async fn validate_geo_files(core_path: &Path, asset_dir: &Path) -> Result<()> {
     });
 
     let config_bytes = serde_json::to_vec(&test_config).map_err(|_| error())?;
-    let mut cmd = crate::services::vpn_service::command(core_path);
+    let mut cmd = std::process::Command::new(core_path);
+    #[cfg(windows)] {
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(0x08000000);
+    }
     cmd.args(["run", "-test", "-config", "stdin:"])
         .env("XRAY_LOCATION_ASSET", asset_dir)
         .stdin(std::process::Stdio::piped())
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::piped());
-
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null());
     let mut child = cmd.spawn().map_err(|_| error())?;
-    if let Some(mut stdin) = child.stdin.take() {
-        use tokio::io::AsyncWriteExt;
-        let _ = stdin.write_all(&config_bytes).await;
+    use std::io::Write;
+    let sent = child.stdin.take().ok_or_else(error)?.write_all(&config_bytes);
+    if sent.is_err() { let _ = child.kill(); let _ = child.wait(); return Err(error()); }
+    let deadline = std::time::Instant::now() + Duration::from_secs(10);
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) => return if status.success() { Ok(()) } else { Err(error()) },
+            Ok(None) if std::time::Instant::now() < deadline => std::thread::sleep(Duration::from_millis(20)),
+            _ => { let _ = child.kill(); let _ = child.wait(); return Err(error()); }
+        }
     }
+}
 
-    let output = tokio::time::timeout(Duration::from_secs(10), child.wait_with_output())
-        .await
-        .map_err(|_| error())?
-        .map_err(|_| error())?;
-
-    if !output.status.success() {
-        let err_output = format!(
-            "{} {}",
-            String::from_utf8_lossy(&output.stdout),
-            String::from_utf8_lossy(&output.stderr)
-        );
-        log::error!("Geo database validation failed: {err_output}");
-        return Err(BackendError::new(
-            "GEO_DATA_CORRUPTED",
-            "Candidate GeoIP/GeoSite databases failed Xray validation",
-        ));
+#[cfg(test)]
+mod tests {
+    use super::*;
+    fn resources() -> PathBuf {
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("resources/core")
     }
-
-    Ok(())
+    #[test]
+    fn interrupted_invalid_and_concurrent_updates_preserve_last_good_pair() {
+        let data = tempfile::tempdir().unwrap();
+        ensure_initialized(&resources(), data.path()).unwrap();
+        let previous = std::fs::read(metadata_path(data.path())).unwrap();
+        let (meta, ip, site) = snapshot(data.path()).unwrap();
+        // Crash after one staged file: published metadata and both active files stay intact.
+        let interrupted = tempfile::tempdir_in(geo_dir(data.path())).unwrap();
+        std::fs::write(interrupted.path().join("geoip.dat"), b"partial").unwrap();
+        ensure_initialized(&resources(), data.path()).unwrap();
+        assert_eq!(std::fs::read(metadata_path(data.path())).unwrap(), previous);
+        assert!(info(data.path()).valid);
+        assert!(install_snapshot(data.path(), &resources().join("xray.exe"), meta.clone(), &ip, b"invalid").is_err());
+        assert!(install_snapshot(data.path(), &resources().join("absent.exe"), meta.clone(), &ip, &site).is_err());
+        let guard = lock(data.path()).unwrap();
+        assert!(install_snapshot(data.path(), &resources().join("xray.exe"), meta.clone(), &ip, &site).is_err());
+        drop(guard);
+        assert_eq!(std::fs::read(metadata_path(data.path())).unwrap(), previous);
+        install_snapshot(data.path(), &resources().join("xray.exe"), meta, &ip, &site).unwrap();
+        assert_ne!(std::fs::read(metadata_path(data.path())).unwrap(), previous);
+        restore_metadata(data.path(), &previous).unwrap();
+        assert!(info(data.path()).valid);
+    }
+    #[test]
+    fn bundled_and_updated_assets_are_verified_and_resolved_from_same_generation() {
+        let data = tempfile::tempdir().unwrap();
+        let core = crate::xray::core::prepare(&resources(), data.path()).unwrap();
+        assert_eq!(assets_for_core(&core), active_dir(data.path()).unwrap());
+        let (meta, ip, site) = snapshot(data.path()).unwrap();
+        install_snapshot(data.path(), &core, meta, &ip, &site).unwrap();
+        assert_eq!(assets_for_core(&core), active_dir(data.path()).unwrap());
+        std::fs::write(active_dir(data.path()).unwrap().join("geosite.dat"), vec![1; 2000]).unwrap();
+        assert!(!info(data.path()).valid);
+        let asset = Asset { name:"geoip.dat".into(), size:1024, browser_download_url:String::new(), digest:Some(format!("sha256:{}", "a".repeat(64))) };
+        assert!(verify_download(&asset, &"b".repeat(64)).is_err());
+    }
 }

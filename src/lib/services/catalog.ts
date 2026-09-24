@@ -33,6 +33,21 @@ export interface Rule {
 	presetId?: string;
 }
 
+export function orderedRules(rules: readonly Rule[]): Rule[] {
+	const key = (r: Rule): [number, string] => {
+		const builtin = ['russia-optimized', 'bypass-blocking', 'russia-direct'].includes(r.presetId ?? '');
+		const rank = !builtin ? 0 : r.matcher === 'geoip' && r.name === 'private' ? 1
+			: r.matcher === 'geosite' && r.name === 'youtube' ? 2
+			: r.matcher === 'geosite' && r.serverId !== 'direct' ? 3
+			: r.matcher === 'geosite' ? 4 : r.serverId !== 'direct' ? 5 : 6;
+		return [rank, builtin ? r.id : ''];
+	};
+	return [...rules].sort((a, b) => {
+		const [ar, ai] = key(a), [br, bi] = key(b);
+		return ar - br || (ai < bi ? -1 : ai > bi ? 1 : 0);
+	});
+}
+
 export interface Catalog {
 	version: 1;
 	servers: Server[];
@@ -550,6 +565,9 @@ export class CatalogService {
 	}
 
 	async applyPreset(presetId: string) {
+		if (['russia-optimized', 'bypass-blocking'].includes(presetId) && !this.current.subscriptions.length && !this.current.servers.length) {
+			throw new ServiceError('invalidServer');
+		}
 		const targetServer = 'subscription';
 		let rulesToCreate: Array<{
 			matcher: RuleMatcher;
@@ -603,8 +621,11 @@ export class CatalogService {
 		const customRules = this.current.rules.filter(
 			(r) => r.presetId !== presetId,
 		);
-		const newPresetRules: Rule[] = rulesToCreate.map((r, i) => ({
-			id: `preset-${presetId}-${i + 1}`,
+		if (presetId !== 'russia-direct') {
+			rulesToCreate.push({ matcher: 'geosite', name: 'youtube', serverId: targetServer });
+		}
+		const newPresetRules: Rule[] = rulesToCreate.map((r) => ({
+			id: `${presetId}-${r.matcher}-${r.name}`,
 			name: r.name,
 			matcher: r.matcher,
 			isDomain: r.matcher === 'domain',
@@ -615,7 +636,7 @@ export class CatalogService {
 
 		this.commit({
 			...this.current,
-			rules: [...newPresetRules, ...customRules],
+			rules: orderedRules([...customRules, ...newPresetRules]),
 		});
 	}
 

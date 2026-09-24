@@ -9,6 +9,26 @@ afterEach(() => {
 });
 
 describe('connection lifecycle', () => {
+	it('shows connecting synchronously and waits for native readiness before connected', async () => {
+		const vpn = new BrowserVpnService(0);
+		const controller = new ConnectionController(vpn);
+		await controller.initialize();
+		let finishConnect!: () => void;
+		vi.spyOn(vpn, 'connect').mockImplementation(
+			() =>
+				new Promise<void>((resolve) => {
+					finishConnect = resolve;
+				}),
+		);
+		const pending = controller.toggle('demo-fi');
+		expect(get(controller.state)).toMatchObject({
+			status: 'connecting',
+			busy: true,
+		});
+		finishConnect();
+		await pending;
+		expect(get(controller.state).status).toBe('disconnected');
+	});
 	it('restores the native backend error after a view reload', async () => {
 		const vpn = Object.assign(new BrowserVpnService(0), {
 			getSnapshot: async () => ({

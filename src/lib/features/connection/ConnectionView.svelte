@@ -4,6 +4,7 @@
 	import NumberFlow from '@number-flow/svelte';
 	import CountryFlag from '../../components/CountryFlag.svelte';
 	import { t } from '../../i18n';
+	import { serverDisplayName } from '../../utils/serverDisplayName';
 	import { tooltip } from '../../actions/tooltip';
 	import type {
 		VpnConnectionState,
@@ -134,9 +135,7 @@
 	<!-- Server Selector Card -->
 	<button
 		class="server-selector"
-		aria-label={server
-			? t('servers.countries.' + server.countryCode)
-			: t('servers.empty')}
+		aria-label={server ? serverDisplayName(server) : t('servers.empty')}
 		onclick={onSelectServer}
 	>
 		<div class="server-info">
@@ -391,7 +390,7 @@
 
 	.protocol {
 		font-family: var(--font-family-base);
-		font-size: 10px;
+		font-size: 11px;
 		font-weight: 700;
 		color: rgba(255, 255, 255, 0.65);
 		letter-spacing: 0.5px;
