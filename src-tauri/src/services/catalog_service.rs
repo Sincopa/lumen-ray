@@ -17,12 +17,33 @@ pub fn snapshot(repo: &Repository, latencies: &std::collections::HashMap<String,
     json!({
         "version": 1,
         "subscriptions": repo.subscriptions.iter().map(|subscription| {
-            let status = subscription.expire.filter(|expire| *expire > 0).map(|expire| {
-                if expire <= now_seconds { "expired" } else { "active" }
-            });
-            let days_remaining = subscription.expire.filter(|expire| *expire > 0).map(|expire| {
-                expire.saturating_sub(now_seconds) / 86_400
-            });
+            let has_user_info = subscription.total.is_some()
+                || subscription.upload.is_some()
+                || subscription.download.is_some();
+            let is_infinite_days = subscription.expire == Some(0)
+                || (subscription.expire.is_none() && has_user_info)
+                || subscription
+                    .expire
+                    .is_some_and(|expire| expire.saturating_sub(now_seconds) / 86_400 >= 3650);
+
+            let status = if is_infinite_days {
+                Some("active")
+            } else {
+                subscription.expire.filter(|expire| *expire > 0).map(|expire| {
+                    if expire <= now_seconds {
+                        "expired"
+                    } else {
+                        "active"
+                    }
+                })
+            };
+            let days_remaining: Option<Value> = if is_infinite_days {
+                Some(json!("∞"))
+            } else {
+                subscription.expire.filter(|expire| *expire > 0).map(|expire| {
+                    json!(expire.saturating_sub(now_seconds) / 86_400)
+                })
+            };
             let traffic = subscription.total.map(|total| {
                 if total == 0 {
                     "∞".to_string()
@@ -356,10 +377,25 @@ pub async fn import(
         .map(str::to_owned)
         .or_else(|| fetched.suggested_name.clone())
         .or_else(|| {
-            url::Url::parse(input.trim())
-                .ok()
-                .and_then(|url| url.host_str().map(str::to_owned))
-                .map(|host| host.trim_start_matches("www.").to_owned())
+            url::Url::parse(input.trim()).ok().and_then(|url| {
+                if let Some(fragment) = url.fragment().map(str::trim).filter(|f| !f.is_empty()) {
+                    let decoded =
+                        percent_encoding::percent_decode_str(fragment).decode_utf8_lossy();
+                    let cleaned = decoded.trim();
+                    if !cleaned.is_empty() {
+                        return Some(cleaned.to_string());
+                    }
+                }
+                for (k, v) in url.query_pairs() {
+                    if (k.eq_ignore_ascii_case("name") || k.eq_ignore_ascii_case("title"))
+                        && !v.trim().is_empty()
+                    {
+                        return Some(v.trim().to_string());
+                    }
+                }
+                url.host_str()
+                    .map(|host| host.trim_start_matches("www.").to_owned())
+            })
         })
         .unwrap_or_else(|| "Subscription".into());
     let id = refresh_id

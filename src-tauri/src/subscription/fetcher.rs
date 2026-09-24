@@ -20,9 +20,51 @@ pub struct FetchedSubscription {
     pub suggested_name: Option<String>,
 }
 
+pub fn header_value_to_string(val: &reqwest::header::HeaderValue) -> Option<String> {
+    val.to_str()
+        .ok()
+        .map(str::to_string)
+        .or_else(|| String::from_utf8(val.as_bytes().to_vec()).ok())
+}
+
+pub fn is_generic_subscription_filename(name: &str) -> bool {
+    let lower = name.trim().to_ascii_lowercase();
+    matches!(
+        lower.as_str(),
+        "config"
+            | "sub"
+            | "subscription"
+            | "subscriptions"
+            | "proxies"
+            | "proxy"
+            | "clash"
+            | "mihomo"
+            | "default"
+            | "data"
+            | "profile"
+            | "export"
+            | "all"
+            | "nodes"
+            | "servers"
+            | "vpn"
+            | "v2ray"
+            | "xray"
+            | "singbox"
+            | "sing-box"
+    )
+}
+
 fn clean_title(value: &str) -> Option<String> {
-    let decoded = percent_encoding::percent_decode_str(value.trim().trim_matches(['"', '\'']))
-        .decode_utf8_lossy();
+    let raw = value.trim().trim_matches(['"', '\'']).trim();
+    let unescaped = if let Some(s) = raw
+        .strip_prefix("UTF-8''")
+        .or_else(|| raw.strip_prefix("utf-8''"))
+    {
+        s
+    } else {
+        raw
+    };
+    let decoded = percent_encoding::percent_decode_str(unescaped).decode_utf8_lossy();
     let cleaned: String = decoded
         .chars()
         .filter(|character| !character.is_control())
@@ -30,23 +72,42 @@ fn clean_title(value: &str) -> Option<String> {
         .collect();
     let cleaned = cleaned.trim();
     let lower = cleaned.to_ascii_lowercase();
-    let suffix_length = [".yaml", ".yml", ".txt"]
+    let suffix_length = [".yaml", ".yml", ".txt", ".json", ".conf"]
         .into_iter()
         .find(|suffix| lower.ends_with(suffix))
         .map(str::len)
         .unwrap_or(0);
     let cleaned = &cleaned[..cleaned.len() - suffix_length];
+    let cleaned = cleaned.trim();
     (!cleaned.is_empty()).then(|| cleaned.to_owned())
 }
 
 pub fn parse_profile_title(value: &str) -> Option<String> {
-    let value = value.trim();
-    if let Some(encoded) = value.strip_prefix("base64:") {
+    let value = value.trim().trim_matches(['"', '\'']).trim();
+    if let Some(encoded) = value
+        .strip_prefix("base64:")
+        .or_else(|| value.strip_prefix("BASE64:"))
+        .or_else(|| value.strip_prefix("base64,"))
+    {
+        let encoded = encoded.trim();
         let decoded = base64::engine::general_purpose::STANDARD
-            .decode(encoded.trim())
-            .or_else(|_| base64::engine::general_purpose::URL_SAFE_NO_PAD.decode(encoded.trim()))
+            .decode(encoded)
+            .or_else(|_| base64::engine::general_purpose::STANDARD_NO_PAD.decode(encoded))
+            .or_else(|_| base64::engine::general_purpose::URL_SAFE.decode(encoded))
+            .or_else(|_| base64::engine::general_purpose::URL_SAFE_NO_PAD.decode(encoded))
             .ok()?;
         return clean_title(&String::from_utf8(decoded).ok()?);
+    }
+    if !value.contains(' ') && value.len() >= 4 && value.len().is_multiple_of(4) {
+        if let Ok(decoded) = base64::engine::general_purpose::STANDARD.decode(value) {
+            if let Ok(s) = String::from_utf8(decoded) {
+                if s.chars().all(|c| !c.is_control()) && s.chars().any(|c| c.is_alphabetic()) {
+                    if let Some(title) = clean_title(&s) {
+                        return Some(title);
+                    }
+                }
+            }
+        }
     }
     clean_title(value)
 }
@@ -70,6 +131,32 @@ pub fn parse_content_disposition(value: &str) -> Option<String> {
         }
     }
     fallback
+}
+
+pub fn extract_title_from_body(body: &str) -> Option<String> {
+    for line in body.lines().take(25) {
+        let trimmed = line.trim();
+        let stripped = trimmed
+            .strip_prefix('#')
+            .or_else(|| trimmed.strip_prefix("//"))
+            .map(str::trim);
+        if let Some(content) = stripped {
+            if let Some((k, v)) = content.split_once(':') {
+                let k_lower = k.trim().to_ascii_lowercase();
+                if k_lower == "profile-title"
+                    || k_lower == "subscription-title"
+                    || k_lower == "profile-name"
+                    || k_lower == "profile"
+                    || k_lower == "name"
+                {
+                    if let Some(title) = parse_profile_title(v.trim()) {
+                        return Some(title);
+                    }
+                }
+            }
+        }
+    }
+    None
 }
 
 pub fn parse_user_info(value: &str) -> Option<SubscriptionUserInfo> {
@@ -326,18 +413,31 @@ impl SubscriptionClient {
                 .flatten()
         });
 
-        let suggested_name = response
+        let title_headers = [
+            "profile-title",
+            "subscription-title",
+            "x-profile-title",
+            "profile-name",
+            "web-page-title",
+        ];
+
+        let mut suggested_name = response
             .headers()
-            .get(reqwest::header::CONTENT_DISPOSITION)
-            .and_then(|value| value.to_str().ok())
-            .and_then(parse_content_disposition)
+            .iter()
+            .find(|(name, _)| {
+                title_headers
+                    .iter()
+                    .any(|h| name.as_str().eq_ignore_ascii_case(h))
+            })
+            .and_then(|(_, value)| header_value_to_string(value))
+            .and_then(|v| parse_profile_title(&v))
             .or_else(|| {
                 response
                     .headers()
-                    .iter()
-                    .find(|(name, _)| name.as_str().eq_ignore_ascii_case("profile-title"))
-                    .and_then(|(_, value)| value.to_str().ok())
-                    .and_then(parse_profile_title)
+                    .get(reqwest::header::CONTENT_DISPOSITION)
+                    .and_then(header_value_to_string)
+                    .and_then(|v| parse_content_disposition(&v))
+                    .filter(|name| !is_generic_subscription_filename(name))
             });
 
         if response
@@ -355,8 +455,13 @@ impl SubscriptionClient {
             body.extend_from_slice(&chunk);
         }
 
+        let body_str = String::from_utf8(body).map_err(|_| BackendError::invalid())?;
+        if suggested_name.is_none() {
+            suggested_name = extract_title_from_body(&body_str);
+        }
+
         Ok(FetchedSubscription {
-            body: String::from_utf8(body).map_err(|_| BackendError::invalid())?,
+            body: body_str,
             user_info,
             suggested_name,
         })
@@ -427,6 +532,29 @@ mod tests {
             parse_profile_title("base64:RXhhbXBsZSBWUE4="),
             Some("Example VPN".into())
         );
+        // Base64 with cyrillic characters
+        assert_eq!(
+            parse_profile_title("base64:0JPRgNC40LHQvdC40Lo="),
+            Some("Грибник".into())
+        );
+        assert_eq!(
+            parse_profile_title("BASE64:0JPRgNC40LHQvdC40Lo="),
+            Some("Грибник".into())
+        );
+        assert_eq!(
+            parse_profile_title("\"base64:0JPRgNC40LHQvdC40Lo=\""),
+            Some("Грибник".into())
+        );
+        // Raw base64 without prefix
+        assert_eq!(
+            parse_profile_title("0JPRgNC40LHQvdC40Lo="),
+            Some("Грибник".into())
+        );
+        // Percent-encoded
+        assert_eq!(
+            parse_profile_title("%D0%93%D1%80%D0%B8%D0%B1%D0%BD%D0%B8%D0%BA"),
+            Some("Грибник".into())
+        );
         assert_eq!(
             parse_content_disposition("inline; filename*=UTF-8''Koala%20VPN.yaml"),
             Some("Koala VPN".into())
@@ -434,6 +562,23 @@ mod tests {
         assert_eq!(
             parse_content_disposition("attachment; filename=\"Personal.yml\""),
             Some("Personal".into())
+        );
+        assert!(is_generic_subscription_filename("config"));
+        assert!(is_generic_subscription_filename("sub"));
+        assert!(is_generic_subscription_filename("clash"));
+        assert!(is_generic_subscription_filename("proxies"));
+        assert!(!is_generic_subscription_filename("MyCustomService"));
+
+        let body_with_title = "# profile-title: base64:0JPRgNC40LHQvdC40Lo=\nvless://...";
+        assert_eq!(
+            extract_title_from_body(body_with_title),
+            Some("Грибник".into())
+        );
+
+        let body_with_plain = "// subscription-title: CoolVPN\nvless://...";
+        assert_eq!(
+            extract_title_from_body(body_with_plain),
+            Some("CoolVPN".into())
         );
     }
 

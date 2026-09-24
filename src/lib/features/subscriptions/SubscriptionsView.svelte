@@ -311,7 +311,7 @@
 										<span class="metric-label">
 											{t('subscriptions.daysLabel')}
 										</span>
-										<span class="metric-val">{sub.daysRemaining ?? '—'}</span>
+										<span class="metric-val">{sub.daysRemaining ?? (sub.traffic === '∞' ? '∞' : '—')}</span>
 									</div>
 									<div class="metric-item">
 										<span class="metric-label">

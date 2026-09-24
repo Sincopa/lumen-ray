@@ -16,7 +16,7 @@ export interface Subscription {
 	name: string;
 	updatedAt: number;
 	status?: 'active' | 'expired';
-	daysRemaining?: number;
+	daysRemaining?: number | string;
 	traffic?: string;
 	updatedMinutesAgo?: number;
 }

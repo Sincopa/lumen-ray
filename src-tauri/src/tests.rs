@@ -1326,4 +1326,174 @@ mod hwid_tests {
         assert_eq!(reqs_after.len(), 2);
         assert!(!reqs_after[1].headers.contains_key("x-device-model"));
     }
+
+    #[tokio::test]
+    async fn profile_title_priority_over_generic_content_disposition() {
+        let server = MockHttpServer::start(|_path, _headers| {
+            (
+                200,
+                vec![
+                    ("profile-title", "base64:0JPRgNC40LHQvdC40Lo=".into()),
+                    (
+                        "content-disposition",
+                        "attachment; filename=\"config.yaml\"".into(),
+                    ),
+                ],
+                VALID_SUB_BASE64.into(),
+            )
+        })
+        .await;
+
+        let client = SubscriptionClient::ephemeral().unwrap();
+        let fetched = fetch_with_metadata(&server.url("/sub"), &client)
+            .await
+            .unwrap();
+
+        assert_eq!(fetched.suggested_name, Some("Грибник".into()));
+    }
+
+    #[tokio::test]
+    async fn profile_title_raw_utf8_bytes_support() {
+        let server = MockHttpServer::start(|_path, _headers| {
+            (
+                200,
+                vec![("profile-title", "Грибник".into())],
+                VALID_SUB_BASE64.into(),
+            )
+        })
+        .await;
+
+        let client = SubscriptionClient::ephemeral().unwrap();
+        let fetched = fetch_with_metadata(&server.url("/sub"), &client)
+            .await
+            .unwrap();
+
+        assert_eq!(fetched.suggested_name, Some("Грибник".into()));
+    }
+
+    #[tokio::test]
+    async fn subscription_body_profile_title_fallback() {
+        let server = MockHttpServer::start(|_path, _headers| {
+            (
+                200,
+                vec![],
+                format!("# profile-title: RemnaTitle\n{VALID_SUB_BASE64}"),
+            )
+        })
+        .await;
+
+        let client = SubscriptionClient::ephemeral().unwrap();
+        let fetched = fetch_with_metadata(&server.url("/sub"), &client)
+            .await
+            .unwrap();
+
+        assert_eq!(fetched.suggested_name, Some("RemnaTitle".into()));
+    }
+
+    #[tokio::test]
+    async fn subscription_import_name_url_fallback() {
+        let server =
+            MockHttpServer::start(|_path, _headers| (200, vec![], VALID_SUB_BASE64.into())).await;
+
+        let temp_dir = tempfile::tempdir().unwrap();
+        let resources = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("resources/core");
+        let state = AppState::open(temp_dir.path().to_path_buf(), resources).unwrap();
+
+        // 1. URL fragment name
+        let url_with_fragment = format!(
+            "{}#%D0%93%D1%80%D0%B8%D0%B1%D0%BD%D0%B8%D0%BA",
+            server.url("/sub")
+        );
+        catalog_service::import(&state, url_with_fragment, None, None)
+            .await
+            .unwrap();
+        assert_eq!(
+            state.repository.read().await.subscriptions[0].name,
+            "Грибник"
+        );
+
+        // 2. URL query name parameter
+        let url_with_query = format!("{}?name=MyCustomService", server.url("/sub2"));
+        catalog_service::import(&state, url_with_query, None, None)
+            .await
+            .unwrap();
+        assert_eq!(
+            state.repository.read().await.subscriptions[1].name,
+            "MyCustomService"
+        );
+    }
+
+    #[test]
+    fn catalog_snapshot_infinite_days() {
+        use crate::storage::repository::{Repository, Subscription};
+        let mut repo = Repository::default();
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+
+        // Sub 1: expire == Some(0) (lifetime subscription standard)
+        repo.subscriptions.push(Subscription {
+            id: "sub-1".into(),
+            name: "Infinite Days 0".into(),
+            updated_at: now,
+            expire: Some(0),
+            total: Some(100_000_000_000),
+            upload: Some(1000),
+            download: Some(2000),
+        });
+
+        // Sub 2: expire == None but has user info (traffic)
+        repo.subscriptions.push(Subscription {
+            id: "sub-2".into(),
+            name: "Infinite Days None".into(),
+            updated_at: now,
+            expire: None,
+            total: Some(0), // infinite traffic too
+            upload: Some(1000),
+            download: Some(2000),
+        });
+
+        // Sub 3: expire in 20 years
+        repo.subscriptions.push(Subscription {
+            id: "sub-3".into(),
+            name: "Far Future".into(),
+            updated_at: now,
+            expire: Some(now + 20 * 365 * 86_400),
+            total: Some(500),
+            upload: None,
+            download: None,
+        });
+
+        // Sub 4: normal active subscription expiring in 5 days
+        repo.subscriptions.push(Subscription {
+            id: "sub-4".into(),
+            name: "Normal 5 Days".into(),
+            updated_at: now,
+            expire: Some(now + 5 * 86_400 + 100),
+            total: Some(500),
+            upload: None,
+            download: None,
+        });
+
+        let snap = crate::services::catalog_service::snapshot(&repo, &Default::default());
+        let subs = snap["subscriptions"].as_array().unwrap();
+
+        // Sub 1: infinite
+        assert_eq!(subs[0]["daysRemaining"], "∞");
+        assert_eq!(subs[0]["status"], "active");
+
+        // Sub 2: infinite
+        assert_eq!(subs[1]["daysRemaining"], "∞");
+        assert_eq!(subs[1]["traffic"], "∞");
+        assert_eq!(subs[1]["status"], "active");
+
+        // Sub 3: far future -> infinite
+        assert_eq!(subs[2]["daysRemaining"], "∞");
+        assert_eq!(subs[2]["status"], "active");
+
+        // Sub 4: normal
+        assert_eq!(subs[3]["daysRemaining"], 5);
+        assert_eq!(subs[3]["status"], "active");
+    }
 }
