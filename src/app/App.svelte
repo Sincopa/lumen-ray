@@ -343,7 +343,7 @@
 									error={$connectionStore.error}
 									onRetry={() => connection.initialize()}
 									onToggle={toggleConnection}
-								onSelectServer={() => goToTab('servers')}
+									onSelectServer={() => goToTab('servers')}
 								/>
 							{/if}
 						{:else if currentTab === 'subscriptions'}

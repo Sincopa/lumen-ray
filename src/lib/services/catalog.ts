@@ -35,15 +35,29 @@ export interface Rule {
 
 export function orderedRules(rules: readonly Rule[]): Rule[] {
 	const key = (r: Rule): [number, string] => {
-		const builtin = ['russia-optimized', 'bypass-blocking', 'russia-direct'].includes(r.presetId ?? '');
-		const rank = !builtin ? 0 : r.matcher === 'geoip' && r.name === 'private' ? 1
-			: r.matcher === 'geosite' && r.name === 'youtube' ? 2
-			: r.matcher === 'geosite' && r.serverId !== 'direct' ? 3
-			: r.matcher === 'geosite' ? 4 : r.serverId !== 'direct' ? 5 : 6;
+		const builtin = [
+			'russia-optimized',
+			'bypass-blocking',
+			'russia-direct',
+		].includes(r.presetId ?? '');
+		const rank = !builtin
+			? 0
+			: r.matcher === 'geoip' && r.name === 'private'
+				? 1
+				: r.matcher === 'geosite' && r.name === 'youtube'
+					? 2
+					: r.matcher === 'geosite' && r.serverId !== 'direct'
+						? 3
+						: r.matcher === 'geosite'
+							? 4
+							: r.serverId !== 'direct'
+								? 5
+								: 6;
 		return [rank, builtin ? r.id : ''];
 	};
 	return [...rules].sort((a, b) => {
-		const [ar, ai] = key(a), [br, bi] = key(b);
+		const [ar, ai] = key(a),
+			[br, bi] = key(b);
 		return ar - br || (ai < bi ? -1 : ai > bi ? 1 : 0);
 	});
 }
@@ -291,9 +305,14 @@ export function normalizeGeoTag(
 		if (lower.startsWith('geoip:')) tag = tag.slice('geoip:'.length).trim();
 	} else {
 		if (lower.startsWith('geosite:')) tag = tag.slice('geosite:'.length).trim();
-		else if (lower.startsWith('geoip:')) tag = tag.slice('geoip:'.length).trim();
+		else if (lower.startsWith('geoip:'))
+			tag = tag.slice('geoip:'.length).trim();
 	}
-	if (!/^[a-zA-Z0-9_\-!@]+$/.test(tag) || tag.length === 0 || tag.length > 128) {
+	if (
+		!/^[a-zA-Z0-9_\-!@]+$/.test(tag) ||
+		tag.length === 0 ||
+		tag.length > 128
+	) {
 		throw new ServiceError('invalidRule');
 	}
 	return tag;
@@ -565,7 +584,11 @@ export class CatalogService {
 	}
 
 	async applyPreset(presetId: string) {
-		if (['russia-optimized', 'bypass-blocking'].includes(presetId) && !this.current.subscriptions.length && !this.current.servers.length) {
+		if (
+			['russia-optimized', 'bypass-blocking'].includes(presetId) &&
+			!this.current.subscriptions.length &&
+			!this.current.servers.length
+		) {
 			throw new ServiceError('invalidServer');
 		}
 		const targetServer = 'subscription';
@@ -622,7 +645,11 @@ export class CatalogService {
 			(r) => r.presetId !== presetId,
 		);
 		if (presetId !== 'russia-direct') {
-			rulesToCreate.push({ matcher: 'geosite', name: 'youtube', serverId: targetServer });
+			rulesToCreate.push({
+				matcher: 'geosite',
+				name: 'youtube',
+				serverId: targetServer,
+			});
 		}
 		const newPresetRules: Rule[] = rulesToCreate.map((r) => ({
 			id: `${presetId}-${r.matcher}-${r.name}`,

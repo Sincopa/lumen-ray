@@ -4,6 +4,10 @@
 	import { slide } from 'svelte/transition';
 	import { catalog, connection } from '../../services';
 	import { errorCode } from '../../services/errors';
+	import {
+		refreshStatus,
+		refreshSubscriptionWithStatus,
+	} from '../../services/maintenance';
 	import { t, i18n } from '../../i18n';
 	import type { Subscription } from '../../services/catalog';
 	import Dialog from '../../components/Dialog.svelte';
@@ -32,6 +36,7 @@
 
 	const catalogStore = catalog.state;
 	const connectionStore = connection.state;
+	const subscriptionRefreshStatus = refreshStatus;
 
 	// Local state
 	let expanded = $state<string | null>(null);
@@ -104,7 +109,7 @@
 		busy = id;
 		error = '';
 		try {
-			await catalog.refreshSubscription(id);
+			await refreshSubscriptionWithStatus(id);
 		} catch (e) {
 			error = t('errors.' + errorCode(e));
 		} finally {
@@ -311,7 +316,9 @@
 										<span class="metric-label">
 											{t('subscriptions.daysLabel')}
 										</span>
-										<span class="metric-val">{sub.daysRemaining ?? (sub.traffic === '∞' ? '∞' : '—')}</span>
+										<span class="metric-val">
+											{sub.daysRemaining ?? (sub.traffic === '∞' ? '∞' : '—')}
+										</span>
 									</div>
 									<div class="metric-item">
 										<span class="metric-label">
@@ -321,6 +328,14 @@
 									</div>
 								</div>
 								<div class="updated-time">{formatUpdatedAgo(sub)}</div>
+								{#if $subscriptionRefreshStatus[sub.id]?.state === 'error'}
+									<div class="refresh-error" role="status">
+										{t('subscriptions.refreshFailed')}: {t(
+											'errors.' +
+												($subscriptionRefreshStatus[sub.id].error ?? 'unknown'),
+										)}
+									</div>
+								{/if}
 							</div>
 						{/if}
 					</button>
@@ -622,6 +637,11 @@
 		font-size: 11px;
 		color: #ffffff8c;
 		max-width: 50%;
+		text-align: right;
+	}
+	.refresh-error {
+		font-size: 11px;
+		color: #ffb4aa;
 		text-align: right;
 	}
 	.share-content {

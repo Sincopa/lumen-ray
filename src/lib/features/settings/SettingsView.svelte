@@ -30,21 +30,10 @@
 		updateGeoDatabases,
 		type GeoDatabaseInfo,
 	} from '../../services/geoDatabase';
-
-	interface NetworkDiagnostics {
-		status: string;
-		networkMode: string;
-		coreVersion: string;
-		publicIpv4: string | null;
-		publicIpv6: string | null;
-		systemDns: string[];
-		configuredDns: string;
-		tunnelReady: boolean;
-		routesReady: boolean;
-		routingConflict: boolean;
-		systemProxyEnabled: boolean;
-		proxyManaged: boolean;
-	}
+	import {
+		formatNetworkDiagnostics,
+		type NetworkDiagnostics,
+	} from '../../services/networkDiagnostics';
 
 	let autoConnect = $state(false);
 	let resettingProxy = $state(false);
@@ -151,22 +140,10 @@
 
 	async function copyDiagnostics() {
 		if (!diagnostics) return;
-		const report = [
-			`Lumen / Xray ${diagnostics.coreVersion}`,
-			`Status: ${diagnostics.status}`,
-			`Mode: ${diagnostics.networkMode}`,
-			`IPv4: ${diagnostics.publicIpv4 ?? 'unavailable'}`,
-			`IPv6: ${diagnostics.publicIpv6 ?? 'unavailable'}`,
-			`System DNS: ${diagnostics.systemDns.join(', ') || 'unavailable'}`,
-			`Selected DNS: ${diagnostics.configuredDns}`,
-			`TUN adapter: ${diagnostics.tunnelReady}`,
-			`TUN routes: ${diagnostics.routesReady}`,
-			`Routing conflict: ${diagnostics.routingConflict}`,
-			`System proxy enabled: ${diagnostics.systemProxyEnabled}`,
-			`System proxy managed: ${diagnostics.proxyManaged}`,
-		].join('\n');
 		try {
-			await navigator.clipboard.writeText(report);
+			await navigator.clipboard.writeText(
+				formatNetworkDiagnostics(diagnostics),
+			);
 			reportCopied = true;
 			setTimeout(() => {
 				reportCopied = false;

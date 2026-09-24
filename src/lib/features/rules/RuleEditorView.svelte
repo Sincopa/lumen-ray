@@ -16,6 +16,7 @@
 		onCancel: () => void;
 		onSelectProcess: () => void;
 		onSelectServer: () => void;
+		onMatcherChange: (matcher: RuleMatcher) => void;
 	}
 
 	let {
@@ -26,6 +27,7 @@
 		onCancel,
 		onSelectProcess,
 		onSelectServer,
+		onMatcherChange,
 	}: Props = $props();
 
 	// svelte-ignore state_referenced_locally
@@ -95,6 +97,7 @@
 
 	function switchMatcher(next: RuleMatcher) {
 		matcher = next;
+		onMatcherChange(next);
 		error = '';
 	}
 

@@ -13,9 +13,15 @@ describe('HWID error mapping and localization', () => {
 		expect(errorCode({ code: 'HWID_DEVICE_LIMIT' })).toBe('hwidDeviceLimit');
 		expect(errorCode({ code: 'HWID_UNAVAILABLE' })).toBe('hwidUnavailable');
 
-		expect(errorCode(new ServiceError('hwidNotSupported'))).toBe('hwidNotSupported');
-		expect(errorCode(new ServiceError('hwidDeviceLimit'))).toBe('hwidDeviceLimit');
-		expect(errorCode(new ServiceError('hwidUnavailable'))).toBe('hwidUnavailable');
+		expect(errorCode(new ServiceError('hwidNotSupported'))).toBe(
+			'hwidNotSupported',
+		);
+		expect(errorCode(new ServiceError('hwidDeviceLimit'))).toBe(
+			'hwidDeviceLimit',
+		);
+		expect(errorCode(new ServiceError('hwidUnavailable'))).toBe(
+			'hwidUnavailable',
+		);
 	});
 
 	it('provides valid Russian and English messages for HWID errors', () => {
@@ -28,4 +34,3 @@ describe('HWID error mapping and localization', () => {
 		expect(en.errors.hwidUnavailable).toContain('device identifier');
 	});
 });
-

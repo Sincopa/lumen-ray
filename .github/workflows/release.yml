@@ -81,10 +81,14 @@ jobs:
       - name: Verify frontend
         run: |
           npm run check
+          npm run lint
+          npm run format:check
           npm test
 
       - name: Verify Rust backend
-        run: cargo test --locked --manifest-path src-tauri/Cargo.toml
+        run: |
+          cargo test --locked --manifest-path src-tauri/Cargo.toml
+          cargo clippy --locked --manifest-path src-tauri/Cargo.toml --all-targets --all-features -- -D warnings
 
       - name: Build and publish signed release
         uses: tauri-apps/tauri-action@v1

@@ -69,6 +69,7 @@
 		"empty": "Add your first subscription.",
 		"serverCount": "Servers: {count}",
 		"updatedAt": "Updated: {time}",
+		"refreshFailed": "Refresh failed",
 		"deleteConfirm": "Do you want to delete “{name}”, its servers and associated rules?",
 		"shareTitle": "Link to “{name}”",
 		"shareHint": "Copy the link to import this subscription on another device.",

@@ -14,13 +14,8 @@
 		onClose: () => void;
 	}
 
-	let {
-		appliedPresetIds,
-		hasActiveProxy,
-		onApply,
-		onRemove,
-		onClose,
-	}: Props = $props();
+	let { appliedPresetIds, hasActiveProxy, onApply, onRemove, onClose }: Props =
+		$props();
 
 	let busyId = $state<string | null>(null);
 	let expandedPresetId = $state<string | null>(null);
@@ -52,7 +47,11 @@
 		defaultDesc: string;
 		requiresProxy: boolean;
 		highlights: PresetHighlight[];
-		tags: Array<{ type: 'geoip' | 'geosite'; tag: string; target: 'vpn' | 'direct' }>;
+		tags: Array<{
+			type: 'geoip' | 'geosite';
+			tag: string;
+			target: 'vpn' | 'direct';
+		}>;
 	}
 
 	const PRESETS: PresetDef[] = [
@@ -287,7 +286,9 @@
 									>
 										<span class="chip-name">{ruleTag.type}:{ruleTag.tag}</span>
 										<span class="chip-arrow">→</span>
-										<span class="chip-target">{ruleTag.target.toUpperCase()}</span>
+										<span class="chip-target">
+											{ruleTag.target.toUpperCase()}
+										</span>
 									</span>
 								{/each}
 							</div>

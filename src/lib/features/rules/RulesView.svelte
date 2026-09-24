@@ -252,6 +252,7 @@
 			onSelect={(procs: string[]) => {
 				if (editing) {
 					editing.name = procs.join(', ');
+					editing.matcher = 'application';
 					editing.isDomain = false;
 				}
 				choosingProcess = false;
@@ -323,6 +324,12 @@
 			}}
 			onSelectServer={() => {
 				choosingServer = true;
+			}}
+			onMatcherChange={(matcher) => {
+				if (editing) {
+					editing.matcher = matcher;
+					editing.isDomain = matcher === 'domain';
+				}
 			}}
 		/>
 	{/if}

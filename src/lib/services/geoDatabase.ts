@@ -43,4 +43,3 @@ export async function updateGeoDatabases(): Promise<GeoDatabaseInfo> {
 	}
 	return invoke<GeoDatabaseInfo>('update_geo_databases');
 }
-

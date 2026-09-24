@@ -10,9 +10,7 @@ test('production browser starts offline with no external assets or errors', asyn
 	page.on('request', (request) => {
 		if (
 			/^https?:/.test(request.url()) &&
-			!request.url().startsWith('http://127.0.0.1:5187') &&
-			!request.url().includes('fonts.googleapis.com') &&
-			!request.url().includes('fonts.gstatic.com')
+			!request.url().startsWith('http://127.0.0.1:5187')
 		)
 			external.push(request.url());
 	});
@@ -484,6 +482,12 @@ test('updated shader links and restored cards keep their controls', async ({
 		if (message.type() === 'error') errors.push(message.text());
 	});
 	await page.goto('/');
+	expect(
+		await page.evaluate(
+			async () =>
+				(await document.fonts.load('20px "Material Symbols Rounded"')).length,
+		),
+	).toBeGreaterThan(0);
 	await expect
 		.poll(() =>
 			page.locator('canvas').evaluate((canvas) => {
@@ -573,11 +577,11 @@ for (const size of [
 test('verifies all 7 bug fixes and visual refinements', async ({ page }) => {
 	await page.goto('/');
 
-	// Bug 4: Verify 24px window corner radius
+	// Verify the current top and bottom window corner radii.
 	const appRadius = await page
 		.locator('.app-viewport')
 		.evaluate((el) => window.getComputedStyle(el).borderRadius);
-	expect(appRadius).toBe('24px');
+	expect(appRadius).toBe('24px 24px 48px 48px');
 
 	// Bug 6: Verify top right control button is 1:1 circle (not oval) on hover
 	const closeBtn = page.locator('.control-btn.close');

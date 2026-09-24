@@ -12,20 +12,33 @@ import {
 
 it('combines presets in either order and preserves manual priority and deleted rows', async () => {
 	const results = [];
-	for (const order of [['russia-direct', 'bypass-blocking'], ['bypass-blocking', 'russia-direct']]) {
+	for (const order of [
+		['russia-direct', 'bypass-blocking'],
+		['bypass-blocking', 'russia-direct'],
+	]) {
 		const service = new CatalogService();
-		service.saveRule({ id: 'manual', name: 'googlevideo.com', matcher: 'domain', serverId: 'block', enabled: true });
+		service.saveRule({
+			id: 'manual',
+			name: 'googlevideo.com',
+			matcher: 'domain',
+			serverId: 'block',
+			enabled: true,
+		});
 		for (const id of order) await service.applyPreset(id);
 		const rules = get(service.state).rules;
 		expect(rules[0].id).toBe('manual');
-		expect(rules.findIndex((r) => r.name === 'youtube')).toBeLessThan(rules.findIndex((r) => r.name === 'ru'));
+		expect(rules.findIndex((r) => r.name === 'youtube')).toBeLessThan(
+			rules.findIndex((r) => r.name === 'ru'),
+		);
 		results.push(rules);
 		await service.applyPreset(order[0]);
 		expect(get(service.state).rules).toEqual(rules);
 		const deleted = rules.filter((r) => r.name !== 'youtube');
 		expect(orderedRules(deleted).some((r) => r.name === 'youtube')).toBe(false);
 		await service.removePreset('bypass-blocking');
-		expect(get(service.state).rules.some((r) => r.name === 'youtube')).toBe(false);
+		expect(get(service.state).rules.some((r) => r.name === 'youtube')).toBe(
+			false,
+		);
 		expect(get(service.state).rules[0].id).toBe('manual');
 	}
 	expect(results[0]).toEqual(results[1]);
@@ -326,9 +339,7 @@ describe('catalog', () => {
 	});
 
 	it('normalizes geo tags and handles prefix stripping and mismatch rejection', async () => {
-		const { normalizeGeoTag } = await import(
-			'../../src/lib/services/catalog'
-		);
+		const { normalizeGeoTag } = await import('../../src/lib/services/catalog');
 		expect(normalizeGeoTag('ru', 'geoip')).toBe('ru');
 		expect(normalizeGeoTag('geoip:ru', 'geoip')).toBe('ru');
 		expect(normalizeGeoTag('geosite:category-ru', 'geosite')).toBe(
@@ -341,9 +352,7 @@ describe('catalog', () => {
 		expect(normalizeGeoTag('private', 'geoip')).toBe('private');
 
 		// Mismatched prefixes must throw
-		expect(() => normalizeGeoTag('geosite:ru', 'geoip')).toThrow(
-			'invalidRule',
-		);
+		expect(() => normalizeGeoTag('geosite:ru', 'geoip')).toThrow('invalidRule');
 		expect(() => normalizeGeoTag('geoip:category-ru', 'geosite')).toThrow(
 			'invalidRule',
 		);
@@ -416,14 +425,20 @@ describe('catalog', () => {
 		await service.applyPreset('russia-optimized');
 		let rules = get(service.state).rules;
 
-        expect(rules.length).toBe(9);
-        expect(rules[0].id).toBe('user-custom-rule');
-        const presetRules = rules.filter((r) => r.presetId === 'russia-optimized');
-        expect(presetRules.map((r) => r.name)).toEqual([
-            'private', 'youtube', 'antifilter', 'antifilter-community',
-            'category-ru', 'antifilter', 'antifilter-community', 'ru',
-        ]);
-        expect(presetRules[1].serverId).toBe('subscription');
+		expect(rules.length).toBe(9);
+		expect(rules[0].id).toBe('user-custom-rule');
+		const presetRules = rules.filter((r) => r.presetId === 'russia-optimized');
+		expect(presetRules.map((r) => r.name)).toEqual([
+			'private',
+			'youtube',
+			'antifilter',
+			'antifilter-community',
+			'category-ru',
+			'antifilter',
+			'antifilter-community',
+			'ru',
+		]);
+		expect(presetRules[1].serverId).toBe('subscription');
 
 		// Idempotency: applying again must not duplicate rules
 		await service.applyPreset('russia-optimized');
@@ -441,7 +456,11 @@ describe('catalog', () => {
 		const directPresetRules = get(service.state).rules.filter(
 			(r) => r.presetId === 'russia-direct',
 		);
-        expect(directPresetRules.map((r) => r.name)).toEqual(['private', 'category-ru', 'ru']);
+		expect(directPresetRules.map((r) => r.name)).toEqual([
+			'private',
+			'category-ru',
+			'ru',
+		]);
 
 		// Verify custom rule with block target
 		service.saveRule({
@@ -451,14 +470,15 @@ describe('catalog', () => {
 			serverId: 'block',
 			enabled: true,
 		});
-		const savedBlock = get(service.state).rules.find((r) => r.id === 'block-rule');
+		const savedBlock = get(service.state).rules.find(
+			(r) => r.id === 'block-rule',
+		);
 		expect(savedBlock?.serverId).toBe('block');
 	});
 
 	it('provides geo database information and mock updates', async () => {
-		const { getGeoDatabaseInfo, updateGeoDatabases } = await import(
-			'../../src/lib/services/geoDatabase'
-		);
+		const { getGeoDatabaseInfo, updateGeoDatabases } =
+			await import('../../src/lib/services/geoDatabase');
 		const info = await getGeoDatabaseInfo();
 		expect(info.version).toBe('202410152325');
 		expect(info.source).toContain('NetworkKeeper/v2ray-rules-ru');

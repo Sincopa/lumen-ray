@@ -13,6 +13,7 @@ const child = spawn(core, ['run', '-config', 'stdin:'], {
 child.stdin.end(JSON.stringify(config));
 const routes = new Set();
 let log = '';
+let played = 0;
 child.stdout.on('data', (b) => { log += b.toString(); });
 child.stderr.on('data', (b) => { log += b.toString(); });
 let browser;
@@ -48,6 +49,7 @@ try {
 			await page.locator('video').evaluate((v) => { v.muted = true; return v.play().catch(() => {}); });
 			await page.waitForFunction(() => document.querySelector('video')?.currentTime > 3, null, { timeout: 30000 });
 			const state = await page.locator('video').evaluate((v) => ({ time: v.currentTime, ready: v.readyState, width: v.videoWidth, error: v.error?.code }));
+			played++;
 			console.log(JSON.stringify({ mode, id, state, media: media.slice(-5) }));
 		} catch (error) {
 			const status = await page.locator('video').evaluate((v) => ({ time: v.currentTime, ready: v.readyState, error: v.error?.code })).catch(() => null);
@@ -65,5 +67,12 @@ try {
 			routes.add(JSON.stringify({ outbound: match[1] === 'direct' ? 'direct' : 'vpn', protocol: match[2], host: match[3], port: match[4] }));
 		}
 	}
-	console.log(JSON.stringify({ mode, routes: [...routes].map((r) => JSON.parse(r)) }));
+		console.log(JSON.stringify({ mode, routes: [...routes].map((r) => JSON.parse(r)) }));
+		if (mode === 'fixed-rules') {
+			const routeEntries = [...routes].map((r) => JSON.parse(r));
+			const mediaRoutedDirect = routeEntries.some((route) =>
+				route.outbound === 'direct' && /youtube|googlevideo|ytimg/.test(route.host),
+			);
+			if (played === 0 || mediaRoutedDirect) process.exitCode = 1;
+		}
 }

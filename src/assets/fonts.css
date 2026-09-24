@@ -5,3 +5,23 @@
 	font-style: normal;
 	font-display: swap;
 }
+
+@font-face {
+	font-family: 'Material Symbols Rounded';
+	src: url('./fonts/MaterialSymbolsRounded-subset-v375.woff2') format('woff2');
+	font-weight: 100 700;
+	font-style: normal;
+	font-display: block;
+}
+
+.material-symbols-rounded {
+	font-family: 'Material Symbols Rounded';
+	font-weight: normal;
+	font-style: normal;
+	text-transform: none;
+	letter-spacing: normal;
+	white-space: nowrap;
+	direction: ltr;
+	font-feature-settings: 'liga';
+	-webkit-font-smoothing: antialiased;
+}

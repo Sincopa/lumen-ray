@@ -60,6 +60,9 @@ npm test
 npm run build
 npm run test:e2e
 cargo test --locked --manifest-path src-tauri/Cargo.toml
+cargo clippy --locked --manifest-path src-tauri/Cargo.toml --all-targets --all-features -- -D warnings
 ```
+
+On Windows, `npm run test:tun` checks DNS, IPv4/IPv6 routes, and video playback through an already connected Lumen TUN session. It does not change the connection. `npm run benchmark:latency` measures the startup time and memory of one and four isolated Xray probe processes without a subscription.
 
 The release workflow builds the Windows installer and signed updater artifacts from a version tag. Native data is stored as user-scoped DPAPI ciphertext under `%LOCALAPPDATA%\app.lumen.desktop\data`. The installer does not currently have an Authenticode signature.
