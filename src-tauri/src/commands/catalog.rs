@@ -14,6 +14,22 @@ pub async fn get_catalog(state: tauri::State<'_, Arc<AppState>>) -> Result<Value
         &latencies,
     ))
 }
+async fn restore_catalog_if_unchanged(
+    state: &AppState,
+    app: &tauri::AppHandle,
+    before: &crate::storage::repository::Repository,
+    after: &crate::storage::repository::Repository,
+) -> Result<()> {
+    let _guard = state.mutations.lock().await;
+    if *state.repository.read().await == *after {
+        state.store.save(before)?;
+        *state.repository.write().await = before.clone();
+        let catalog = service::snapshot(before, &*state.latencies.read().await);
+        let _ = app.emit("catalog://changed", catalog);
+        crate::update_tray_menu(app, state);
+    }
+    Ok(())
+}
 #[tauri::command]
 pub async fn mutate_catalog(
     state: tauri::State<'_, Arc<AppState>>,
@@ -49,18 +65,26 @@ pub async fn mutate_catalog(
             let after = state.repository.read().await.clone();
             match crate::services::vpn_service::apply_live_rules(&state, &id, before, &after).await {
                 Ok(true) => return Ok(value),
-                Ok(false) => {}
-                Err(error) => {
-                    let _guard = state.mutations.lock().await;
-                    if serde_json::to_value(&*state.repository.read().await).ok()
-                        == serde_json::to_value(&after).ok()
-                    {
-                        state.store.save(before)?;
-                        *state.repository.write().await = before.clone();
-                        let catalog = service::snapshot(before, &*state.latencies.read().await);
-                        let _ = app.emit("catalog://changed", catalog);
-                        crate::update_tray_menu(&app, &state);
+                Ok(false) => {
+                    let still_connected = state.snapshot.read().await.info.as_ref()
+                        .is_some_and(|info| info.server_id == id);
+                    if !still_connected {
+                        let warm_state = state.inner().clone();
+                        tauri::async_runtime::spawn(async move {
+                            crate::services::vpn_service::prewarm(&warm_state).await;
+                        });
+                        return Ok(value);
                     }
+                    if after.settings.network_mode == "tun" {
+                        restore_catalog_if_unchanged(&state, &app, before, &after).await?;
+                        return Err(BackendError::new(
+                            "RULE_UPDATE_FAILED",
+                            "Routing change could not be applied without restarting the tunnel",
+                        ));
+                    }
+                }
+                Err(error) => {
+                    restore_catalog_if_unchanged(&state, &app, before, &after).await?;
                     return Err(error);
                 }
             }
@@ -157,6 +181,22 @@ pub async fn get_processes() -> Result<Vec<crate::platform::windows::ProcessItem
     tokio::task::spawn_blocking(crate::platform::windows::processes)
         .await
         .map_err(|_| BackendError::new("PROCESS_FAILED", "Could not enumerate processes"))?
+}
+#[cfg(windows)]
+#[tauri::command]
+pub async fn get_rule_icons(
+    names: Vec<String>,
+) -> Result<std::collections::HashMap<String, String>> {
+    tokio::task::spawn_blocking(move || crate::platform::icons::get_rule_icons_map(&names))
+        .await
+        .map_err(|_| BackendError::new("PROCESS_FAILED", "Could not resolve process icons"))
+}
+#[cfg(not(windows))]
+#[tauri::command]
+pub async fn get_rule_icons(
+    _names: Vec<String>,
+) -> Result<std::collections::HashMap<String, String>> {
+    Ok(std::collections::HashMap::new())
 }
 #[tauri::command]
 pub async fn ping_server(state: tauri::State<'_, Arc<AppState>>, id: String) -> Result<Value> {

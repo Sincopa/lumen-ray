@@ -5,8 +5,9 @@ use crate::domain::{
 use serde_json::Value;
 
 pub fn parse(v: &Value, subscription: &str) -> Result<VpnNode> {
-    let s = |k: &str| v[k].as_str().unwrap_or_default().to_owned();
-    let protocol = match s("type").as_str() {
+    let s_ref = |k: &str| v[k].as_str().unwrap_or_default();
+    let s = |k: &str| s_ref(k).to_owned();
+    let protocol = match s_ref("type") {
         "vless" => Protocol::Vless,
         "vmess" => Protocol::Vmess,
         "trojan" => Protocol::Trojan,
@@ -49,7 +50,8 @@ pub fn parse(v: &Value, subscription: &str) -> Result<VpnNode> {
     super::xray_json::keys(&v["ws-opts"]["headers"], &["Host"])?;
     super::xray_json::keys(&v["grpc-opts"], &["grpc-service-name"])?;
     super::xray_json::keys(&v["reality-opts"], &["public-key", "short-id"])?;
-    let network = if s("network").is_empty() {
+    let net_raw = s_ref("network");
+    let network: String = if net_raw.is_empty() {
         if protocol == Protocol::Hysteria {
             "hysteria"
         } else {
@@ -57,12 +59,13 @@ pub fn parse(v: &Value, subscription: &str) -> Result<VpnNode> {
         }
         .into()
     } else {
-        s("network")
+        net_raw.into()
     };
     if !["raw", "tcp", "ws", "grpc", "hysteria"].contains(&network.as_str()) {
         return Err(BackendError::unsupported());
     }
     let reality = v.get("reality-opts");
+    let servername = s_ref("servername");
     let mut node = VpnNode {
         wireguard: None,
         balancer: None,
@@ -107,10 +110,10 @@ pub fn parse(v: &Value, subscription: &str) -> Result<VpnNode> {
                 "none"
             }
             .into(),
-            server_name: if s("servername").is_empty() {
+            server_name: if servername.is_empty() {
                 s("sni")
             } else {
-                s("servername")
+                servername.into()
             },
             fingerprint: s("client-fingerprint"),
             public_key: v["reality-opts"]["public-key"]

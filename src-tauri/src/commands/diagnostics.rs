@@ -23,14 +23,7 @@ pub struct NetworkDiagnostics {
     proxy_managed: bool,
 }
 
-async fn public_ip(port: u16, endpoint: &'static str) -> Option<String> {
-    let proxy = reqwest::Proxy::all(format!("socks5h://127.0.0.1:{port}")).ok()?;
-    let client = reqwest::Client::builder()
-        .no_proxy()
-        .proxy(proxy)
-        .timeout(Duration::from_secs(3))
-        .build()
-        .ok()?;
+async fn public_ip(client: &reqwest::Client, endpoint: &'static str) -> Option<String> {
     let text = client.get(endpoint).send().await.ok()?.text().await.ok()?;
     text.trim()
         .parse::<std::net::IpAddr>()
@@ -61,10 +54,24 @@ pub async fn get_network_diagnostics(
         (Vec::new(), false, false, false, false);
     drop(session);
     let (public_ipv4, public_ipv6) = if let Some(port) = port {
-        tokio::join!(
-            public_ip(port, "https://api.ipify.org"),
-            public_ip(port, "https://api6.ipify.org"),
-        )
+        let client = reqwest::Proxy::all(format!("socks5h://127.0.0.1:{port}"))
+            .ok()
+            .and_then(|proxy| {
+                reqwest::Client::builder()
+                    .no_proxy()
+                    .proxy(proxy)
+                    .timeout(Duration::from_secs(3))
+                    .build()
+                    .ok()
+            });
+        if let Some(client) = client {
+            tokio::join!(
+                public_ip(&client, "https://api.ipify.org"),
+                public_ip(&client, "https://api6.ipify.org"),
+            )
+        } else {
+            (None, None)
+        }
     } else {
         (None, None)
     };

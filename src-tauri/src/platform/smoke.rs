@@ -268,6 +268,8 @@ pub async fn warm_standby_isolation() -> Result<()> {
     });
     let mut after = before.clone();
     after.rules[0].enabled = false;
+    let mut global = after.clone();
+    global.routing_mode = "global".into();
     let data = tempfile::tempdir().map_err(|_| error())?;
     let runtime = crate::runtime::resolve()?;
     let core = crate::xray::core::prepare(&runtime, data.path())?;
@@ -291,6 +293,15 @@ pub async fn warm_standby_isolation() -> Result<()> {
             .ok_or_else(error)?;
         crate::services::vpn_service::run_live_routing_patch(&core, metrics_port + 2, &patch).await?;
         if routing_rule_count(&core, metrics_port + 2).await? + 1 != old_count { return Err(error()); }
+        let mode_patch = crate::xray::config::live_routing_patch(&after, &global, &selected)?
+            .ok_or_else(error)?;
+        crate::services::vpn_service::run_live_routing_patch(&core, metrics_port + 2, &mode_patch).await?;
+        let global_count = routing_rule_count(&core, metrics_port + 2).await?;
+        if global_count >= old_count { return Err(error()); }
+        let back_patch = crate::xray::config::live_routing_patch(&global, &after, &selected)?
+            .ok_or_else(error)?;
+        crate::services::vpn_service::run_live_routing_patch(&core, metrics_port + 2, &back_patch).await?;
+        if routing_rule_count(&core, metrics_port + 2).await? + 1 != old_count { return Err(error()); }
         if public_ip().await? != original || !super::network::standby_isolated() { return Err(error()); }
         steam_reachable().await?;
         Ok(())
@@ -300,7 +311,7 @@ pub async fn warm_standby_isolation() -> Result<()> {
     cleanup?;
     if public_ip().await? != original { return Err(error()); }
     steam_reachable().await?;
-    println!("WARM_TUN_STANDBY_OK direct Internet, Steam endpoint, live rules and cleanup");
+    println!("WARM_TUN_STANDBY_OK direct Internet, Steam endpoint, live rules, mode changes and cleanup");
     Ok(())
 }
 

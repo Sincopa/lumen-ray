@@ -81,6 +81,7 @@ pub fn run() {
             commands::catalog::refresh_subscription,
             commands::catalog::get_subscription_source,
             commands::catalog::get_processes,
+            commands::catalog::get_rule_icons,
             commands::catalog::ping_server,
             commands::diagnostics::get_network_diagnostics,
             commands::diagnostics::open_log_console,
@@ -106,10 +107,7 @@ pub fn run() {
             let data = std::env::var_os("LUMEN_TEST_DATA_DIR")
                 .map(std::path::PathBuf::from)
                 .unwrap_or(data);
-            let state = app::state::AppState::open(data, resources.clone())?;
-            if let Err(e) = crate::xray::geo::ensure_initialized(&resources, &state.data) {
-                log::warn!("Geo database initialization error: {:?}", e);
-            }
+            let state = app::state::AppState::open(data, resources)?;
             let active = crate::xray::updater::current(&state.data.join("core"));
             if active != crate::xray::core::VERSION {
                 let resolved = tauri::async_runtime::block_on(async {
@@ -280,27 +278,47 @@ pub fn create_tray_menu(
 ) -> tauri::Result<tauri::menu::Menu<tauri::Wry>> {
     use tauri::menu::*;
 
-    let snapshot = state
+    let (is_connected, is_connecting) = state
         .snapshot
         .try_read()
-        .map(|s| s.clone())
-        .unwrap_or_default();
-    let repo = state
+        .map(|s| (s.status == "connected", s.status == "connecting"))
+        .unwrap_or((false, false));
+
+    let (selected_server_name, current_sub_nodes, is_global) = state
         .repository
         .try_read()
-        .map(|r| r.clone())
-        .unwrap_or_default();
-
-    let is_connected = snapshot.status == "connected";
-    let is_connecting = snapshot.status == "connecting";
+        .map(|r| {
+            let selected_name = if is_connected {
+                r.nodes
+                    .iter()
+                    .find(|n| Some(&n.id) == r.selected_server_id.as_ref())
+                    .map(|n| n.name.clone())
+            } else {
+                None
+            };
+            let nodes: Vec<(String, String, bool)> = r
+                .nodes
+                .iter()
+                .filter(|n| {
+                    r.selected_subscription_id
+                        .as_ref()
+                        .is_none_or(|sid| n.subscription_id == *sid)
+                })
+                .take(25)
+                .map(|n| {
+                    (
+                        n.id.clone(),
+                        n.name.clone(),
+                        Some(&n.id) == r.selected_server_id.as_ref(),
+                    )
+                })
+                .collect();
+            (selected_name, nodes, r.routing_mode != "rules")
+        })
+        .unwrap_or_else(|_| (None, Vec::new(), true));
 
     let status_text = if is_connected {
-        let server_name = repo
-            .nodes
-            .iter()
-            .find(|n| Some(&n.id) == repo.selected_server_id.as_ref())
-            .map(|n| n.name.as_str())
-            .unwrap_or("Подключено");
+        let server_name = selected_server_name.as_deref().unwrap_or("Подключено");
         format!("● {}", server_name)
     } else if is_connecting {
         "◌ Подключение...".to_string()
@@ -325,35 +343,23 @@ pub fn create_tray_menu(
     let sep1 = PredefinedMenuItem::separator(app)?;
 
     let mut servers_sub = SubmenuBuilder::new(app, "Серверы");
-    let current_sub_nodes: Vec<_> = repo
-        .nodes
-        .iter()
-        .filter(|n| {
-            repo.selected_subscription_id
-                .as_ref()
-                .is_none_or(|sid| n.subscription_id == *sid)
-        })
-        .collect();
 
     if current_sub_nodes.is_empty() {
         servers_sub = servers_sub.text("no_servers", "(Нет серверов)");
     } else {
-        for node in current_sub_nodes.iter().take(25) {
-            let is_sel = Some(&node.id) == repo.selected_server_id.as_ref();
+        for (node_id, node_name, is_sel) in &current_sub_nodes {
             let check_item = CheckMenuItem::with_id(
                 app,
-                format!("srv:{}", node.id),
-                &node.name,
+                format!("srv:{node_id}"),
+                node_name,
                 true,
-                is_sel,
+                *is_sel,
                 None::<&str>,
             )?;
             servers_sub = servers_sub.item(&check_item);
         }
     }
     let servers_menu = servers_sub.build()?;
-
-    let is_global = repo.routing_mode != "rules";
     let mode_global = CheckMenuItem::with_id(
         app,
         "mode:global",

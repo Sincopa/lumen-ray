@@ -254,9 +254,10 @@ pub async fn prewarm(state: &Arc<AppState>) {
 #[cfg(windows)]
 fn configuration_fingerprint(repo: &crate::storage::repository::Repository, selected: &str) -> Result<[u8; 32]> {
     let config = crate::xray::config::build(repo, selected, 10808, 10809, true)?;
-    let bytes = serde_json::to_vec(&config)
+    let mut hasher = Sha256::new();
+    serde_json::to_writer(&mut hasher, &config)
         .map_err(|_| BackendError::new("INVALID_CONFIG", "Could not serialize Xray config"))?;
-    Ok(Sha256::digest(bytes).into())
+    Ok(hasher.finalize().into())
 }
 
 #[cfg(windows)]
@@ -277,9 +278,10 @@ pub async fn apply_live_rules(
     let _operation = state.connection_operation.acquire().await
         .map_err(|_| BackendError::new("BUSY", "Connection manager is shutting down"))?;
     let mut session = state.session.lock().await;
+    let after_hash = configuration_fingerprint(after, selected)?;
     if session.started.is_some()
         && session.prepared_server_id.as_deref() == Some(selected)
-        && session.prepared_config_hash == Some(configuration_fingerprint(after, selected)?)
+        && session.prepared_config_hash == Some(after_hash)
         && session.helper.as_ref().is_some_and(|helper| !helper.exited())
     {
         return Ok(true);
@@ -296,7 +298,7 @@ pub async fn apply_live_rules(
     };
     let core = state.core.read().await.clone();
     run_live_routing_patch(&core, session.metrics_port + 2, &patch).await?;
-    session.prepared_config_hash = Some(configuration_fingerprint(after, selected)?);
+    session.prepared_config_hash = Some(after_hash);
     Ok(true)
 }
 
@@ -462,31 +464,33 @@ async fn connect_session(
     } else {
         ports()?
     };
-    let config = crate::xray::config::build(
-        &repo,
-        &id,
-        proxy_port,
-        metrics_port,
-        repo.settings.network_mode == "tun",
-    )?;
-    let bytes = serde_json::to_vec(&config)
-        .map_err(|_| BackendError::new("INVALID_CONFIG", "Could not serialize Xray config"))?;
+    let is_tun = repo.settings.network_mode == "tun";
+    let bytes = if is_tun {
+        #[cfg(not(windows))]
+        let _ = crate::xray::config::build(&repo, &id, proxy_port, metrics_port, true)?;
+        Vec::new()
+    } else {
+        let config = crate::xray::config::build(&repo, &id, proxy_port, metrics_port, false)?;
+        serde_json::to_vec(&config)
+            .map_err(|_| BackendError::new("INVALID_CONFIG", "Could not serialize Xray config"))?
+    };
     log::info!("VPN timing: config prepared {} ms", session_at.elapsed().as_millis());
     if !reuse_prepared { stop(session).await?; }
     log::info!("VPN timing: previous session stopped {} ms", session_at.elapsed().as_millis());
-    let mut result = if repo.settings.network_mode == "tun" {
+    let mut result = if is_tun {
         start_tunnel(
             session,
             &state.data,
             repo.clone(),
             id.clone(),
-            proxy_port,
-            metrics_port,
+            (proxy_port, metrics_port),
             core.parent()
                 .and_then(|p| p.file_name())
                 .and_then(|s| s.to_str())
                 .unwrap_or(crate::xray::core::VERSION)
                 .into(),
+            #[cfg(windows)]
+            config_hash,
         )
         .await
     } else {
@@ -548,12 +552,10 @@ async fn start_tunnel(
     data: &std::path::Path,
     mut repository: crate::storage::repository::Repository,
     selected: String,
-    proxy_port: u16,
-    metrics_port: u16,
+    (proxy_port, metrics_port): (u16, u16),
     core_version: String,
+    #[cfg(windows)] config_hash: [u8; 32],
 ) -> Result<()> {
-    #[cfg(windows)]
-    let config_hash = configuration_fingerprint(&repository, &selected)?;
     repository.sources.clear();
     let tunnel_at = Instant::now();
     #[cfg(windows)]

@@ -280,6 +280,33 @@ fn disabling_a_rule_can_replace_live_routing_without_restarting_tun() {
     removed.rules.clear();
     assert!(config::live_routing_patch(&before, &removed, &node.id).unwrap().is_some());
 }
+#[cfg(windows)]
+#[test]
+fn switching_routing_modes_keeps_the_active_tun_configuration() {
+    use crate::storage::repository::{Rule, RuleMatcher};
+    let node = uri::parse(VLESS, "sub").unwrap();
+    let mut rules = Repository {
+        nodes: vec![node.clone()], routing_mode: "rules".into(), ..Default::default()
+    };
+    rules.rules.push(Rule {
+        id: "steam".into(), name: "steam.exe".into(), matcher: RuleMatcher::Application,
+        server_id: "subscription".into(), enabled: true, preset_id: None, is_domain: false,
+    });
+    let mut global = rules.clone();
+    global.routing_mode = "global".into();
+    let rules_config = serde_json::to_value(config::build(&rules, &node.id, 10808, 10809, true).unwrap()).unwrap();
+    let global_config = serde_json::to_value(config::build(&global, &node.id, 10808, 10809, true).unwrap()).unwrap();
+    for field in ["inbounds", "outbounds", "dns"] {
+        assert_eq!(rules_config[field], global_config[field], "{field} changed across modes");
+    }
+    assert_eq!(rules_config["routing"]["domainStrategy"], global_config["routing"]["domainStrategy"]);
+    assert_eq!(global_config["routing"]["domainStrategy"], "IPOnDemand");
+    assert_eq!(global_config["routing"]["rules"][0]["inboundTag"][0], "dns-query");
+    assert!(config::live_routing_patch(&rules, &global, &node.id).unwrap().is_some());
+    assert!(config::live_routing_patch(&global, &rules, &node.id).unwrap().is_some());
+    assert_eq!(global_config["routing"]["rules"].as_array().unwrap().last().unwrap()["outboundTag"], "proxy");
+    assert_eq!(rules_config["routing"]["rules"].as_array().unwrap().last().unwrap()["outboundTag"], "direct");
+}
 #[test]
 fn balanced_xray_subscription_and_clean_names() {
     let sub = r#"[

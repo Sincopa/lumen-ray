@@ -66,11 +66,11 @@ pub fn processes() -> Result<Vec<ProcessItem>> {
         }
         let mut entry: PROCESSENTRY32W = std::mem::zeroed();
         entry.dwSize = std::mem::size_of_val(&entry) as u32;
+        let mut path = vec![0u16; 32768];
         let mut more = Process32FirstW(snapshot, &mut entry);
         while more != 0 {
             let process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, entry.th32ProcessID);
             if !process.is_null() {
-                let mut path = vec![0u16; 32768];
                 let mut size = path.len() as u32;
                 if QueryFullProcessImageNameW(process, 0, path.as_mut_ptr(), &mut size) != 0 {
                     let detail = String::from_utf16_lossy(&path[..size as usize]);
@@ -98,7 +98,7 @@ pub fn processes() -> Result<Vec<ProcessItem>> {
     result.sort_by(|a, b| a.id.cmp(&b.id));
     result.dedup_by(|a, b| a.id == b.id);
     for process in &mut result {
-        process.icon = super::icons::icon(&process.detail);
+        process.icon = super::icons::get_app_icon(&process.detail);
     }
     Ok(result)
 }

@@ -9,3 +9,7 @@ export interface NativeProcess {
 export function getProcesses(): Promise<NativeProcess[]> {
 	return invoke('get_processes');
 }
+
+export function getRuleIcons(names: string[]): Promise<Record<string, string>> {
+	return invoke('get_rule_icons', { names });
+}

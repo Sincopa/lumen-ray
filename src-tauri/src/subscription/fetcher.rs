@@ -28,30 +28,31 @@ pub fn header_value_to_string(val: &reqwest::header::HeaderValue) -> Option<Stri
 }
 
 pub fn is_generic_subscription_filename(name: &str) -> bool {
-    let lower = name.trim().to_ascii_lowercase();
-    matches!(
-        lower.as_str(),
-        "config"
-            | "sub"
-            | "subscription"
-            | "subscriptions"
-            | "proxies"
-            | "proxy"
-            | "clash"
-            | "mihomo"
-            | "default"
-            | "data"
-            | "profile"
-            | "export"
-            | "all"
-            | "nodes"
-            | "servers"
-            | "vpn"
-            | "v2ray"
-            | "xray"
-            | "singbox"
-            | "sing-box"
-    )
+    let trimmed = name.trim();
+    [
+        "config",
+        "sub",
+        "subscription",
+        "subscriptions",
+        "proxies",
+        "proxy",
+        "clash",
+        "mihomo",
+        "default",
+        "data",
+        "profile",
+        "export",
+        "all",
+        "nodes",
+        "servers",
+        "vpn",
+        "v2ray",
+        "xray",
+        "singbox",
+        "sing-box",
+    ]
+    .iter()
+    .any(|&generic| trimmed.eq_ignore_ascii_case(generic))
 }
 
 fn clean_title(value: &str) -> Option<String> {
@@ -71,10 +72,13 @@ fn clean_title(value: &str) -> Option<String> {
         .take(80)
         .collect();
     let cleaned = cleaned.trim();
-    let lower = cleaned.to_ascii_lowercase();
     let suffix_length = [".yaml", ".yml", ".txt", ".json", ".conf"]
         .into_iter()
-        .find(|suffix| lower.ends_with(suffix))
+        .find(|suffix| {
+            cleaned
+                .get(cleaned.len().saturating_sub(suffix.len())..)
+                .is_some_and(|tail| tail.eq_ignore_ascii_case(suffix))
+        })
         .map(str::len)
         .unwrap_or(0);
     let cleaned = &cleaned[..cleaned.len() - suffix_length];
@@ -142,12 +146,16 @@ pub fn extract_title_from_body(body: &str) -> Option<String> {
             .map(str::trim);
         if let Some(content) = stripped {
             if let Some((k, v)) = content.split_once(':') {
-                let k_lower = k.trim().to_ascii_lowercase();
-                if k_lower == "profile-title"
-                    || k_lower == "subscription-title"
-                    || k_lower == "profile-name"
-                    || k_lower == "profile"
-                    || k_lower == "name"
+                let k_trimmed = k.trim();
+                if [
+                    "profile-title",
+                    "subscription-title",
+                    "profile-name",
+                    "profile",
+                    "name",
+                ]
+                .iter()
+                .any(|&candidate| k_trimmed.eq_ignore_ascii_case(candidate))
                 {
                     if let Some(title) = parse_profile_title(v.trim()) {
                         return Some(title);
@@ -169,12 +177,17 @@ pub fn parse_user_info(value: &str) -> Option<SubscriptionUserInfo> {
         let Ok(value) = value.trim().parse::<u64>() else {
             continue;
         };
-        match key.trim().to_ascii_lowercase().as_str() {
-            "upload" => info.upload = Some(value),
-            "download" => info.download = Some(value),
-            "total" => info.total = Some(value),
-            "expire" => info.expire = Some(value),
-            _ => continue,
+        let k = key.trim();
+        if k.eq_ignore_ascii_case("upload") {
+            info.upload = Some(value);
+        } else if k.eq_ignore_ascii_case("download") {
+            info.download = Some(value);
+        } else if k.eq_ignore_ascii_case("total") {
+            info.total = Some(value);
+        } else if k.eq_ignore_ascii_case("expire") {
+            info.expire = Some(value);
+        } else {
+            continue;
         }
         found = true;
     }
@@ -447,7 +460,11 @@ impl SubscriptionClient {
             return Err(BackendError::invalid());
         }
 
-        let mut body = Vec::new();
+        let capacity = response
+            .content_length()
+            .map(|n| (n as usize).min(MAX_BYTES))
+            .unwrap_or(0);
+        let mut body = Vec::with_capacity(capacity);
         while let Some(chunk) = response.chunk().await.map_err(|_| error())? {
             if body.len() + chunk.len() > MAX_BYTES {
                 return Err(BackendError::invalid());
@@ -474,17 +491,14 @@ impl SubscriptionClient {
 
 /// Helper function to check if a header exists case-insensitively and has value "true" or "1".
 fn has_header_flag(headers: &reqwest::header::HeaderMap, name: &str) -> bool {
-    for (key, val) in headers {
-        if key.as_str().eq_ignore_ascii_case(name) {
-            if let Ok(str_val) = val.to_str() {
-                let trimmed = str_val.trim();
-                if trimmed.eq_ignore_ascii_case("true") || trimmed == "1" {
-                    return true;
-                }
-            }
-        }
-    }
-    false
+    headers.get_all(name).iter().any(|val| {
+        val.to_str()
+            .map(|s| {
+                let trimmed = s.trim();
+                trimmed.eq_ignore_ascii_case("true") || trimmed == "1"
+            })
+            .unwrap_or(false)
+    })
 }
 
 #[allow(dead_code)]

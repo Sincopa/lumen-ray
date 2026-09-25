@@ -1,7 +1,11 @@
+<script module lang="ts">
+	const persistentRuleIconCache: Record<string, string> = {};
+</script>
+
 <script lang="ts">
 	import { onDestroy, onMount } from 'svelte';
 	import { runtime } from '../../runtime';
-	import { getProcesses } from '../../services/processes';
+	import { getProcesses, getRuleIcons } from '../../services/processes';
 	import { createDeferredTask } from '../../utils/deferredTask';
 	import { catalog } from '../../services';
 	import { errorCode } from '../../services/errors';
@@ -115,17 +119,70 @@
 		),
 	);
 
-	let processIcons = $state<Record<string, string>>({});
+	let processIcons = $state<Record<string, string>>({ ...persistentRuleIconCache });
+
+	function registerIcons(newIcons: Record<string, string>) {
+		let changed = false;
+		for (const [key, iconVal] of Object.entries(newIcons)) {
+			if (!iconVal) continue;
+			const lower = key.toLowerCase();
+			const stem = lower.replace(/\.exe$/i, '');
+			const base = formatRuleDisplayName(key).toLowerCase();
+			const baseStem = base.replace(/\.exe$/i, '');
+
+			for (const alias of [lower, stem, base, baseStem]) {
+				if (alias && persistentRuleIconCache[alias] !== iconVal) {
+					persistentRuleIconCache[alias] = iconVal;
+					changed = true;
+				}
+			}
+		}
+		if (changed) {
+			processIcons = { ...persistentRuleIconCache };
+		}
+	}
+
 	onMount(() => {
 		if (runtime.isTauri) {
 			void getProcesses().then((items) => {
 				const map: Record<string, string> = {};
 				for (const item of items) {
 					if (item.icon) {
-						map[item.name.toLowerCase()] = item.icon;
+						map[item.name] = item.icon;
+						if (item.detail) map[item.detail] = item.icon;
 					}
 				}
-				processIcons = map;
+				registerIcons(map);
+			});
+		}
+	});
+
+	$effect(() => {
+		if (!runtime.isTauri) return;
+		const appRules = $catalogStore.rules.filter(
+			(r) => (r.matcher ?? (r.isDomain ? 'domain' : 'application')) === 'application',
+		);
+		const needed = new Set<string>();
+		for (const r of appRules) {
+			const displayName = formatRuleDisplayName(r.name);
+			const base = displayName.toLowerCase();
+			const stem = base.replace(/\.exe$/i, '');
+			const full = r.name.toLowerCase();
+			if (
+				!processIcons[base] &&
+				!processIcons[stem] &&
+				!processIcons[full] &&
+				!persistentRuleIconCache[base] &&
+				!persistentRuleIconCache[stem] &&
+				!persistentRuleIconCache[full]
+			) {
+				needed.add(r.name);
+				needed.add(displayName);
+			}
+		}
+		if (needed.size > 0) {
+			void getRuleIcons(Array.from(needed)).then((icons) => {
+				registerIcons(icons);
 			});
 		}
 	});
@@ -142,7 +199,16 @@
 		const matcher = rule.matcher ?? (rule.isDomain ? 'domain' : 'application');
 		if (matcher !== 'application') return null;
 		const baseName = formatRuleDisplayName(rule.name).toLowerCase();
+		const stemName = baseName.replace(/\.exe$/i, '');
+		const fullName = rule.name.toLowerCase();
+
 		if (processIcons[baseName]) return processIcons[baseName];
+		if (processIcons[stemName]) return processIcons[stemName];
+		if (processIcons[fullName]) return processIcons[fullName];
+		if (persistentRuleIconCache[baseName]) return persistentRuleIconCache[baseName];
+		if (persistentRuleIconCache[stemName]) return persistentRuleIconCache[stemName];
+		if (persistentRuleIconCache[fullName]) return persistentRuleIconCache[fullName];
+
 		if (baseName.includes('chrome')) return chromeIcon;
 		if (baseName.includes('discord')) return discordIcon;
 		if (baseName.includes('yandex')) return yandexIcon;

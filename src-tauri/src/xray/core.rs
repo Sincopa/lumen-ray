@@ -61,7 +61,8 @@ fn prepare_files(runtime: &RuntimePaths, data: &Path, tunnel: bool) -> Result<Pa
         if matches!(name.as_str(), "geoip.dat" | "geosite.dat") {
             let source = crate::xray::geo::active_dir(data)?.join(&name);
             let bytes = std::fs::read(source).map_err(|_| error())?;
-            let valid = std::fs::read(&dest).is_ok_and(|existing| existing == bytes);
+            let valid = std::fs::metadata(&dest).is_ok_and(|m| m.len() == bytes.len() as u64)
+                && std::fs::read(&dest).is_ok_and(|existing| existing == bytes);
             if !valid {
                 crate::xray::updater::atomic_write(&dest, &bytes)?;
             }

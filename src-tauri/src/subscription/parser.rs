@@ -36,10 +36,10 @@ pub fn parse(input: &str, subscription: &str) -> Result<ParsedSubscription> {
     let entries: Vec<Result<VpnNode>> = if text.starts_with(['{', '[']) {
         let json: serde_json::Value =
             serde_json::from_str(text).map_err(|_| BackendError::invalid())?;
-        let roots = json
-            .as_array()
-            .cloned()
-            .unwrap_or_else(|| vec![json.clone()]);
+        let roots = match json {
+            serde_json::Value::Array(arr) => arr,
+            other => vec![other],
+        };
         let mut parsed_entries = Vec::new();
         for root in roots {
             if parsed_entries.len() >= MAX_NODES {

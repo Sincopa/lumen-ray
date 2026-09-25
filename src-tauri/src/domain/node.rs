@@ -14,7 +14,7 @@ pub enum Protocol {
 }
 
 /// Credentials never cross IPC. Only the encrypted repository persists this model.
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct VpnNode {
     pub id: String,
@@ -33,7 +33,7 @@ pub struct VpnNode {
     #[serde(default)]
     pub balancer: Option<BalancerOptions>,
 }
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct BalancerOptions {
     pub tag: String,
@@ -43,7 +43,7 @@ pub struct BalancerOptions {
     pub observatory: Option<serde_json::Value>,
     pub outbounds: Vec<serde_json::Value>,
 }
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct WireguardOptions {
     pub secret_key: String,
@@ -64,7 +64,7 @@ fn default_mtu() -> u16 {
 fn default_strategy() -> String {
     "ForceIP".into()
 }
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct WireguardPeer {
     pub endpoint: String,
@@ -76,7 +76,7 @@ pub struct WireguardPeer {
     #[serde(default, rename = "allowedIPs")]
     pub allowed_i_ps: Vec<String>,
 }
-#[derive(Clone, Serialize, Deserialize, Default)]
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct Transport {
     pub network: String,
@@ -89,7 +89,7 @@ pub struct Transport {
     #[serde(default)]
     pub header_type: String,
 }
-#[derive(Clone, Serialize, Deserialize, Default)]
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct Security {
     #[serde(default)]
@@ -149,12 +149,18 @@ impl VpnNode {
     }
     pub fn identify(&mut self) -> Result<()> {
         self.validate()?;
-        self.address = self.address.to_lowercase();
-        let mut identity = self.clone();
-        identity.name.clear();
-        identity.id.clear();
-        let bytes = serde_json::to_vec(&identity).map_err(|_| BackendError::invalid())?;
-        self.id = format!("{:x}", Sha256::digest(bytes));
+        if self.address.bytes().any(|b| b.is_ascii_uppercase())
+            || (!self.address.is_ascii() && self.address.chars().any(char::is_uppercase))
+        {
+            self.address = self.address.to_lowercase();
+        }
+        let saved_name = std::mem::take(&mut self.name);
+        self.id.clear();
+        let mut hasher = Sha256::new();
+        let res = serde_json::to_writer(&mut hasher, &*self);
+        self.name = saved_name;
+        res.map_err(|_| BackendError::invalid())?;
+        self.id = format!("{:x}", hasher.finalize());
         Ok(())
     }
 }

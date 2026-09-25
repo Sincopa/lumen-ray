@@ -2,32 +2,42 @@
 //! Persist only fixed diagnostic categories, never the original line or its fragments.
 use tokio::io::{AsyncRead, AsyncReadExt};
 
+fn contains_ignore_ascii_case(haystack: &[u8], needle: &[u8]) -> bool {
+    if needle.is_empty() {
+        return true;
+    }
+    haystack
+        .windows(needle.len())
+        .any(|window| window.eq_ignore_ascii_case(needle))
+}
+
 pub fn category(line: &[u8]) -> Option<&'static str> {
-    let text = String::from_utf8_lossy(line).to_ascii_lowercase();
-    if text.contains("unable to set routes") {
+    let has = |needle: &[u8]| contains_ignore_ascii_case(line, needle);
+    if has(b"unable to set routes") {
         Some("Windows tunnel route setup failed")
-    } else if text.contains("unable to set ips") {
+    } else if has(b"unable to set ips") {
         Some("Windows tunnel address setup failed")
-    } else if text.contains("unable to set dns") {
+    } else if has(b"unable to set dns") {
         Some("Windows tunnel DNS setup failed")
-    } else if text.contains("interface configuration failed") {
+    } else if has(b"interface configuration failed") {
         Some("Windows tunnel interface is not ready")
-    } else if text.contains("wintun")
-        || (text.contains("failed to start proxy") && text.contains("system cannot find the file specified")) {
+    } else if has(b"wintun")
+        || (has(b"failed to start proxy") && has(b"system cannot find the file specified"))
+    {
         Some("Wintun adapter startup failed")
-    } else if text.contains("address already in use") || text.contains("only one usage") {
+    } else if has(b"address already in use") || has(b"only one usage") {
         Some("local port already in use")
-    } else if text.contains("failed to start") {
+    } else if has(b"failed to start") {
         Some("startup failure")
-    } else if text.contains("certificate") {
+    } else if has(b"certificate") {
         Some("TLS certificate error")
-    } else if text.contains("timeout") || text.contains("deadline exceeded") {
+    } else if has(b"timeout") || has(b"deadline exceeded") {
         Some("network timeout")
-    } else if text.contains("refused") {
+    } else if has(b"refused") {
         Some("connection refused")
-    } else if text.contains("[error]") {
+    } else if has(b"[error]") {
         Some("core error (details withheld)")
-    } else if text.contains("[warning]") {
+    } else if has(b"[warning]") {
         Some("core warning (details withheld)")
     } else {
         None
@@ -35,21 +45,19 @@ pub fn category(line: &[u8]) -> Option<&'static str> {
 }
 
 pub struct CoreLogs {
-    tasks: Vec<tokio::task::JoinHandle<()>>,
+    task: tokio::task::JoinHandle<()>,
     last_category: std::sync::Arc<std::sync::Mutex<Option<&'static str>>>,
 }
 impl Drop for CoreLogs {
     fn drop(&mut self) {
-        for task in &self.tasks {
-            task.abort();
-        }
+        self.task.abort();
     }
 }
 impl CoreLogs {
     pub fn from_reader(reader: impl AsyncRead + Unpin + Send + 'static) -> Self {
         let last_category = std::sync::Arc::new(std::sync::Mutex::new(None));
         Self {
-            tasks: vec![tokio::spawn(drain(reader, last_category.clone()))],
+            task: tokio::spawn(drain(reader, last_category.clone())),
             last_category,
         }
     }
@@ -57,7 +65,10 @@ impl CoreLogs {
         self.last_category.lock().ok().and_then(|value| *value)
     }
 }
-async fn drain(mut output: impl AsyncRead + Unpin, last_category: std::sync::Arc<std::sync::Mutex<Option<&'static str>>>) {
+async fn drain(
+    mut output: impl AsyncRead + Unpin,
+    last_category: std::sync::Arc<std::sync::Mutex<Option<&'static str>>>,
+) {
     let mut buffer = [0u8; 4096];
     let mut line = Vec::with_capacity(4096);
     let mut last = std::time::Instant::now() - std::time::Duration::from_secs(1);
@@ -66,20 +77,20 @@ async fn drain(mut output: impl AsyncRead + Unpin, last_category: std::sync::Arc
             Ok(0) | Err(_) => break,
             Ok(count) => count,
         };
-        for byte in &buffer[..count] {
-            if *byte == b'\n' {
-                if let Some(category) = category(&line) {
-                    if let Ok(mut value) = last_category.lock() { *value = Some(category); }
-                }
-                if last.elapsed().as_secs() >= 1 {
-                    if let Some(category) = category(&line) {
-                        log::warn!("Xray: {category}");
+        for &byte in &buffer[..count] {
+            if byte == b'\n' {
+                if let Some(cat) = category(&line) {
+                    if let Ok(mut value) = last_category.lock() {
+                        *value = Some(cat);
+                    }
+                    if last.elapsed().as_secs() >= 1 {
+                        log::warn!("Xray: {cat}");
                         last = std::time::Instant::now();
                     }
                 }
                 line.clear();
             } else if line.len() < 4096 {
-                line.push(*byte);
+                line.push(byte);
             }
         }
     }

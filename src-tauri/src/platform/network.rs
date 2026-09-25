@@ -9,6 +9,27 @@ use windows_sys::Win32::{
     Networking::WinSock::{AF_INET, AF_INET6, AF_UNSPEC, SOCKADDR_IN, SOCKADDR_IN6},
 };
 
+const LUMEN_TUN_ALIAS: [u16; 9] = [
+    b'L' as u16,
+    b'u' as u16,
+    b'm' as u16,
+    b'e' as u16,
+    b'n' as u16,
+    b'T' as u16,
+    b'u' as u16,
+    b'n' as u16,
+    0,
+];
+
+fn tunnel_luid() -> Option<NET_LUID_LH> {
+    let mut luid: NET_LUID_LH = unsafe { std::mem::zeroed() };
+    if unsafe { ConvertInterfaceAliasToLuid(LUMEN_TUN_ALIAS.as_ptr(), &mut luid) } == 0 {
+        Some(luid)
+    } else {
+        None
+    }
+}
+
 /// DNS configured on the active physical adapter, before creating LumenTun.
 /// Do not silently replace the user's system resolver with a public provider.
 pub fn system_dns() -> crate::domain::errors::Result<Vec<String>> {
@@ -41,46 +62,51 @@ pub fn system_dns() -> crate::domain::errors::Result<Vec<String>> {
         unsafe {
             while !adapter.is_null() {
                 let entry = &*adapter;
-                let mut servers = Vec::new();
-                let mut dns = entry.FirstDnsServerAddress;
-                while !dns.is_null() {
-                    let address = (*dns).Address.lpSockaddr;
-                    if !address.is_null() {
-                        let ip = match (*address).sa_family {
-                            AF_INET => Some(std::net::IpAddr::V4(std::net::Ipv4Addr::from(
-                                (*(address.cast::<SOCKADDR_IN>()))
-                                    .sin_addr
-                                    .S_un
-                                    .S_addr
-                                    .to_ne_bytes(),
-                            ))),
-                            AF_INET6 => Some(std::net::IpAddr::V6(std::net::Ipv6Addr::from(
-                                (*(address.cast::<SOCKADDR_IN6>())).sin6_addr.u.Byte,
-                            ))),
-                            _ => None,
-                        };
-                        if let Some(ip) = ip.filter(|ip| !ip.is_unspecified()) {
-                            servers.push(ip.to_string());
-                        }
-                    }
-                    dns = (*dns).Next;
-                }
-                let name = if entry.FriendlyName.is_null() {
-                    String::new()
-                } else {
-                    let len = (0..256)
-                        .find(|&i| *entry.FriendlyName.add(i) == 0)
-                        .unwrap_or(256);
-                    String::from_utf16_lossy(std::slice::from_raw_parts(entry.FriendlyName, len))
-                };
+                let metric = entry.Ipv4Metric;
                 if entry.OperStatus == IfOperStatusUp
-                    && !name.to_ascii_lowercase().contains("lumentun")
                     && !entry.FirstGatewayAddress.is_null()
-                    && !servers.is_empty()
+                    && !entry.FirstDnsServerAddress.is_null()
+                    && best.as_ref().is_none_or(|(previous, _)| metric < *previous)
                 {
-                    let metric = entry.Ipv4Metric;
-                    if best.as_ref().is_none_or(|(previous, _)| metric < *previous) {
-                        best = Some((metric, servers));
+                    let name = if entry.FriendlyName.is_null() {
+                        String::new()
+                    } else {
+                        let len = (0..256)
+                            .find(|&i| *entry.FriendlyName.add(i) == 0)
+                            .unwrap_or(256);
+                        String::from_utf16_lossy(std::slice::from_raw_parts(
+                            entry.FriendlyName,
+                            len,
+                        ))
+                    };
+                    if !name.to_ascii_lowercase().contains("lumentun") {
+                        let mut servers = Vec::new();
+                        let mut dns = entry.FirstDnsServerAddress;
+                        while !dns.is_null() {
+                            let address = (*dns).Address.lpSockaddr;
+                            if !address.is_null() {
+                                let ip = match (*address).sa_family {
+                                    AF_INET => Some(std::net::IpAddr::V4(std::net::Ipv4Addr::from(
+                                        (*(address.cast::<SOCKADDR_IN>()))
+                                            .sin_addr
+                                            .S_un
+                                            .S_addr
+                                            .to_ne_bytes(),
+                                    ))),
+                                    AF_INET6 => Some(std::net::IpAddr::V6(std::net::Ipv6Addr::from(
+                                        (*(address.cast::<SOCKADDR_IN6>())).sin6_addr.u.Byte,
+                                    ))),
+                                    _ => None,
+                                };
+                                if let Some(ip) = ip.filter(|ip| !ip.is_unspecified()) {
+                                    servers.push(ip.to_string());
+                                }
+                            }
+                            dns = (*dns).Next;
+                        }
+                        if !servers.is_empty() {
+                            best = Some((metric, servers));
+                        }
                     }
                 }
                 adapter = entry.Next;
@@ -95,12 +121,10 @@ pub fn tunnel_ready() -> bool {
     tunnel_route_exists(AF_INET)
 }
 fn tunnel_route_exists(family: u16) -> bool {
+    let Some(luid) = tunnel_luid() else {
+        return false;
+    };
     unsafe {
-        let name: Vec<u16> = "LumenTun".encode_utf16().chain(Some(0)).collect();
-        let mut luid: NET_LUID_LH = std::mem::zeroed();
-        if ConvertInterfaceAliasToLuid(name.as_ptr(), &mut luid) != 0 {
-            return false;
-        }
         let mut table = std::ptr::null_mut();
         if GetIpForwardTable2(family, &mut table) != 0 || table.is_null() {
             return false;
@@ -120,11 +144,13 @@ pub fn standby_isolated() -> bool {
     use windows_sys::Win32::NetworkManagement::IpHelper::{
         GetIpInterfaceEntry, InitializeIpInterfaceEntry, MIB_IPINTERFACE_ROW,
     };
-    if tunnel_route_exists(AF_INET) || tunnel_route_exists(AF_INET6) { return false; }
+    if tunnel_route_exists(AF_INET) || tunnel_route_exists(AF_INET6) {
+        return false;
+    }
+    let Some(luid) = tunnel_luid() else {
+        return false;
+    };
     unsafe {
-        let name: Vec<u16> = "LumenTun".encode_utf16().chain(Some(0)).collect();
-        let mut luid: NET_LUID_LH = std::mem::zeroed();
-        if ConvertInterfaceAliasToLuid(name.as_ptr(), &mut luid) != 0 { return false; }
         [AF_INET, AF_INET6].into_iter().all(|family| {
             let mut interface = MIB_IPINTERFACE_ROW::default();
             InitializeIpInterfaceEntry(&mut interface);
@@ -142,12 +168,10 @@ pub fn tunnel_adapter_ready() -> bool {
     use windows_sys::Win32::NetworkManagement::IpHelper::{
         GetIpInterfaceEntry, InitializeIpInterfaceEntry, MIB_IPINTERFACE_ROW,
     };
+    let Some(luid) = tunnel_luid() else {
+        return false;
+    };
     unsafe {
-        let name: Vec<u16> = "LumenTun".encode_utf16().chain(Some(0)).collect();
-        let mut luid: NET_LUID_LH = std::mem::zeroed();
-        if ConvertInterfaceAliasToLuid(name.as_ptr(), &mut luid) != 0 {
-            return false;
-        }
         let mut row = MIB_IPINTERFACE_ROW::default();
         InitializeIpInterfaceEntry(&mut row);
         row.Family = AF_INET;
@@ -171,11 +195,8 @@ impl TunnelRoutes {
             GetIpInterfaceEntry, InitializeIpInterfaceEntry, MIB_IPINTERFACE_ROW,
             SetIpInterfaceEntry,
         };
-        let name: Vec<u16> = "LumenTun".encode_utf16().chain(Some(0)).collect();
-        let mut luid: NET_LUID_LH = Default::default();
-        if unsafe { ConvertInterfaceAliasToLuid(name.as_ptr(), &mut luid) } != 0 {
-            return Err(BackendError::new("TUN_FAILED", "Tunnel adapter is unavailable"));
-        }
+        let luid = tunnel_luid()
+            .ok_or_else(|| BackendError::new("TUN_FAILED", "Tunnel adapter is unavailable"))?;
         // Windows also uses interface priority when choosing DNS and application
         // sockets. A prepared adapter must rank behind the physical network.
         for family in [AF_INET, AF_INET6] {
@@ -298,12 +319,8 @@ pub fn verify_tunnel_routes() -> crate::domain::errors::Result<()> {
             "Another network route bypasses Lumen. Disconnect the other VPN and retry",
         )
     };
+    let luid = tunnel_luid().ok_or_else(error)?;
     unsafe {
-        let name: Vec<u16> = "LumenTun".encode_utf16().chain(Some(0)).collect();
-        let mut luid: NET_LUID_LH = std::mem::zeroed();
-        if ConvertInterfaceAliasToLuid(name.as_ptr(), &mut luid) != 0 {
-            return Err(error());
-        }
         for ip in [
             std::net::Ipv4Addr::new(1, 1, 1, 1),
             std::net::Ipv4Addr::new(8, 8, 8, 8),

@@ -91,7 +91,10 @@ if ($Mode -eq 'All' -or $Mode -eq 'Installer') {
 # 2. Package Windows Portable (.zip)
 if ($Mode -eq 'All' -or $Mode -eq 'Portable') {
     Write-Host '[3/3] Creating Windows Portable (.zip)...' -ForegroundColor Green
-    $targetExe = Join-Path $root 'src-tauri/target/release/Lumen Ray.exe'
+    $targetExe = Join-Path $root 'src-tauri/target/release/Lumen.exe'
+    if (-not (Test-Path -LiteralPath $targetExe)) {
+        $targetExe = Join-Path $root 'src-tauri/target/release/app.exe'
+    }
     if (-not (Test-Path -LiteralPath $targetExe)) {
         $fallbackCandidates = Get-ChildItem -LiteralPath (Join-Path $root 'src-tauri/target/release') -Filter '*.exe' | Where-Object { $_.Name -match '^(Lumen|app)' }
         if ($fallbackCandidates) {
@@ -102,14 +105,14 @@ if ($Mode -eq 'All' -or $Mode -eq 'Portable') {
     }
 
     $scratchDir = Join-Path ([IO.Path]::GetTempPath()) "lumen-portable-build-$([guid]::NewGuid().ToString('N'))"
-    $portableAppDir = Join-Path $scratchDir 'Lumen Ray'
+    $portableAppDir = Join-Path $scratchDir 'Lumen'
     $portableRuntimeDir = Join-Path $portableAppDir 'runtime'
 
     try {
         New-Item -ItemType Directory -Force -Path $portableRuntimeDir | Out-Null
 
         # Copy main executable as "Lumen Ray.exe"
-        Copy-Item -LiteralPath $targetExe -Destination (Join-Path $portableAppDir 'Lumen Ray.exe') -Force
+        Copy-Item -LiteralPath $targetExe -Destination (Join-Path $portableAppDir 'Lumen.exe') -Force
 
         # Copy runtime directory layout cleanly (xray, drivers, licenses)
         Copy-Item -LiteralPath (Join-Path $runtimeRoot 'xray') -Destination (Join-Path $portableRuntimeDir 'xray') -Recurse -Force

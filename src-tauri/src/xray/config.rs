@@ -184,29 +184,32 @@ pub fn build(
     } else { vec![] };
     // System/private resolvers stay reachable on the physical network. Explicit public
     // resolvers use the selected VPN, including balancers. This tag precedes self/LAN.
-    let dns = if repo.routing_mode == "rules" {
+    let dns = if tun || repo.routing_mode == "rules" {
         let local = repo.settings.dns_server == "system" || dns_servers.iter().any(|s| {
             s.parse::<std::net::IpAddr>().is_ok_and(|ip| match ip {
                 std::net::IpAddr::V4(ip) => ip.is_private() || ip.is_loopback() || ip.is_link_local(),
                 std::net::IpAddr::V6(ip) => ip.is_loopback() || ip.is_unique_local() || ip.is_unicast_link_local(),
             })
         });
-        rules.insert(0, if local {
-            json!({"type":"field","inboundTag":["dns-query"],"outboundTag":"direct"})
-        } else { json!({"type":"field","inboundTag":["dns-query"],target_field:target_tag}) });
+        if tun || repo.routing_mode == "rules" {
+            rules.insert(0, if local {
+                json!({"type":"field","inboundTag":["dns-query"],"outboundTag":"direct"})
+            } else { json!({"type":"field","inboundTag":["dns-query"],target_field:target_tag}) });
+        }
         let servers: Vec<_> = dns_servers.iter().map(|s| if s.contains(':') { format!("tcp://[{s}]") } else { format!("tcp://{s}") }).collect();
         Some(json!({"tag":"dns-query","servers":servers}))
     } else { None };
     // Hijack A/AAAA before LAN bypass, including queries originally sent to a local router.
-    if repo.routing_mode == "rules" {
+    if tun || repo.routing_mode == "rules" {
         outbounds.push(json!({"tag":"dns","protocol":"dns"}));
+    }
+    if repo.routing_mode == "rules" {
         rules.push(json!({"type":"field","port":"53","outboundTag":"dns"}));
     }
     if repo.settings.bypass_lan {
         rules.push(json!({"type":"field","ip":["127.0.0.0/8","10.0.0.0/8","172.16.0.0/12","192.168.0.0/16","169.254.0.0/16","::1/128","fc00::/7","fe80::/10"],"outboundTag":"direct"}));
     }
-    if repo.routing_mode == "rules" {
-        for rule in crate::services::catalog_service::ordered_rules(&repo.rules) {
+    for rule in crate::services::catalog_service::ordered_rules(&repo.rules) {
             let target = if ["direct", "block"].contains(&rule.server_id.as_str()) {
                 rule.server_id.clone()
             } else if rule.server_id == "subscription"
@@ -235,7 +238,7 @@ pub fn build(
             };
             // Keep an outbound available when its rule is temporarily disabled,
             // so re-enabling it only replaces routing rules through the live API.
-            if !rule.enabled { continue; }
+            if !rule.enabled || repo.routing_mode != "rules" { continue; }
             let is_balancer_target = balancer_tag.as_deref() == Some(&target);
             let mut compiled = if is_balancer_target {
                 json!({"type":"field","balancerTag":target})
@@ -289,8 +292,6 @@ pub fn build(
                 }
             }
             rules.push(compiled);
-        }
-
     }
     let default_field = if repo.routing_mode == "rules" || balancer_tag.is_none() {
         "outboundTag"
@@ -313,9 +314,9 @@ pub fn build(
         inbounds.push(json!({"tag":"tun","protocol":"tun","settings":{"name":"LumenTun","mtu":1500,"gateway":["172.31.255.1/30","fd42:6c75:6d65::1/126"],"dns":dns_servers,"autoSystemRoutingTable":["0.0.0.0/0","::/0"],"autoOutboundsInterface":"auto"},"sniffing":{"enabled":true,"destOverride":["http","tls","quic"],"routeOnly":true}}));
     }
 
-    // IPIfNonMatch never reaches its DNS pass when the catch-all matches.
-    // Keep global mode unchanged; in rules mode resolve when an IP matcher needs it.
-    let mut routing = json!({"domainStrategy":if repo.routing_mode == "rules" { "IPOnDemand" } else { "IPIfNonMatch" },"rules":rules});
+    // TUN keeps one router strategy in both modes so its rules can change
+    // without tearing down the adapter. The global catch-all still selects VPN.
+    let mut routing = json!({"domainStrategy":if tun || repo.routing_mode == "rules" { "IPOnDemand" } else { "IPIfNonMatch" },"rules":rules});
     if let Some(balancer) = &node.balancer {
         routing["balancers"] = json!([{
             "tag": balancer.tag,

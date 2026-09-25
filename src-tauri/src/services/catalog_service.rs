@@ -102,54 +102,65 @@ fn format_bytes(bytes: u64) -> String {
     }
 }
 fn clean_name(name: &str) -> String {
-    let s = name.trim();
-    let chars: Vec<char> = s.chars().collect();
-    let mut i = 0;
-    while i < chars.len() {
-        if chars[i].is_whitespace() {
-            i += 1;
+    let mut chars = name.trim().chars();
+    loop {
+        let rest = chars.as_str();
+        let Some(c1) = chars.next() else {
+            break;
+        };
+        if c1.is_whitespace() || c1 == '\u{1f3f3}' || c1 == '\u{fe0f}' {
             continue;
         }
-        if i + 1 < chars.len()
-            && ('\u{1f1e6}'..='\u{1f1ff}').contains(&chars[i])
-            && ('\u{1f1e6}'..='\u{1f1ff}').contains(&chars[i + 1])
-        {
-            i += 2;
-            continue;
+        if ('\u{1f1e6}'..='\u{1f1ff}').contains(&c1) {
+            let mut lookahead = chars.clone();
+            if let Some(c2) = lookahead.next() {
+                if ('\u{1f1e6}'..='\u{1f1ff}').contains(&c2) {
+                    chars = lookahead;
+                    continue;
+                }
+            }
         }
-        if chars[i] == '\u{1f3f3}' || chars[i] == '\u{fe0f}' {
-            i += 1;
-            continue;
+        let trimmed = rest.trim();
+        if trimmed.starts_with("Белые Списки / ") {
+            let without_flags: String = trimmed
+                .chars()
+                .filter(|c| !('\u{1f1e6}'..='\u{1f1ff}').contains(c))
+                .collect();
+            return without_flags.trim().to_string();
         }
-        break;
+        return trimmed.to_string();
     }
-    let res: String = chars[i..].iter().collect();
-    let trimmed = res.trim();
-    if trimmed.starts_with("Белые Списки / ") {
-        let without_flags: String = trimmed
-            .chars()
-            .filter(|c| !('\u{1f1e6}'..='\u{1f1ff}').contains(c))
-            .collect();
-        without_flags.trim().to_string()
-    } else {
-        trimmed.to_string()
-    }
+    String::new()
 }
 fn country(name: &str) -> String {
-    let chars: Vec<_> = name.chars().collect();
     // Look for the LAST pair of Regional Indicator Symbols (country flag emoji).
     // Some names start with 🏳️ (white flag) before the real country flag,
     // or contain multiple flags — prefer the last actual country flag found.
-    let mut result = String::new();
-    for pair in chars.windows(2) {
-        if pair.iter().all(|c| ('\u{1f1e6}'..='\u{1f1ff}').contains(c)) {
-            result = pair
-                .iter()
-                .filter_map(|c| char::from_u32(*c as u32 - 0x1f1e6 + 'a' as u32))
-                .collect();
+    let mut last_pair: Option<(char, char)> = None;
+    let mut prev: Option<char> = None;
+    for c in name.chars() {
+        if ('\u{1f1e6}'..='\u{1f1ff}').contains(&c) {
+            if let Some(p) = prev {
+                if let (Some(a), Some(b)) = (
+                    char::from_u32(p as u32 - 0x1f1e6 + 'a' as u32),
+                    char::from_u32(c as u32 - 0x1f1e6 + 'a' as u32),
+                ) {
+                    last_pair = Some((a, b));
+                }
+            }
+            prev = Some(c);
+        } else {
+            prev = None;
         }
     }
-    result
+    if let Some((a, b)) = last_pair {
+        let mut result = String::with_capacity(2);
+        result.push(a);
+        result.push(b);
+        result
+    } else {
+        String::new()
+    }
 }
 #[derive(Deserialize)]
 #[serde(

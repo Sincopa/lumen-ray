@@ -11,10 +11,17 @@ use std::collections::BTreeMap;
 use url::Url;
 
 pub fn decode(input: &str) -> Result<String> {
-    let input: String = input.chars().filter(|c| !c.is_whitespace()).collect();
+    let trimmed = input.trim();
+    let filtered: String;
+    let clean = if trimmed.chars().any(char::is_whitespace) {
+        filtered = trimmed.chars().filter(|c| !c.is_whitespace()).collect();
+        filtered.as_str()
+    } else {
+        trimmed
+    };
     [STANDARD, STANDARD_NO_PAD, URL_SAFE, URL_SAFE_NO_PAD]
         .iter()
-        .find_map(|engine| engine.decode(&input).ok())
+        .find_map(|engine| engine.decode(clean).ok())
         .and_then(|bytes| String::from_utf8(bytes).ok())
         .ok_or_else(BackendError::invalid)
 }
@@ -29,14 +36,19 @@ pub fn parse(input: &str, subscription: &str) -> Result<VpnNode> {
     if let Some(encoded) = input.strip_prefix("vmess://") {
         return vmess(encoded, subscription);
     }
-    let mut normalized = input.to_owned();
-    if let Some(encoded) = input.strip_prefix("ss://") {
+    let ss_decoded: String;
+    let normalized = if let Some(encoded) = input.strip_prefix("ss://") {
         if !encoded.contains('@') {
             let (body, fragment) = encoded.split_once('#').unwrap_or((encoded, ""));
-            normalized = format!("ss://{}#{}", decode(body)?, fragment);
+            ss_decoded = format!("ss://{}#{}", decode(body)?, fragment);
+            ss_decoded.as_str()
+        } else {
+            input
         }
-    }
-    let url = Url::parse(&normalized).map_err(|_| BackendError::invalid())?;
+    } else {
+        input
+    };
+    let url = Url::parse(normalized).map_err(|_| BackendError::invalid())?;
     let protocol = match url.scheme() {
         "vless" => Protocol::Vless,
         "trojan" => Protocol::Trojan,
@@ -48,6 +60,7 @@ pub fn parse(input: &str, subscription: &str) -> Result<VpnNode> {
         .query_pairs()
         .map(|(k, v)| (k.into_owned(), v.into_owned()))
         .collect();
+    let q_str = |key: &str| query.get(key).map(String::as_str).unwrap_or_default();
     let q = |key: &str| query.get(key).cloned().unwrap_or_default();
     // Unknown knobs must not silently weaken security or change the requested transport.
     const KEYS: &[&str] = &[
@@ -73,10 +86,10 @@ pub fn parse(input: &str, subscription: &str) -> Result<VpnNode> {
     if query.keys().any(|k| !KEYS.contains(&k.as_str()))
         || ["allowInsecure", "insecure"]
             .iter()
-            .any(|k| ["1", "true"].contains(&q(k).as_str()))
-        || (!matches!(q("type").as_str(), "kcp" | "mkcp")
-            && !["", "none"].contains(&q("headerType").as_str()))
-        || !["", "none"].contains(&q("encryption").as_str())
+            .any(|k| ["1", "true"].contains(&q_str(k)))
+        || (!matches!(q_str("type"), "kcp" | "mkcp")
+            && !["", "none"].contains(&q_str("headerType")))
+        || !["", "none"].contains(&q_str("encryption"))
     {
         return Err(BackendError::unsupported());
     }
@@ -143,7 +156,7 @@ pub fn parse(input: &str, subscription: &str) -> Result<VpnNode> {
             fingerprint: q("fp"),
             public_key: q("pbk"),
             short_id: q("sid"),
-            alpn: q("alpn")
+            alpn: q_str("alpn")
                 .split(',')
                 .filter(|s| !s.is_empty())
                 .map(str::to_owned)
@@ -163,9 +176,16 @@ fn vmess(input: &str, subscription: &str) -> Result<VpnNode> {
             .or_else(|| value[k].as_u64().map(|n| n.to_string()))
             .unwrap_or_default()
     };
-    if !["", "0"].contains(&s("aid").as_str()) || !["", "none"].contains(&s("type").as_str()) {
+    let aid = s("aid");
+    let vtype = s("type");
+    if !["", "0"].contains(&aid.as_str()) || !["", "none"].contains(&vtype.as_str()) {
         return Err(BackendError::unsupported());
     }
+    let scy = s("scy");
+    let net = s("net");
+    let path = s("path");
+    let tls = s("tls");
+    let alpn_raw = s("alpn");
     let mut node = VpnNode {
         wireguard: None,
         balancer: None,
@@ -176,33 +196,21 @@ fn vmess(input: &str, subscription: &str) -> Result<VpnNode> {
         port: s("port").parse().map_err(|_| BackendError::invalid())?,
         protocol: Protocol::Vmess,
         credential: s("id"),
-        method: if s("scy").is_empty() {
-            "auto".into()
-        } else {
-            s("scy")
-        },
+        method: if scy.is_empty() { "auto".into() } else { scy },
         flow: String::new(),
         transport: Transport {
-            network: if s("net").is_empty() {
-                "raw".into()
-            } else {
-                s("net")
-            },
-            path: s("path"),
+            network: if net.is_empty() { "raw".into() } else { net },
+            service_name: path.clone(),
+            path,
             host: s("host"),
-            service_name: s("path"),
             mode: String::new(),
             ..Transport::default()
         },
         security: Security {
-            kind: if s("tls").is_empty() {
-                "none".into()
-            } else {
-                s("tls")
-            },
+            kind: if tls.is_empty() { "none".into() } else { tls },
             server_name: s("sni"),
             fingerprint: s("fp"),
-            alpn: s("alpn")
+            alpn: alpn_raw
                 .split(',')
                 .filter(|s| !s.is_empty())
                 .map(str::to_owned)

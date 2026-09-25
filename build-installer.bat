@@ -32,6 +32,7 @@ if not exist "node_modules\" (
         echo [ERROR] npm install failed.
         pause
         exit /b 1
+    )
 )
 
 powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0scripts\build-release.ps1" -Mode Installer

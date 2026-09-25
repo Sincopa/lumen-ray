@@ -134,7 +134,11 @@ pub async fn prepare(version: &str, directory: &Path) -> Result<PathBuf> {
                 .map_err(|_| error())?
                 .error_for_status()
                 .map_err(|_| error())?;
-            let mut bytes = Vec::new();
+            let capacity = response
+                .content_length()
+                .and_then(|len| usize::try_from(len).ok())
+                .map_or(0, |len| len.min(MAX_ARCHIVE));
+            let mut bytes = Vec::with_capacity(capacity);
             while let Some(chunk) = response.chunk().await.map_err(|_| error())? {
                 if bytes.len() + chunk.len() > MAX_ARCHIVE {
                     return Err(error());

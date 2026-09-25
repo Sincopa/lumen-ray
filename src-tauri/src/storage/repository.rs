@@ -10,7 +10,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Subscription {
     pub id: String,
@@ -46,25 +46,35 @@ pub fn is_valid_geo_tag(tag: &str) -> bool {
 
 pub fn normalize_geo_tag(tag: &str, expected_kind: &str) -> Result<String> {
     let trimmed = tag.trim();
-    if expected_kind == "geosite" && trimmed.to_lowercase().starts_with("geoip:") {
+    if expected_kind == "geosite"
+        && trimmed
+            .get(..6)
+            .is_some_and(|p| p.eq_ignore_ascii_case("geoip:"))
+    {
         return Err(BackendError::new(
             "INVALID_RULE",
             "Mismatched geoip prefix in geosite rule",
         ));
     }
-    if expected_kind == "geoip" && trimmed.to_lowercase().starts_with("geosite:") {
+    if expected_kind == "geoip"
+        && trimmed
+            .get(..8)
+            .is_some_and(|p| p.eq_ignore_ascii_case("geosite:"))
+    {
         return Err(BackendError::new(
             "INVALID_RULE",
             "Mismatched geosite prefix in geoip rule",
         ));
     }
-    let prefix = format!("{expected_kind}:");
-    let normalized =
-        if trimmed.len() >= prefix.len() && trimmed[..prefix.len()].eq_ignore_ascii_case(&prefix) {
-            trimmed[prefix.len()..].trim()
-        } else {
-            trimmed
-        };
+    let normalized = if trimmed
+        .get(..expected_kind.len())
+        .is_some_and(|p| p.eq_ignore_ascii_case(expected_kind))
+        && trimmed.as_bytes().get(expected_kind.len()) == Some(&b':')
+    {
+        trimmed[expected_kind.len() + 1..].trim()
+    } else {
+        trimmed
+    };
     if !is_valid_geo_tag(normalized) {
         return Err(BackendError::new(
             "INVALID_RULE",
@@ -148,7 +158,7 @@ fn default_server_selection() -> String {
     "manual".to_string()
 }
 
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Settings {
     pub network_mode: String,
@@ -204,7 +214,7 @@ impl Default for Settings {
         }
     }
 }
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Repository {
     pub version: u32,

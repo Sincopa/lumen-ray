@@ -117,9 +117,12 @@ fn launch(id: String) -> Result<ProcessHandle> {
         Ok(ProcessHandle(info.hProcess))
     }
 }
+
+#[allow(dead_code)]
 pub async fn start(request: StartTunnel, data: &std::path::Path) -> Result<Helper> {
     start_internal(request, data, false).await
 }
+
 pub async fn start_standby(request: StartTunnel, data: &std::path::Path) -> Result<Helper> {
     start_internal(request, data, true).await
 }
