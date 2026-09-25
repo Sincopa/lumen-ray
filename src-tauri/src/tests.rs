@@ -141,6 +141,15 @@ async fn bundled_core_validation() {
     let bytes =
         serde_json::to_vec(&config::build(&repo, &node.id, 10808, 10809, false).unwrap()).unwrap();
     vpn_service::validate(&path, &bytes).await.unwrap();
+    #[cfg(windows)]
+    {
+        let standby = config::build_standby(&repo, &node.id, 10808, 10809).unwrap();
+        let value = serde_json::to_value(&standby).unwrap();
+        let tun = value["inbounds"].as_array().unwrap().iter()
+            .find(|inbound| inbound["protocol"] == "tun").unwrap();
+        assert!(tun["settings"].get("autoSystemRoutingTable").is_none());
+        vpn_service::validate(&path, &serde_json::to_vec(&standby).unwrap()).await.unwrap();
+    }
     assert!(vpn_service::validate(&path, b"{invalid").await.is_err());
     let advanced = [
         "hysteria2://test-password@example.com:443?sni=example.com".to_owned(),
@@ -247,6 +256,29 @@ fn ip_rules_and_default_direct() {
     }
     repo.rules[0].name = "203.0.113.0/99".into();
     assert!(config::build(&repo, &node.id, 10808, 10809, true).is_err());
+}
+#[cfg(windows)]
+#[test]
+fn disabling_a_rule_can_replace_live_routing_without_restarting_tun() {
+    use crate::storage::repository::{Rule, RuleMatcher};
+    let node = uri::parse(VLESS, "sub").unwrap();
+    let mut before = Repository {
+        nodes: vec![node.clone()], routing_mode: "rules".into(), ..Default::default()
+    };
+    before.rules.push(Rule {
+        id: "steam".into(), name: "steam.exe".into(), matcher: RuleMatcher::Application,
+        server_id: "subscription".into(), enabled: true, preset_id: None, is_domain: false,
+    });
+    let mut after = before.clone();
+    after.rules[0].enabled = false;
+    let patch = config::live_routing_patch(&before, &after, &node.id).unwrap().unwrap();
+    assert!(!patch["routing"]["rules"].as_array().unwrap().iter().any(|rule|
+        rule["process"].as_array().is_some_and(|processes|
+            processes.iter().any(|process| process == "steam.exe"))));
+    assert!(config::live_routing_patch(&after, &before, &node.id).unwrap().is_some());
+    let mut removed = before.clone();
+    removed.rules.clear();
+    assert!(config::live_routing_patch(&before, &removed, &node.id).unwrap().is_some());
 }
 #[test]
 fn balanced_xray_subscription_and_clean_names() {

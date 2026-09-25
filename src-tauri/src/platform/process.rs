@@ -92,6 +92,9 @@ impl Drop for Attributes {
     }
 }
 impl CoreProcess {
+    pub fn diagnostic_category(&self) -> Option<&'static str> {
+        self._logs.as_ref().and_then(crate::diagnostics::CoreLogs::last_category)
+    }
     pub async fn spawn(core: &Path, config: &[u8]) -> Result<Self> {
         let (mut process, input, output) = Self::launch(core)?;
         process._logs = Some(crate::diagnostics::CoreLogs::from_reader(

@@ -25,7 +25,7 @@ pub struct AppState {
     _instance: std::fs::File,
 }
 impl AppState {
-    pub fn open(data: PathBuf, resources: PathBuf) -> Result<Arc<Self>> {
+    pub fn open(data: PathBuf, resources: impl Into<crate::runtime::RuntimePaths>) -> Result<Arc<Self>> {
         use crate::domain::errors::BackendError;
         std::fs::create_dir_all(&data).map_err(|_| {
             BackendError::new("STORAGE_FAILED", "Cannot create application directory")
@@ -43,7 +43,7 @@ impl AppState {
         let repository = store.load()?;
         #[cfg(windows)]
         crate::platform::proxy::SystemProxy::recover(&data)?;
-        let core = crate::xray::core::prepare(&resources, &data)?;
+        let core = crate::xray::core::prepare(resources.into(), &data)?;
         let device_identity = Arc::new(
             crate::platform::device_identity::DeviceIdentityManager::new(
                 data.join("identity.dpapi"),

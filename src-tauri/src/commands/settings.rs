@@ -107,6 +107,9 @@ pub async fn set_settings(
             }
             return Err(error);
         }
+    } else {
+        let warm_state = state.inner().clone();
+        tauri::async_runtime::spawn(async move { crate::services::vpn_service::prewarm(&warm_state).await; });
     }
     Ok(SettingsDto {
         settings,

@@ -34,7 +34,9 @@ pub fn monitor(state: Arc<AppState>, app: tauri::AppHandle) {
                         failed_id = active_id.clone();
                         let _=stop(&mut session).await;
                         *state.traffic.write().await=Default::default();
-                        publish(&state,&app,Snapshot{status:"error".into(),info:None,error:Some(BackendError::new("CORE_CRASHED","Tunnel helper stopped unexpectedly"))}).await;
+                        if active_id.is_some() {
+                            publish(&state,&app,Snapshot{status:"error".into(),info:None,error:Some(BackendError::new("CORE_CRASHED","Tunnel helper stopped unexpectedly"))}).await;
+                        }
                     }
                     if let Some(child)=session.child.as_mut(){
                         if let Ok(Some(exit))=child.try_wait(){

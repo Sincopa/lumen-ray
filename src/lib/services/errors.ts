@@ -1,5 +1,7 @@
 export type ErrorCode =
 	| 'routingConflict'
+	| 'tunAdapterTimeout'
+	| 'ruleUpdateFailed'
 	| 'unavailable'
 	| 'timeout'
 	| 'invalidServer'
@@ -24,6 +26,8 @@ export class ServiceError extends Error {
 export function errorCode(error: unknown): ErrorCode {
 	const codes: ErrorCode[] = [
 		'routingConflict',
+		'tunAdapterTimeout',
+		'ruleUpdateFailed',
 		'unavailable',
 		'timeout',
 		'invalidServer',
@@ -63,6 +67,8 @@ export function errorCode(error: unknown): ErrorCode {
 		CORE_START_FAILED: 'unavailable',
 		CORE_CRASHED: 'unavailable',
 		TUN_FAILED: 'unavailable',
+		TUN_ADAPTER_TIMEOUT: 'tunAdapterTimeout',
+		RULE_UPDATE_FAILED: 'ruleUpdateFailed',
 		PERMISSION_DENIED: 'unavailable',
 		SERVER_UNREACHABLE: 'unavailable',
 		BUSY: 'unavailable',

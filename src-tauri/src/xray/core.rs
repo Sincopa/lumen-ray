@@ -18,16 +18,17 @@ struct Manifest {
 
 pub const VERSION: &str = "26.9.9";
 
-pub fn prepare(runtime: &RuntimePaths, data: &Path) -> Result<PathBuf> {
-    crate::xray::geo::ensure_initialized(runtime, data)?;
-    prepare_files(runtime, data, false)
+pub fn prepare(runtime: impl Into<RuntimePaths>, data: &Path) -> Result<PathBuf> {
+    let runtime = runtime.into();
+    crate::xray::geo::ensure_initialized(&runtime, data)?;
+    prepare_files(&runtime, data, false)
 }
 
 /// The elevated helper receives a verified Geo snapshot over its authenticated pipe.
 /// It only needs the bundled executable and Wintun in its protected staging directory.
 #[cfg(windows)]
-pub fn prepare_for_tunnel(runtime: &RuntimePaths, data: &Path) -> Result<PathBuf> {
-    prepare_files(runtime, data, true)
+pub fn prepare_for_tunnel(runtime: impl Into<RuntimePaths>, data: &Path) -> Result<PathBuf> {
+    prepare_files(&runtime.into(), data, true)
 }
 
 fn prepare_files(runtime: &RuntimePaths, data: &Path, tunnel: bool) -> Result<PathBuf> {

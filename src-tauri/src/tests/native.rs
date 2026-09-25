@@ -75,7 +75,7 @@ async fn private_subscription_config_validation() {
     );
     let directory = tempfile::tempdir().unwrap();
     let core = core::prepare(
-        &std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("resources/core"),
+        std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("resources/core"),
         directory.path(),
     )
     .unwrap();
@@ -149,7 +149,7 @@ async fn private_proxy_traffic_smoke() {
     let parsed = parser::parse(&body, "smoke").unwrap();
     let directory = tempfile::tempdir().unwrap();
     let core = core::prepare(
-        &std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("resources/core"),
+        std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("resources/core"),
         directory.path(),
     )
     .unwrap();

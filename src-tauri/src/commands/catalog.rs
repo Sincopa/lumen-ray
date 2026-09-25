@@ -5,6 +5,7 @@ use crate::{
 };
 use serde_json::Value;
 use std::sync::Arc;
+use tauri::Emitter;
 #[tauri::command]
 pub async fn get_catalog(state: tauri::State<'_, Arc<AppState>>) -> Result<Value> {
     let latencies = state.latencies.read().await;
@@ -27,6 +28,7 @@ pub async fn mutate_catalog(
             | service::Mutation::ApplyPreset { .. }
             | service::Mutation::RemovePreset { .. }
     );
+    let previous = if reconnect { Some(state.repository.read().await.clone()) } else { None };
     let value = service::mutate(&state, mutation).await?;
     disconnect_removed_server(&state, &app).await?;
     crate::update_tray_menu(&app, &state);
@@ -42,7 +44,33 @@ pub async fn mutate_catalog(
         None
     };
     if let Some(id) = id {
+        #[cfg(windows)]
+        if let Some(before) = previous.as_ref() {
+            let after = state.repository.read().await.clone();
+            match crate::services::vpn_service::apply_live_rules(&state, &id, before, &after).await {
+                Ok(true) => return Ok(value),
+                Ok(false) => {}
+                Err(error) => {
+                    let _guard = state.mutations.lock().await;
+                    if serde_json::to_value(&*state.repository.read().await).ok()
+                        == serde_json::to_value(&after).ok()
+                    {
+                        state.store.save(before)?;
+                        *state.repository.write().await = before.clone();
+                        let catalog = service::snapshot(before, &*state.latencies.read().await);
+                        let _ = app.emit("catalog://changed", catalog);
+                        crate::update_tray_menu(&app, &state);
+                    }
+                    return Err(error);
+                }
+            }
+        }
         crate::services::vpn_service::connect(&state, &app, id).await?;
+    } else {
+        let state = state.inner().clone();
+        tauri::async_runtime::spawn(async move {
+            crate::services::vpn_service::prewarm(&state).await;
+        });
     }
     Ok(value)
 }
@@ -55,6 +83,8 @@ pub async fn import_subscription(
 ) -> Result<service::ImportResult> {
     let result = service::import(&state, input, name, None).await?;
     crate::update_tray_menu(&app, &state);
+    let warm_state = state.inner().clone();
+    tauri::async_runtime::spawn(async move { crate::services::vpn_service::prewarm(&warm_state).await; });
     Ok(result)
 }
 #[tauri::command]
@@ -81,6 +111,8 @@ pub async fn refresh_subscription(
     let result = service::import(&state, input, Some(name), Some(id)).await?;
     disconnect_removed_server(&state, &app).await?;
     crate::update_tray_menu(&app, &state);
+    let warm_state = state.inner().clone();
+    tauri::async_runtime::spawn(async move { crate::services::vpn_service::prewarm(&warm_state).await; });
     Ok(result)
 }
 #[tauri::command]

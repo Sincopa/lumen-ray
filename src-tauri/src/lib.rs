@@ -3,6 +3,7 @@ mod commands;
 mod diagnostics;
 mod domain;
 mod platform;
+mod runtime;
 mod services;
 mod storage;
 mod subscription;
@@ -34,10 +35,13 @@ pub fn run_helper_if_requested() -> bool {
 }
 pub fn run_smoke_if_requested() -> bool {
     #[cfg(all(windows, debug_assertions))]
-    if std::env::args().nth(1).as_deref() == Some("--lumen-smoke-tun") {
+    if matches!(std::env::args().nth(1).as_deref(), Some("--lumen-smoke-tun" | "--lumen-smoke-warm" | "--lumen-smoke-warm-live" | "--lumen-smoke-standby")) {
+        let warm = std::env::args().nth(1).as_deref() == Some("--lumen-smoke-warm");
+        let live = std::env::args().nth(1).as_deref() == Some("--lumen-smoke-warm-live");
+        let standby = std::env::args().nth(1).as_deref() == Some("--lumen-smoke-standby");
         match tokio::runtime::Runtime::new() {
-            Ok(runtime) => match runtime.block_on(platform::smoke::run()) {
-                Ok(()) => println!("NATIVE_SMOKE_OK"),
+            Ok(runtime) => match runtime.block_on(async { if warm { platform::smoke::warm_route_cycle().await } else if live { platform::smoke::warm_live().await } else if standby { platform::smoke::warm_standby_isolation().await } else { platform::smoke::run().await } }) {
+                Ok(()) => if !warm && !live && !standby { println!("NATIVE_SMOKE_OK"); },
                 Err(error) => {
                     eprintln!("{error}");
                     std::process::exit(1);
@@ -142,6 +146,8 @@ pub fn run() {
                     {
                         log::warn!("Automatic connection failed");
                     }
+                } else {
+                    services::vpn_service::prewarm(&startup).await;
                 }
             });
             let initial_menu = create_tray_menu(app.handle(), &state)?;
@@ -424,6 +430,7 @@ async fn handle_tray_menu_event(
             let status = state.snapshot.read().await.status.clone();
             if status == "connected" {
                 let _ = services::vpn_service::disconnect(state, app).await;
+                services::vpn_service::prewarm(state).await;
             } else {
                 let server_id = state.repository.read().await.selected_server_id.clone();
                 if let Some(srv_id) = server_id {

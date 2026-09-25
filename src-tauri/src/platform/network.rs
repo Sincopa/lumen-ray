@@ -92,6 +92,9 @@ pub fn system_dns() -> crate::domain::errors::Result<Vec<String>> {
 }
 /// Read-only confirmation that Xray installed the default route on its own adapter.
 pub fn tunnel_ready() -> bool {
+    tunnel_route_exists(AF_INET)
+}
+fn tunnel_route_exists(family: u16) -> bool {
     unsafe {
         let name: Vec<u16> = "LumenTun".encode_utf16().chain(Some(0)).collect();
         let mut luid: NET_LUID_LH = std::mem::zeroed();
@@ -99,7 +102,7 @@ pub fn tunnel_ready() -> bool {
             return false;
         }
         let mut table = std::ptr::null_mut();
-        if GetIpForwardTable2(AF_INET, &mut table) != 0 || table.is_null() {
+        if GetIpForwardTable2(family, &mut table) != 0 || table.is_null() {
             return false;
         }
         let entries =
@@ -109,6 +112,176 @@ pub fn tunnel_ready() -> bool {
             .any(|r| r.InterfaceLuid.Value == luid.Value && r.DestinationPrefix.PrefixLength == 0);
         FreeMibTable(table as _);
         found
+    }
+}
+
+/// The prepared adapter must not own default routes or outrank ordinary adapters.
+pub fn standby_isolated() -> bool {
+    use windows_sys::Win32::NetworkManagement::IpHelper::{
+        GetIpInterfaceEntry, InitializeIpInterfaceEntry, MIB_IPINTERFACE_ROW,
+    };
+    if tunnel_route_exists(AF_INET) || tunnel_route_exists(AF_INET6) { return false; }
+    unsafe {
+        let name: Vec<u16> = "LumenTun".encode_utf16().chain(Some(0)).collect();
+        let mut luid: NET_LUID_LH = std::mem::zeroed();
+        if ConvertInterfaceAliasToLuid(name.as_ptr(), &mut luid) != 0 { return false; }
+        [AF_INET, AF_INET6].into_iter().all(|family| {
+            let mut interface = MIB_IPINTERFACE_ROW::default();
+            InitializeIpInterfaceEntry(&mut interface);
+            interface.Family = family;
+            interface.InterfaceLuid = luid;
+            GetIpInterfaceEntry(&mut interface) == 0
+                && !interface.UseAutomaticMetric
+                && interface.Metric >= 5_000
+        })
+    }
+}
+
+/// A prepared tunnel has an initialized interface but no system default route.
+pub fn tunnel_adapter_ready() -> bool {
+    use windows_sys::Win32::NetworkManagement::IpHelper::{
+        GetIpInterfaceEntry, InitializeIpInterfaceEntry, MIB_IPINTERFACE_ROW,
+    };
+    unsafe {
+        let name: Vec<u16> = "LumenTun".encode_utf16().chain(Some(0)).collect();
+        let mut luid: NET_LUID_LH = std::mem::zeroed();
+        if ConvertInterfaceAliasToLuid(name.as_ptr(), &mut luid) != 0 {
+            return false;
+        }
+        let mut row = MIB_IPINTERFACE_ROW::default();
+        InitializeIpInterfaceEntry(&mut row);
+        row.Family = AF_INET;
+        row.InterfaceLuid = luid;
+        GetIpInterfaceEntry(&mut row) == 0 && row.Connected
+    }
+}
+
+/// Owns only the two default routes created for a prepared TUN session.
+/// The helper drops them before it acknowledges a disconnect.
+pub struct TunnelRoutes {
+    luid: NET_LUID_LH,
+    rows: Vec<windows_sys::Win32::NetworkManagement::IpHelper::MIB_IPFORWARD_ROW2>,
+    metrics: Vec<(u16, bool, u32)>,
+}
+
+impl TunnelRoutes {
+    pub fn new() -> crate::domain::errors::Result<Self> {
+        use crate::domain::errors::BackendError;
+        use windows_sys::Win32::NetworkManagement::IpHelper::{
+            GetIpInterfaceEntry, InitializeIpInterfaceEntry, MIB_IPINTERFACE_ROW,
+            SetIpInterfaceEntry,
+        };
+        let name: Vec<u16> = "LumenTun".encode_utf16().chain(Some(0)).collect();
+        let mut luid: NET_LUID_LH = Default::default();
+        if unsafe { ConvertInterfaceAliasToLuid(name.as_ptr(), &mut luid) } != 0 {
+            return Err(BackendError::new("TUN_FAILED", "Tunnel adapter is unavailable"));
+        }
+        // Windows also uses interface priority when choosing DNS and application
+        // sockets. A prepared adapter must rank behind the physical network.
+        for family in [AF_INET, AF_INET6] {
+            let mut interface = MIB_IPINTERFACE_ROW::default();
+            unsafe { InitializeIpInterfaceEntry(&mut interface); }
+            interface.Family = family;
+            interface.InterfaceLuid = luid;
+            if unsafe { GetIpInterfaceEntry(&mut interface) } != 0 {
+                return Err(BackendError::new("TUN_FAILED", "Tunnel interface is not ready"));
+            }
+            interface.UseAutomaticMetric = false;
+            interface.Metric = 5_000;
+            if unsafe { SetIpInterfaceEntry(&mut interface) } != 0 {
+                return Err(BackendError::new("TUN_FAILED", "Could not lower standby tunnel priority"));
+            }
+        }
+        Ok(Self { luid, rows: Vec::new(), metrics: Vec::new() })
+    }
+
+    pub fn activate(&mut self) -> crate::domain::errors::Result<()> {
+        use crate::domain::errors::BackendError;
+        use windows_sys::Win32::NetworkManagement::IpHelper::{
+            CreateIpForwardEntry2, GetIpInterfaceEntry, InitializeIpForwardEntry,
+            InitializeIpInterfaceEntry, MIB_IPFORWARD_ROW2, MIB_IPINTERFACE_ROW,
+            SetIpInterfaceEntry,
+        };
+        if self.rows.len() == 2 { return Ok(()); }
+        if !self.rows.is_empty() || !self.metrics.is_empty() {
+            return Err(BackendError::new("TUN_FAILED", "Tunnel route cleanup is incomplete"));
+        }
+        for family in [AF_INET, AF_INET6] {
+            let mut interface = MIB_IPINTERFACE_ROW::default();
+            unsafe { InitializeIpInterfaceEntry(&mut interface); }
+            interface.Family = family;
+            interface.InterfaceLuid = self.luid;
+            if unsafe { GetIpInterfaceEntry(&mut interface) } != 0 {
+                let _ = self.deactivate();
+                return Err(BackendError::new("TUN_FAILED", "Tunnel interface is not ready"));
+            }
+            self.metrics.push((family, interface.UseAutomaticMetric, interface.Metric));
+            interface.UseAutomaticMetric = false;
+            interface.Metric = 0;
+            if unsafe { SetIpInterfaceEntry(&mut interface) } != 0 {
+                let _ = self.deactivate();
+                return Err(BackendError::new("TUN_FAILED", "Could not configure tunnel priority"));
+            }
+            let mut route = MIB_IPFORWARD_ROW2::default();
+            unsafe { InitializeIpForwardEntry(&mut route); }
+            route.InterfaceLuid = self.luid;
+            route.DestinationPrefix.PrefixLength = 0;
+            if family == AF_INET {
+                route.DestinationPrefix.Prefix.Ipv4.sin_family = family;
+                route.NextHop.Ipv4.sin_family = family;
+            } else {
+                route.DestinationPrefix.Prefix.Ipv6.sin6_family = family;
+                route.NextHop.Ipv6.sin6_family = family;
+            }
+            route.Metric = 0;
+            if unsafe { CreateIpForwardEntry2(&route) } != 0 {
+                let _ = self.deactivate();
+                return Err(BackendError::new("TUN_FAILED", "Could not enable tunnel route"));
+            }
+            self.rows.push(route);
+        }
+        if let Err(error) = verify_tunnel_routes() {
+            let _ = self.deactivate();
+            return Err(error);
+        }
+        Ok(())
+    }
+
+    pub fn deactivate(&mut self) -> crate::domain::errors::Result<()> {
+        use crate::domain::errors::BackendError;
+        use windows_sys::Win32::Foundation::ERROR_NOT_FOUND;
+        use windows_sys::Win32::NetworkManagement::IpHelper::{
+            DeleteIpForwardEntry2, GetIpInterfaceEntry, InitializeIpInterfaceEntry,
+            MIB_IPINTERFACE_ROW, SetIpInterfaceEntry,
+        };
+        let mut failed = false;
+        let mut remaining_routes = Vec::new();
+        for route in self.rows.drain(..) {
+            let status = unsafe { DeleteIpForwardEntry2(&route) };
+            if status != 0 && status != ERROR_NOT_FOUND {
+                failed = true;
+                remaining_routes.push(route);
+            }
+        }
+        self.rows = remaining_routes;
+        let mut remaining_metrics = Vec::new();
+        for (family, automatic, metric) in self.metrics.drain(..) {
+            let mut interface = MIB_IPINTERFACE_ROW::default();
+            unsafe { InitializeIpInterfaceEntry(&mut interface); }
+            interface.Family = family;
+            interface.InterfaceLuid = self.luid;
+            if unsafe { GetIpInterfaceEntry(&mut interface) } == 0 {
+                interface.UseAutomaticMetric = automatic;
+                interface.Metric = metric;
+                if unsafe { SetIpInterfaceEntry(&mut interface) } != 0 {
+                    failed = true;
+                    remaining_metrics.push((family, automatic, metric));
+                }
+            }
+        }
+        self.metrics = remaining_metrics;
+        if failed { Err(BackendError::new("TUN_FAILED", "Could not remove tunnel routes")) }
+        else { Ok(()) }
     }
 }
 

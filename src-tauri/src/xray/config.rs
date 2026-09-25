@@ -12,6 +12,8 @@ use serde_json::{json, Value};
 #[serde(rename_all = "camelCase")]
 pub struct XrayConfig {
     log: Value,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    api: Option<Value>,
     inbounds: Vec<Value>,
     outbounds: Vec<Value>,
     routing: Value,
@@ -22,6 +24,43 @@ pub struct XrayConfig {
     metrics: Value,
     #[serde(skip_serializing_if = "Option::is_none")]
     observatory: Option<Value>,
+}
+
+#[cfg(windows)]
+pub fn build_standby(
+    repo: &Repository,
+    selected: &str,
+    proxy_port: u16,
+    metrics_port: u16,
+) -> Result<XrayConfig> {
+    let mut config = build(repo, selected, proxy_port, metrics_port, true)?;
+    let tun = config.inbounds.iter_mut()
+        .find(|inbound| inbound["protocol"] == "tun")
+        .ok_or_else(BackendError::invalid)?;
+    tun["settings"].as_object_mut()
+        .ok_or_else(BackendError::invalid)?
+        .remove("autoSystemRoutingTable");
+    let api_port = metrics_port.checked_add(2).ok_or_else(BackendError::invalid)?;
+    config.api = Some(json!({"tag":"lumen-api","listen":format!("127.0.0.1:{api_port}"),"services":["RoutingService"]}));
+    Ok(config)
+}
+
+/// Xray replaces the complete rule set atomically through RoutingService.
+/// Other configuration sections must stay identical during a live update.
+#[cfg(windows)]
+pub fn live_routing_patch(repo_before: &Repository, repo_after: &Repository, selected: &str) -> Result<Option<Value>> {
+    let before = build(repo_before, selected, 10808, 10809, true)?;
+    let after = build(repo_after, selected, 10808, 10809, true)?;
+    if after.outbounds.iter().any(|outbound| !before.outbounds.contains(outbound))
+        || before.inbounds != after.inbounds
+        || before.dns != after.dns
+        || before.observatory != after.observatory
+        || before.routing["domainStrategy"] != after.routing["domainStrategy"]
+        || before.routing["balancers"] != after.routing["balancers"]
+    {
+        return Ok(None);
+    }
+    Ok(Some(json!({"routing": after.routing})))
 }
 pub fn outbound(node: &VpnNode, tag: &str) -> Result<Value> {
     node.validate()?;
@@ -167,7 +206,7 @@ pub fn build(
         rules.push(json!({"type":"field","ip":["127.0.0.0/8","10.0.0.0/8","172.16.0.0/12","192.168.0.0/16","169.254.0.0/16","::1/128","fc00::/7","fe80::/10"],"outboundTag":"direct"}));
     }
     if repo.routing_mode == "rules" {
-        for rule in crate::services::catalog_service::ordered_rules(&repo.rules).into_iter().filter(|r| r.enabled) {
+        for rule in crate::services::catalog_service::ordered_rules(&repo.rules) {
             let target = if ["direct", "block"].contains(&rule.server_id.as_str()) {
                 rule.server_id.clone()
             } else if rule.server_id == "subscription"
@@ -194,6 +233,9 @@ pub fn build(
             } else {
                 target_tag.to_string()
             };
+            // Keep an outbound available when its rule is temporarily disabled,
+            // so re-enabling it only replaces routing rules through the live API.
+            if !rule.enabled { continue; }
             let is_balancer_target = balancer_tag.as_deref() == Some(&target);
             let mut compiled = if is_balancer_target {
                 json!({"type":"field","balancerTag":target})
@@ -284,6 +326,7 @@ pub fn build(
 
     Ok(XrayConfig {
         log: json!({"loglevel":"warning"}),
+        api: None,
         inbounds,
         outbounds,
         routing,

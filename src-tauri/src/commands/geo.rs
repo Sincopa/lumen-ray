@@ -44,5 +44,9 @@ pub async fn update_geo_databases(
         }
         return Err(error);
     }
+    if active.is_none() {
+        let warm_state = state.inner().clone();
+        tauri::async_runtime::spawn(async move { crate::services::vpn_service::prewarm(&warm_state).await; });
+    }
     Ok(info)
 }

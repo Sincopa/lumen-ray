@@ -74,6 +74,18 @@ impl From<PathBuf> for RuntimePaths {
     }
 }
 
+impl From<&PathBuf> for RuntimePaths {
+    fn from(root: &PathBuf) -> Self {
+        Self::new(root.clone())
+    }
+}
+
+impl From<&RuntimePaths> for RuntimePaths {
+    fn from(paths: &RuntimePaths) -> Self {
+        paths.clone()
+    }
+}
+
 impl From<&Path> for RuntimePaths {
     fn from(root: &Path) -> Self {
         Self::new(root.to_path_buf())
@@ -140,36 +152,4 @@ pub fn resolve_from(base: Option<&Path>) -> Result<RuntimePaths> {
 /// Global resolver for runtime paths without passing an explicit base directory.
 pub fn resolve() -> Result<RuntimePaths> {
     resolve_from(None)
-}
-
-pub fn runtime_root() -> Result<PathBuf> {
-    resolve().map(|r| r.root().to_path_buf())
-}
-
-pub fn xray_dir() -> Result<PathBuf> {
-    resolve().map(|r| r.xray_dir())
-}
-
-pub fn xray_binary() -> Result<PathBuf> {
-    resolve().map(|r| r.xray_binary())
-}
-
-pub fn geoip_path() -> Result<PathBuf> {
-    resolve().map(|r| r.geoip_path())
-}
-
-pub fn geosite_path() -> Result<PathBuf> {
-    resolve().map(|r| r.geosite_path())
-}
-
-pub fn wintun_path() -> Result<PathBuf> {
-    resolve().map(|r| r.wintun_path())
-}
-
-pub fn xray_manifest_path() -> Result<PathBuf> {
-    resolve().map(|r| r.xray_manifest_path())
-}
-
-pub fn xray_license_path() -> Result<PathBuf> {
-    resolve().map(|r| r.xray_license_path())
 }

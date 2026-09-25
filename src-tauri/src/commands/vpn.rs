@@ -25,7 +25,10 @@ pub async fn disconnect(
     state: tauri::State<'_, Arc<AppState>>,
     app: tauri::AppHandle,
 ) -> Result<()> {
-    service::disconnect(&state, &app).await
+    service::disconnect(&state, &app).await?;
+    let state = state.inner().clone();
+    tauri::async_runtime::spawn(async move { service::prewarm(&state).await; });
+    Ok(())
 }
 #[tauri::command]
 pub async fn reconnect(
