@@ -74,7 +74,10 @@ export function createMaintenance(
 				});
 				return;
 			} catch (cause) {
-				if (attempt === retries) {
+				if (
+					attempt === retries ||
+					!['subscriptionFetchFailed', 'timeout'].includes(errorCode(cause))
+				) {
 					publishStatus(id, { state: 'error', error: errorCode(cause) });
 					throw cause;
 				}

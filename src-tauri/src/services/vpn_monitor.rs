@@ -1,4 +1,4 @@
-use super::vpn_service::{public_ip, publish, schedule_recovery, stop, Snapshot};
+use super::vpn_service::{publish, schedule_recovery, stop, Snapshot};
 use crate::app::state::AppState;
 use crate::domain::errors::BackendError;
 use std::{
@@ -20,12 +20,26 @@ pub fn monitor(state: Arc<AppState>, app: tauri::AppHandle) {
         };
         let mut previous = (0u16, 0u64, 0u64, Instant::now());
         let mut last_health = Instant::now();
+        let mut last_tick = Instant::now();
+        let mut generation = 0;
+        #[cfg(windows)]
+        let watcher = crate::platform::network_watch::NetworkWatch::new();
+        #[cfg(windows)]
+        let mut revision = watcher.revision();
+        #[cfg(windows)]
+        let mut physical = crate::platform::network_watch::physical_fingerprint();
+        let mut physical_changed = false;
+        let mut network_dirty = false;
         let mut unhealthy = 0u8;
         let mut ticker = tokio::time::interval(Duration::from_secs(1));
+        ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
         loop {
             tokio::select! {
                 _=shutdown.changed()=>break,
                 _=ticker.tick()=>{
+                    network_dirty |= last_tick.elapsed() > Duration::from_secs(15);
+                    last_tick = Instant::now();
+                    #[cfg(windows)] { let now = watcher.revision(); network_dirty |= now != revision; revision = now; }
                     let Ok(operation)=state.connection_operation.try_acquire()else{continue};
                     let mut session=std::mem::take(&mut *state.session.lock().await);
                     let active_id = state.snapshot.read().await.info.as_ref().map(|info| info.server_id.clone());
@@ -47,37 +61,52 @@ pub fn monitor(state: Arc<AppState>, app: tauri::AppHandle) {
                             publish(&state,&app,Snapshot{status:"error".into(),info:None,error:Some(BackendError::new("CORE_CRASHED","Xray stopped unexpectedly"))}).await;
                         }
                     }
-                    let active=session.started.map(|s|(session.metrics_port,session.proxy_port,s.elapsed().as_secs()));
+                    let active=session.started.map(|s|(session.metrics_port,session.proxy_port,s.elapsed().as_secs(),session.generation));
                     *state.session.lock().await=session;
                     drop(operation);
                     if let Some(id) = failed_id {
                         schedule_recovery(state.clone(), app.clone(), id);
                     }
-                    if let Some((port,proxy_port,duration))=active{
-                        if last_health.elapsed() >= Duration::from_secs(30) {
+                    if let Some((port,proxy_port,duration,active_generation))=active{
+                        if generation != active_generation {
+                            generation = active_generation; unhealthy = 0; network_dirty = false; physical_changed = false; last_health = Instant::now();
+                            #[cfg(windows)] { physical = crate::platform::network_watch::physical_fingerprint(); }
+                        }
+                        if network_dirty || last_health.elapsed() >= Duration::from_secs(30) {
                             last_health = Instant::now();
-                            if state.repository.read().await.settings.auto_reconnect {
-                                if public_ip(proxy_port).await.is_ok() { unhealthy = 0; }
+                            {
+                                let settings = state.repository.read().await.settings.clone();
+                                #[cfg(windows)] {
+                                    let now=crate::platform::network_watch::physical_fingerprint();
+                                    physical_changed |= physical.is_some() && now.is_some() && physical != now;
+                                    if now.is_some() { physical=now; }
+                                }
+                                let outcome = super::health::verify(proxy_port, settings.network_mode == "tun").await;
+                                if outcome.is_ok() { unhealthy = 0; }
                                 else { unhealthy = unhealthy.saturating_add(1); }
-                                if unhealthy >= 3 {
+                                let failed = unhealthy >= 3 || (network_dirty && outcome.is_err()) || (physical_changed && settings.auto_reconnect);
+                                network_dirty = false;
+                                if failed {
                                     let Ok(operation) = state.connection_operation.try_acquire() else { continue };
                                     let mut current = state.session.lock().await;
-                                    if current.started.is_some() && current.proxy_port == proxy_port {
+                                    if current.started.is_some() && current.generation == active_generation {
                                         let id = state.snapshot.read().await.info.as_ref().map(|info| info.server_id.clone());
                                         if let Some(id) = &id {
                                             state.latencies.write().await.insert(id.clone(), serde_json::json!("timeout"));
                                         }
-                                        let _ = stop(&mut current).await;
+                                        let cleanup = stop(&mut current).await;
                                         *state.traffic.write().await = Default::default();
-                                        publish(&state, &app, Snapshot { status: "error".into(), info: None, error: Some(BackendError::new("SERVER_UNREACHABLE", "Connection health check failed")) }).await;
+                                        let error=cleanup.err().or_else(|| outcome.err()).unwrap_or_else(|| BackendError::new("NETWORK_CHANGED", "Physical network changed"));
+                                        publish(&state, &app, Snapshot { status: "error".into(), info: None, error: Some(error) }).await;
                                         drop(current);
                                         drop(operation);
-                                        if let Some(id) = id { schedule_recovery(state.clone(), app.clone(), id); }
+                                        if settings.auto_reconnect { if let Some(id) = id { schedule_recovery(state.clone(), app.clone(), id); } }
                                     }
                                     unhealthy = 0;
+                                    physical_changed = false;
                                     continue;
                                 }
-                            } else { unhealthy = 0; }
+                            }
                         }
                         let mut traffic=super::stats_service::TrafficStats{duration_seconds:duration,..Default::default()};
                         if let Ok((up,down))=super::stats_service::counters(&client,port).await{
@@ -88,7 +117,7 @@ pub fn monitor(state: Arc<AppState>, app: tauri::AppHandle) {
                         }
                         let Ok(_publish_operation)=state.connection_operation.try_acquire()else{continue};
                         let current=state.session.lock().await;
-                        if current.started.is_none()||current.metrics_port!=port{continue;}
+                        if current.started.is_none()||current.generation!=active_generation{continue;}
                         drop(current);
                         *state.traffic.write().await=traffic.clone();
                         if app.emit("vpn://stats",traffic).is_err(){log::warn!("Unable to deliver metrics event");}

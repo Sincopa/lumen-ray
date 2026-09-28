@@ -119,7 +119,9 @@
 		),
 	);
 
-	let processIcons = $state<Record<string, string>>({ ...persistentRuleIconCache });
+	let processIcons = $state<Record<string, string>>({
+		...persistentRuleIconCache,
+	});
 
 	function registerIcons(newIcons: Record<string, string>) {
 		let changed = false;
@@ -160,8 +162,12 @@
 	$effect(() => {
 		if (!runtime.isTauri) return;
 		const appRules = $catalogStore.rules.filter(
-			(r) => (r.matcher ?? (r.isDomain ? 'domain' : 'application')) === 'application',
+			(r) =>
+				(r.matcher ?? (r.isDomain ? 'domain' : 'application')) ===
+				'application',
 		);
+		// Local deduplication scratch space; it is never exposed as reactive state.
+		// eslint-disable-next-line svelte/prefer-svelte-reactivity
 		const needed = new Set<string>();
 		for (const r of appRules) {
 			const displayName = formatRuleDisplayName(r.name);
@@ -205,9 +211,12 @@
 		if (processIcons[baseName]) return processIcons[baseName];
 		if (processIcons[stemName]) return processIcons[stemName];
 		if (processIcons[fullName]) return processIcons[fullName];
-		if (persistentRuleIconCache[baseName]) return persistentRuleIconCache[baseName];
-		if (persistentRuleIconCache[stemName]) return persistentRuleIconCache[stemName];
-		if (persistentRuleIconCache[fullName]) return persistentRuleIconCache[fullName];
+		if (persistentRuleIconCache[baseName])
+			return persistentRuleIconCache[baseName];
+		if (persistentRuleIconCache[stemName])
+			return persistentRuleIconCache[stemName];
+		if (persistentRuleIconCache[fullName])
+			return persistentRuleIconCache[fullName];
 
 		if (baseName.includes('chrome')) return chromeIcon;
 		if (baseName.includes('discord')) return discordIcon;

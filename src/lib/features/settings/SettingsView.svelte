@@ -1,5 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
+	import AdvancedTools from './AdvancedTools.svelte';
+	let toolsOpen = $state(false);
 	import { invoke } from '@tauri-apps/api/core';
 	import chevronIcon from '../../../assets/chevron.svg';
 	import reloadIcon from '../../../assets/reload.svg';
@@ -703,6 +705,13 @@
 					</div>
 				</SettingRow>
 				<SettingRow
+					label={i18n.currentLanguage === 'ru' ? 'Инструменты' : 'Tools'}
+					showChevron
+					onclick={() => {
+						toolsOpen = true;
+					}}
+				/>
+				<SettingRow
 					label={t('settings.diagnostics')}
 					showChevron
 					onclick={() => {
@@ -1160,6 +1169,12 @@
 		</div>
 	{/if}
 </div>
+
+{#if toolsOpen}<AdvancedTools
+		onClose={() => {
+			toolsOpen = false;
+		}}
+	/>{/if}
 
 <style>
 	.settings-view {

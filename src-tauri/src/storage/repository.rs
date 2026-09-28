@@ -161,6 +161,10 @@ fn default_server_selection() -> String {
 #[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Settings {
+    #[serde(default)]
+    pub dns_policy: crate::xray::dns_policy::DnsPolicy,
+    #[serde(default = "default_subscription_transport")]
+    pub subscription_transport: String,
     pub network_mode: String,
     pub auto_connect: bool,
     #[serde(default = "default_true")]
@@ -196,6 +200,8 @@ impl Default for Settings {
     fn default() -> Self {
         Self {
             network_mode: "tun".into(),
+            dns_policy: Default::default(),
+            subscription_transport: default_subscription_transport(),
             auto_connect: false,
             close_to_tray: true,
             start_minimized: false,
@@ -214,9 +220,14 @@ impl Default for Settings {
         }
     }
 }
+fn default_subscription_transport() -> String {
+    "direct".into()
+}
 #[derive(Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Repository {
+    #[serde(default)]
+    pub subscription_changes: Vec<SubscriptionChange>,
     pub version: u32,
     pub subscriptions: Vec<Subscription>,
     pub nodes: Vec<VpnNode>,
@@ -234,6 +245,7 @@ impl Default for Repository {
     fn default() -> Self {
         Self {
             version: 1,
+            subscription_changes: vec![],
             subscriptions: vec![],
             nodes: vec![],
             sources: BTreeMap::new(),
@@ -245,6 +257,15 @@ impl Default for Repository {
             settings: Settings::default(),
         }
     }
+}
+#[derive(Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SubscriptionChange {
+    pub subscription_id: String,
+    pub at: u64,
+    pub added: usize,
+    pub updated: usize,
+    pub removed: usize,
 }
 fn error() -> BackendError {
     BackendError::new("STORAGE_FAILED", "Could not read or save application data")
@@ -263,7 +284,22 @@ impl RepositoryStore {
         if !self.path.exists() {
             return Ok(Repository::default());
         }
-        let encrypted = std::fs::read(&self.path).map_err(|_| error())?;
+        match self.load_from(&self.path) {
+            Err(error) if error.code != "STORAGE_VERSION" => {
+                let mut previous = self
+                    .load_from(&self.path.with_extension("previous.dpapi"))
+                    .map_err(|_| error)?;
+                previous.settings.auto_connect = false;
+                log::warn!(
+                    "Recovered the previous encrypted repository; automatic connection is disabled"
+                );
+                Ok(previous)
+            }
+            result => result,
+        }
+    }
+    fn load_from(&self, path: &Path) -> Result<Repository> {
+        let encrypted = std::fs::read(path).map_err(|_| error())?;
         let bytes = OsSecretStore.unprotect(&encrypted)?;
         let mut repo: Repository = serde_json::from_slice(&bytes).map_err(|_| error())?;
         if repo.version != 1 {
@@ -289,6 +325,13 @@ impl RepositoryStore {
             .map_err(|_| error())?;
         temporary.write_all(&encrypted).map_err(|_| error())?;
         temporary.as_file().sync_all().map_err(|_| error())?;
+        if self.path.exists() && self.load_from(&self.path).is_ok() {
+            let previous = std::fs::read(&self.path).map_err(|_| error())?;
+            crate::xray::updater::atomic_write(
+                &self.path.with_extension("previous.dpapi"),
+                &previous,
+            )?;
+        }
         temporary.persist(&self.path).map_err(|_| error())?;
         Ok(())
     }

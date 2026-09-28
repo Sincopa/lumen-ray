@@ -36,6 +36,10 @@ pub async fn mutate_catalog(
     app: tauri::AppHandle,
     mutation: service::Mutation,
 ) -> Result<Value> {
+    let _transaction = state.updates.lock().await;
+    let generation = state
+        .connection_generation
+        .load(std::sync::atomic::Ordering::Acquire);
     let reconnect = matches!(
         mutation,
         service::Mutation::SetRoutingMode { .. }
@@ -44,7 +48,11 @@ pub async fn mutate_catalog(
             | service::Mutation::ApplyPreset { .. }
             | service::Mutation::RemovePreset { .. }
     );
-    let previous = if reconnect { Some(state.repository.read().await.clone()) } else { None };
+    let previous = if reconnect {
+        Some(state.repository.read().await.clone())
+    } else {
+        None
+    };
     let value = service::mutate(&state, mutation).await?;
     disconnect_removed_server(&state, &app).await?;
     crate::update_tray_menu(&app, &state);
@@ -63,10 +71,16 @@ pub async fn mutate_catalog(
         #[cfg(windows)]
         if let Some(before) = previous.as_ref() {
             let after = state.repository.read().await.clone();
-            match crate::services::vpn_service::apply_live_rules(&state, &id, before, &after).await {
+            match crate::services::vpn_service::apply_live_rules(&state, &id, before, &after).await
+            {
                 Ok(true) => return Ok(value),
                 Ok(false) => {
-                    let still_connected = state.snapshot.read().await.info.as_ref()
+                    let still_connected = state
+                        .snapshot
+                        .read()
+                        .await
+                        .info
+                        .as_ref()
                         .is_some_and(|info| info.server_id == id);
                     if !still_connected {
                         let warm_state = state.inner().clone();
@@ -75,7 +89,7 @@ pub async fn mutate_catalog(
                         });
                         return Ok(value);
                     }
-                    if after.settings.network_mode == "tun" {
+                    if after.settings.network_mode == "tun" && !after.settings.dns_policy.enabled {
                         restore_catalog_if_unchanged(&state, &app, before, &after).await?;
                         return Err(BackendError::new(
                             "RULE_UPDATE_FAILED",
@@ -89,7 +103,7 @@ pub async fn mutate_catalog(
                 }
             }
         }
-        crate::services::vpn_service::connect(&state, &app, id).await?;
+        crate::services::vpn_service::connect_if_current(&state, &app, id, generation).await?;
     } else {
         let state = state.inner().clone();
         tauri::async_runtime::spawn(async move {
@@ -105,10 +119,13 @@ pub async fn import_subscription(
     input: String,
     name: Option<String>,
 ) -> Result<service::ImportResult> {
+    let _transaction = state.updates.lock().await;
     let result = service::import(&state, input, name, None).await?;
     crate::update_tray_menu(&app, &state);
     let warm_state = state.inner().clone();
-    tauri::async_runtime::spawn(async move { crate::services::vpn_service::prewarm(&warm_state).await; });
+    tauri::async_runtime::spawn(async move {
+        crate::services::vpn_service::prewarm(&warm_state).await;
+    });
     Ok(result)
 }
 #[tauri::command]
@@ -117,6 +134,18 @@ pub async fn refresh_subscription(
     app: tauri::AppHandle,
     id: String,
 ) -> Result<service::ImportResult> {
+    let _transaction = state.updates.lock().await;
+    let generation = state
+        .connection_generation
+        .load(std::sync::atomic::Ordering::Acquire);
+    let before = state.repository.read().await.clone();
+    let active = state
+        .snapshot
+        .read()
+        .await
+        .info
+        .as_ref()
+        .map(|info| info.server_id.clone());
     let (input, name) = {
         let repo = state.repository.read().await;
         (
@@ -133,10 +162,39 @@ pub async fn refresh_subscription(
         )
     };
     let result = service::import(&state, input, Some(name), Some(id)).await?;
+    let after = state.repository.read().await.clone();
+    if let Some(active) = active.filter(|active| {
+        let old = before.nodes.iter().find(|n| n.id == *active);
+        let new = after.nodes.iter().find(|n| n.id == *active);
+        new.is_some() && old != new
+    }) {
+        if let Err(error) = crate::services::vpn_service::connect_if_current(
+            &state,
+            &app,
+            active.clone(),
+            generation,
+        )
+        .await
+        {
+            restore_catalog_if_unchanged(&state, &app, &before, &after).await?;
+            if error.code != "CANCELLED" {
+                let _ = crate::services::vpn_service::connect_if_current(
+                    &state,
+                    &app,
+                    active,
+                    generation + 1,
+                )
+                .await;
+            }
+            return Err(error);
+        }
+    }
     disconnect_removed_server(&state, &app).await?;
     crate::update_tray_menu(&app, &state);
     let warm_state = state.inner().clone();
-    tauri::async_runtime::spawn(async move { crate::services::vpn_service::prewarm(&warm_state).await; });
+    tauri::async_runtime::spawn(async move {
+        crate::services::vpn_service::prewarm(&warm_state).await;
+    });
     Ok(result)
 }
 #[tauri::command]

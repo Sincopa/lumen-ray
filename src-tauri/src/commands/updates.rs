@@ -103,13 +103,23 @@ pub async fn install_core_update(
     let candidate = updater::prepare(&update.version, &state.data.join("core")).await?;
     let repo = state.repository.read().await.clone();
     if let Some(id) = &repo.selected_server_id {
-        let config = crate::xray::config::build(&repo, id, 10808, 10809, false)?;
+        let config = crate::xray::config::build(
+            &repo,
+            id,
+            10808,
+            10809,
+            repo.settings.network_mode == "tun",
+        )?;
         crate::services::vpn_service::validate(
             &candidate,
             &serde_json::to_vec(&config).map_err(|_| BackendError::invalid())?,
         )
         .await?;
     }
+    let generation = state
+        .connection_generation
+        .load(std::sync::atomic::Ordering::Acquire)
+        + 1;
     let active = state
         .snapshot
         .read()
@@ -119,18 +129,35 @@ pub async fn install_core_update(
         .map(|i| i.server_id.clone());
     crate::services::vpn_service::disconnect(&state, &app).await?;
     *state.core.write().await = candidate;
-    if let Some(id) = active {
-        if let Err(error) = crate::services::vpn_service::connect(&state, &app, id.clone()).await {
-            *state.core.write().await = previous;
-            if crate::services::vpn_service::connect(&state, &app, id)
+    let result = async {
+        if let Some(id) = &active {
+            crate::services::vpn_service::connect_if_current(&state, &app, id.clone(), generation)
+                .await?;
+        }
+        updater::activate(&state.data.join("core"), &update.version)
+    }
+    .await;
+    if let Err(error) = result {
+        *state.core.write().await = previous;
+        if error.code != "CANCELLED" {
+            if let Some(id) = active {
+                if crate::services::vpn_service::connect_if_current(
+                    &state,
+                    &app,
+                    id,
+                    generation + 1,
+                )
                 .await
                 .is_err()
-            {
-                log::error!("Core rollback connection failed");
+                {
+                    return Err(BackendError::new(
+                        "CORE_ROLLBACK_FAILED",
+                        "The update failed and the previous connection could not be restored",
+                    ));
+                }
             }
-            return Err(error);
         }
+        return Err(error);
     }
-    updater::activate(&state.data.join("core"), &update.version)?;
     Ok(update.version)
 }

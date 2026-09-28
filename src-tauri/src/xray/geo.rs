@@ -310,6 +310,10 @@ async fn download_file(url: &str, max_size: usize) -> Result<Vec<u8>> {
 }
 
 pub fn validate_geo_files_sync(core_path: &Path, asset_dir: &Path) -> Result<()> {
+    // Concurrent first-run preparations otherwise spawn one Go worker pool per
+    // database check and can starve each other until their deadlines expire.
+    static VALIDATION: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    let _validation = VALIDATION.lock().map_err(|_| error())?;
     let test_config = serde_json::json!({
         "log": { "loglevel": "none" },
         "inbounds": [{ "port": std::net::TcpListener::bind("127.0.0.1:0").ok().and_then(|l| l.local_addr().ok()).map(|a| a.port()).unwrap_or(10808), "protocol": "socks" }],
@@ -335,6 +339,7 @@ pub fn validate_geo_files_sync(core_path: &Path, asset_dir: &Path) -> Result<()>
         cmd.creation_flags(0x08000000);
     }
     cmd.args(["run", "-test", "-config", "stdin:"])
+        .env("GOMAXPROCS", "2")
         .env("XRAY_LOCATION_ASSET", asset_dir)
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::null())
@@ -346,9 +351,12 @@ pub fn validate_geo_files_sync(core_path: &Path, asset_dir: &Path) -> Result<()>
     let deadline = std::time::Instant::now() + Duration::from_secs(10);
     loop {
         match child.try_wait() {
-            Ok(Some(status)) => return if status.success() { Ok(()) } else { Err(error()) },
+            Ok(Some(status)) => return if status.success() { Ok(()) } else {
+                Err(BackendError::new("GEO_UPDATE_FAILED", "Xray rejected the geo database validation configuration"))
+            },
             Ok(None) if std::time::Instant::now() < deadline => std::thread::sleep(Duration::from_millis(20)),
-            _ => { let _ = child.kill(); let _ = child.wait(); return Err(error()); }
+            Ok(None) => { let _ = child.kill(); let _ = child.wait(); return Err(BackendError::new("GEO_UPDATE_FAILED", "Xray geo database validation timed out")); }
+            Err(_) => { let _ = child.kill(); let _ = child.wait(); return Err(BackendError::new("GEO_UPDATE_FAILED", "Cannot inspect Xray geo validation process")); }
         }
     }
 }

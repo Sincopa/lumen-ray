@@ -1,5 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
+	import AdvancedTools from '../lib/features/settings/AdvancedTools.svelte';
+	let pendingImport = $state('');
 	import { fly } from 'svelte/transition';
 	import { cubicOut } from 'svelte/easing';
 	import BackgroundShader from '../lib/components/BackgroundShader.svelte';
@@ -269,6 +271,31 @@
 			? 1
 			: -1;
 	}
+	onMount(() => {
+		if (!runtime.isTauri) return;
+		let disposed = false;
+		let unlisten: (() => void) | undefined;
+		const read = async () => {
+			const value = await invoke<string | null>('take_import_link');
+			if (!disposed && value) pendingImport = value;
+		};
+		void listen('import://pending', () => {
+			void read().catch(() => {});
+		})
+			.then((off) => {
+				if (disposed) {
+					off();
+					return;
+				}
+				unlisten = off;
+				return read();
+			})
+			.catch(() => {});
+		return () => {
+			disposed = true;
+			unlisten?.();
+		};
+	});
 </script>
 
 <main class="app-viewport">
@@ -379,6 +406,13 @@
 		{/if}
 	</div>
 </main>
+
+{#if pendingImport}<AdvancedTools
+		initialImport={pendingImport}
+		onClose={() => {
+			pendingImport = '';
+		}}
+	/>{/if}
 
 <style>
 	.demo-notice {

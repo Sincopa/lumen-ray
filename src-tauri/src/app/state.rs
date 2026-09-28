@@ -20,12 +20,19 @@ pub struct AppState {
     pub latencies: RwLock<std::collections::HashMap<String, serde_json::Value>>,
     pub desired_server: RwLock<Option<String>>,
     pub recovery_running: std::sync::atomic::AtomicBool,
+    pub recovery_attempts: Mutex<std::collections::VecDeque<std::time::Instant>>,
+    pub connection_generation: std::sync::atomic::AtomicU64,
+    pub server_quality:
+        RwLock<std::collections::HashMap<String, crate::services::server_quality::Quality>>,
     pub device_identity: Arc<crate::platform::device_identity::DeviceIdentityManager>,
     pub subscription_client: Arc<crate::subscription::fetcher::SubscriptionClient>,
     _instance: std::fs::File,
 }
 impl AppState {
-    pub fn open(data: PathBuf, resources: impl Into<crate::runtime::RuntimePaths>) -> Result<Arc<Self>> {
+    pub fn open(
+        data: PathBuf,
+        resources: impl Into<crate::runtime::RuntimePaths>,
+    ) -> Result<Arc<Self>> {
         use crate::domain::errors::BackendError;
         std::fs::create_dir_all(&data).map_err(|_| {
             BackendError::new("STORAGE_FAILED", "Cannot create application directory")
@@ -72,6 +79,9 @@ impl AppState {
             latencies: RwLock::new(std::collections::HashMap::new()),
             desired_server: RwLock::new(None),
             recovery_running: std::sync::atomic::AtomicBool::new(false),
+            recovery_attempts: Mutex::new(Default::default()),
+            connection_generation: std::sync::atomic::AtomicU64::new(0),
+            server_quality: RwLock::new(Default::default()),
             device_identity,
             subscription_client,
             _instance: instance,

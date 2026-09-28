@@ -2,6 +2,15 @@ import { writable } from 'svelte/store';
 import { invoke } from '@tauri-apps/api/core';
 import { runtime } from '../runtime';
 export interface NativeSettings {
+	dnsPolicy: {
+		enabled: boolean;
+		direct: string;
+		proxy: string;
+		fallback: string[];
+		bootstrap: string;
+		ipv6: 'auto' | 'ipv4';
+	};
+	subscriptionTransport: 'direct' | 'proxy' | 'auto';
 	networkMode: 'tun' | 'proxy';
 	autoConnect: boolean;
 	closeToTray: boolean;
@@ -21,6 +30,15 @@ export interface NativeSettings {
 	coreVersion: string;
 }
 const defaults: NativeSettings = {
+	dnsPolicy: {
+		enabled: false,
+		direct: 'system',
+		proxy: 'https://1.1.1.1/dns-query',
+		fallback: [],
+		bootstrap: '1.1.1.1',
+		ipv6: 'auto',
+	},
+	subscriptionTransport: 'direct',
 	networkMode: 'tun',
 	autoConnect: false,
 	closeToTray: true,

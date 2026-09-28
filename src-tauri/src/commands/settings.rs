@@ -29,6 +29,97 @@ pub async fn set_settings(
     app: tauri::AppHandle,
     mut settings: Settings,
 ) -> Result<SettingsDto> {
+    let _transaction = state.updates.lock().await;
+    validate_settings(&settings)?;
+    #[cfg(windows)]
+    {
+        if settings.auto_start != crate::platform::windows::is_autostart() {
+            crate::platform::windows::set_autostart(settings.auto_start)?;
+        }
+        settings.auto_start = crate::platform::windows::is_autostart();
+    }
+    let changed;
+    let previous;
+    {
+        let _guard = state.mutations.lock().await;
+        let mut repo = state.repository.read().await.clone();
+        previous = repo.settings.clone();
+        changed = repo.settings.network_mode != settings.network_mode
+            || repo.settings.dns_policy != settings.dns_policy
+            || repo.settings.dns_server != settings.dns_server
+            || repo.settings.bypass_lan != settings.bypass_lan;
+        repo.settings = settings.clone();
+        state.store.save(&repo)?;
+        *state.repository.write().await = repo;
+    }
+    let generation = state
+        .connection_generation
+        .load(std::sync::atomic::Ordering::Acquire);
+    let id = if changed {
+        state
+            .snapshot
+            .read()
+            .await
+            .info
+            .as_ref()
+            .map(|i| i.server_id.clone())
+    } else {
+        None
+    };
+    if let Some(id) = id {
+        if let Err(error) =
+            crate::services::vpn_service::connect_if_current(&state, &app, id.clone(), generation)
+                .await
+        {
+            let _guard = state.mutations.lock().await;
+            let mut repo = state.repository.read().await.clone();
+            repo.settings.network_mode = previous.network_mode;
+            repo.settings.dns_server = previous.dns_server;
+            repo.settings.dns_policy = previous.dns_policy;
+            repo.settings.bypass_lan = previous.bypass_lan;
+            state.store.save(&repo)?;
+            *state.repository.write().await = repo;
+            drop(_guard);
+            if error.code != "CANCELLED" && state.snapshot.read().await.status != "connected" {
+                let _ = crate::services::vpn_service::connect_if_current(
+                    &state,
+                    &app,
+                    id,
+                    generation + 1,
+                )
+                .await;
+            }
+            return Err(error);
+        }
+    } else {
+        let warm_state = state.inner().clone();
+        tauri::async_runtime::spawn(async move {
+            crate::services::vpn_service::prewarm(&warm_state).await;
+        });
+    }
+    Ok(SettingsDto {
+        settings,
+        core_version: super::updates::version(&state.core.read().await),
+    })
+}
+
+#[tauri::command]
+pub async fn reset_network_settings(state: tauri::State<'_, Arc<AppState>>) -> Result<()> {
+    #[cfg(windows)]
+    {
+        crate::platform::proxy::SystemProxy::recover(&state.data)?;
+    }
+    Ok(())
+}
+
+pub(crate) fn validate_settings(settings: &Settings) -> Result<()> {
+    settings.dns_policy.validate()?;
+    if !["direct", "proxy", "auto"].contains(&settings.subscription_transport.as_str()) {
+        return Err(BackendError::new(
+            "INVALID_CONFIG",
+            "Invalid subscription transport",
+        ));
+    }
     if !["tun", "proxy"].contains(&settings.network_mode.as_str()) {
         return Err(BackendError::new(
             "INVALID_CONFIG",
@@ -60,68 +151,6 @@ pub async fn set_settings(
             "INVALID_CONFIG",
             "Ping URL must use HTTP or HTTPS",
         ));
-    }
-    #[cfg(windows)]
-    {
-        if settings.auto_start != crate::platform::windows::is_autostart() {
-            crate::platform::windows::set_autostart(settings.auto_start)?;
-        }
-        settings.auto_start = crate::platform::windows::is_autostart();
-    }
-    let changed;
-    let previous;
-    {
-        let _guard = state.mutations.lock().await;
-        let mut repo = state.repository.read().await.clone();
-        previous = repo.settings.clone();
-        changed = repo.settings.network_mode != settings.network_mode
-            || repo.settings.dns_server != settings.dns_server
-            || repo.settings.bypass_lan != settings.bypass_lan;
-        repo.settings = settings.clone();
-        state.store.save(&repo)?;
-        *state.repository.write().await = repo;
-    }
-    let id = if changed {
-        state
-            .snapshot
-            .read()
-            .await
-            .info
-            .as_ref()
-            .map(|i| i.server_id.clone())
-    } else {
-        None
-    };
-    if let Some(id) = id {
-        if let Err(error) = crate::services::vpn_service::connect(&state, &app, id.clone()).await {
-            let _guard = state.mutations.lock().await;
-            let mut repo = state.repository.read().await.clone();
-            repo.settings.network_mode = previous.network_mode;
-            repo.settings.dns_server = previous.dns_server;
-            repo.settings.bypass_lan = previous.bypass_lan;
-            state.store.save(&repo)?;
-            *state.repository.write().await = repo;
-            drop(_guard);
-            if state.snapshot.read().await.status != "connected" {
-                let _ = crate::services::vpn_service::connect(&state, &app, id).await;
-            }
-            return Err(error);
-        }
-    } else {
-        let warm_state = state.inner().clone();
-        tauri::async_runtime::spawn(async move { crate::services::vpn_service::prewarm(&warm_state).await; });
-    }
-    Ok(SettingsDto {
-        settings,
-        core_version: super::updates::version(&state.core.read().await),
-    })
-}
-
-#[tauri::command]
-pub async fn reset_network_settings(state: tauri::State<'_, Arc<AppState>>) -> Result<()> {
-    #[cfg(windows)]
-    {
-        crate::platform::proxy::SystemProxy::recover(&state.data)?;
     }
     Ok(())
 }

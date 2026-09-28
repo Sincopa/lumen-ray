@@ -71,6 +71,12 @@ export function errorCode(error: unknown): ErrorCode {
 		RULE_UPDATE_FAILED: 'ruleUpdateFailed',
 		PERMISSION_DENIED: 'unavailable',
 		SERVER_UNREACHABLE: 'unavailable',
+		TUN_NETWORK_UNREACHABLE: 'unavailable',
+		SUBSCRIPTION_ACCESS_DENIED: 'invalidSubscription',
+		NOT_CONNECTED: 'unavailable',
+		CANCELLED: 'unavailable',
+		NETWORK_CHANGED: 'unavailable',
+		CORE_ROLLBACK_FAILED: 'unavailable',
 		BUSY: 'unavailable',
 	};
 	if (typeof code === 'string') code = nativeCodes[code] ?? code;

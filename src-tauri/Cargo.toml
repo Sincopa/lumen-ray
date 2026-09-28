@@ -34,6 +34,11 @@ fs2 = "0.4"
 zip = { version = "6", default-features = false, features = ["deflate"] }
 tauri-plugin-updater = "2"
 tauri-plugin-notification = "2"
+aes-gcm = "0.10"
+argon2 = "0.5"
+tauri-plugin-deep-link = "2"
+tauri-plugin-single-instance = "2"
+zeroize = { version = "1", features = ["alloc"] }
 
 [target.'cfg(windows)'.dependencies]
 png = "0.17"

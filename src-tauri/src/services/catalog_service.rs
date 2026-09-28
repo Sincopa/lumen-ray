@@ -374,9 +374,7 @@ pub async fn import(
         "inline"
     };
     log::info!("Subscription {operation} started ({source_kind} source)");
-    let fetched = state
-        .subscription_client
-        .fetch_with_metadata(&input)
+    let fetched = fetch_subscription(state, &input)
         .await
         .inspect_err(|error| {
             log::warn!("Subscription {operation} download failed: {}", error.code);
@@ -412,9 +410,10 @@ pub async fn import(
     let id = refresh_id
         .clone()
         .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
-    let parsed = crate::subscription::parser::parse(&fetched.body, &id).inspect_err(|error| {
-        log::warn!("Subscription {operation} parsing failed: {}", error.code);
-    })?;
+    let mut parsed =
+        crate::subscription::parser::parse(&fetched.body, &id).inspect_err(|error| {
+            log::warn!("Subscription {operation} parsing failed: {}", error.code);
+        })?;
     let mut skipped = std::collections::BTreeMap::new();
     for diagnostic in &parsed.diagnostics {
         *skipped.entry(diagnostic.code).or_insert(0usize) += 1;
@@ -429,6 +428,16 @@ pub async fn import(
     if refresh_id.is_some() && !next.sources.contains_key(&id) {
         return Err(BackendError::invalid());
     }
+    let old: Vec<_> = next
+        .nodes
+        .iter()
+        .filter(|n| n.subscription_id == id)
+        .cloned()
+        .collect();
+    let change = reconcile_nodes(&old, &mut parsed.nodes, &id);
+    next.subscription_changes.push(change);
+    let overflow = next.subscription_changes.len().saturating_sub(100);
+    next.subscription_changes.drain(..overflow);
     next.nodes.retain(|n| n.subscription_id != id);
     next.nodes.extend(parsed.nodes);
     if let Some(sub) = next.subscriptions.iter_mut().find(|s| s.id == id) {
@@ -460,6 +469,29 @@ pub async fn import(
             .map(|n| n.id.clone());
     }
     reconcile(&mut next);
+    if let Some(active) = state
+        .snapshot
+        .read()
+        .await
+        .info
+        .as_ref()
+        .map(|info| info.server_id.clone())
+    {
+        if next.nodes.iter().any(|node| node.id == active) {
+            let config = crate::xray::config::build(
+                &next,
+                &active,
+                10808,
+                10809,
+                next.settings.network_mode == "tun",
+            )?;
+            super::vpn_service::validate(
+                &state.core.read().await,
+                &serde_json::to_vec(&config).map_err(|_| BackendError::invalid())?,
+            )
+            .await?;
+        }
+    }
     state.store.save(&next)?;
     let latencies = state.latencies.read().await;
     let catalog = snapshot(&next, &latencies);
@@ -627,13 +659,141 @@ pub fn ordered_rules(rules: &[Rule]) -> Vec<&Rule> {
     use crate::storage::repository::RuleMatcher;
     let mut rows: Vec<_> = rules.iter().collect();
     rows.sort_by_key(|r| {
-        let builtin = matches!(r.preset_id.as_deref(), Some("russia-optimized" | "bypass-blocking" | "russia-direct"));
-        let rank = if !builtin { 0 } else if r.matcher == RuleMatcher::Geoip && r.name == "private" { 1 }
-        else if r.matcher == RuleMatcher::Geosite && r.name == "youtube" { 2 }
-        else if r.matcher == RuleMatcher::Geosite && r.server_id != "direct" { 3 }
-        else if r.matcher == RuleMatcher::Geosite { 4 }
-        else if r.server_id != "direct" { 5 } else { 6 };
+        let builtin = matches!(
+            r.preset_id.as_deref(),
+            Some("russia-optimized" | "bypass-blocking" | "russia-direct")
+        );
+        let rank = if !builtin {
+            0
+        } else if r.matcher == RuleMatcher::Geoip && r.name == "private" {
+            1
+        } else if r.matcher == RuleMatcher::Geosite && r.name == "youtube" {
+            2
+        } else if r.matcher == RuleMatcher::Geosite && r.server_id != "direct" {
+            3
+        } else if r.matcher == RuleMatcher::Geosite {
+            4
+        } else if r.server_id != "direct" {
+            5
+        } else {
+            6
+        };
         (rank, if builtin { r.id.as_str() } else { "" })
     });
     rows
+}
+
+async fn fetch_subscription(
+    state: &AppState,
+    input: &str,
+) -> Result<crate::subscription::fetcher::FetchedSubscription> {
+    if !input.trim().starts_with("https://") && !input.trim().starts_with("http://") {
+        return state.subscription_client.fetch_with_metadata(input).await;
+    }
+    let transport = state
+        .repository
+        .read()
+        .await
+        .settings
+        .subscription_transport
+        .clone();
+    let port = {
+        let session = state.session.lock().await;
+        session.started.map(|_| session.proxy_port)
+    };
+    if transport == "proxy" {
+        let port = port.ok_or_else(|| {
+            BackendError::new(
+                "NOT_CONNECTED",
+                "Connect before downloading through the VPN",
+            )
+        })?;
+        return state
+            .subscription_client
+            .through_proxy(port)?
+            .fetch_with_metadata(input)
+            .await;
+    }
+    match state.subscription_client.fetch_with_metadata(input).await {
+        Err(error)
+            if transport == "auto"
+                && error.code == "SUBSCRIPTION_FETCH_FAILED"
+                && port.is_some() =>
+        {
+            state
+                .subscription_client
+                .through_proxy(port.unwrap())?
+                .fetch_with_metadata(input)
+                .await
+        }
+        result => result,
+    }
+}
+
+fn reconcile_nodes(
+    old: &[crate::domain::node::VpnNode],
+    incoming: &mut [crate::domain::node::VpnNode],
+    subscription_id: &str,
+) -> crate::storage::repository::SubscriptionChange {
+    let mut claimed = std::collections::HashSet::new();
+    let mut added = 0;
+    let mut updated = 0;
+    for node in incoming {
+        let same_id = old
+            .iter()
+            .find(|previous| previous.id == node.id && !claimed.contains(&previous.id));
+        let matches: Vec<_> = old
+            .iter()
+            .filter(|previous| {
+                !claimed.contains(&previous.id)
+                    && previous.address == node.address
+                    && previous.port == node.port
+                    && previous.protocol == node.protocol
+                    && previous.name == node.name
+            })
+            .collect();
+        let previous = same_id.or_else(|| {
+            if matches.len() == 1 {
+                matches.first().copied()
+            } else {
+                None
+            }
+        });
+        if let Some(previous) = previous {
+            node.id = previous.id.clone();
+            if previous != node {
+                updated += 1;
+            }
+            claimed.insert(previous.id.clone());
+        } else {
+            added += 1;
+        }
+    }
+    crate::storage::repository::SubscriptionChange {
+        subscription_id: subscription_id.into(),
+        at: now(),
+        added,
+        updated,
+        removed: old.len().saturating_sub(claimed.len()),
+    }
+}
+
+#[cfg(test)]
+mod refresh_tests {
+    use super::*;
+    #[test]
+    fn credential_rotation_preserves_selection_and_reports_change() {
+        let old =
+            crate::subscription::uri::parse("trojan://old-password@example.org:443#Server", "sub")
+                .unwrap();
+        let new =
+            crate::subscription::uri::parse("trojan://new-password@example.org:443#Server", "sub")
+                .unwrap();
+        let mut incoming = vec![new];
+        let change = reconcile_nodes(std::slice::from_ref(&old), &mut incoming, "sub");
+        assert_eq!(incoming[0].id, old.id);
+        assert_eq!((change.added, change.updated, change.removed), (0, 1, 0));
+        let change = reconcile_nodes(&incoming.clone(), &mut incoming, "sub");
+        assert_eq!((change.added, change.updated, change.removed), (0, 0, 0));
+    }
 }

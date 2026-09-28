@@ -34,24 +34,38 @@ pub fn build_standby(
     metrics_port: u16,
 ) -> Result<XrayConfig> {
     let mut config = build(repo, selected, proxy_port, metrics_port, true)?;
-    let tun = config.inbounds.iter_mut()
+    let tun = config
+        .inbounds
+        .iter_mut()
         .find(|inbound| inbound["protocol"] == "tun")
         .ok_or_else(BackendError::invalid)?;
-    tun["settings"].as_object_mut()
+    tun["settings"]
+        .as_object_mut()
         .ok_or_else(BackendError::invalid)?
         .remove("autoSystemRoutingTable");
-    let api_port = metrics_port.checked_add(2).ok_or_else(BackendError::invalid)?;
-    config.api = Some(json!({"tag":"lumen-api","listen":format!("127.0.0.1:{api_port}"),"services":["RoutingService"]}));
+    let api_port = metrics_port
+        .checked_add(2)
+        .ok_or_else(BackendError::invalid)?;
+    config.api = Some(
+        json!({"tag":"lumen-api","listen":format!("127.0.0.1:{api_port}"),"services":["RoutingService"]}),
+    );
     Ok(config)
 }
 
 /// Xray replaces the complete rule set atomically through RoutingService.
 /// Other configuration sections must stay identical during a live update.
 #[cfg(windows)]
-pub fn live_routing_patch(repo_before: &Repository, repo_after: &Repository, selected: &str) -> Result<Option<Value>> {
+pub fn live_routing_patch(
+    repo_before: &Repository,
+    repo_after: &Repository,
+    selected: &str,
+) -> Result<Option<Value>> {
     let before = build(repo_before, selected, 10808, 10809, true)?;
     let after = build(repo_after, selected, 10808, 10809, true)?;
-    if after.outbounds.iter().any(|outbound| !before.outbounds.contains(outbound))
+    if after
+        .outbounds
+        .iter()
+        .any(|outbound| !before.outbounds.contains(outbound))
         || before.inbounds != after.inbounds
         || before.dns != after.dns
         || before.observatory != after.observatory
@@ -176,122 +190,165 @@ pub fn build(
         json!({"type":"field","inboundTag":["probe"], target_field: target_tag}),
         json!({"type":"field","process":["self/"],"outboundTag":"direct"}),
     ];
-    let dns_servers = if tun || repo.routing_mode == "rules" {
+    let dns_servers = if repo.settings.dns_policy.enabled {
+        vec![repo.settings.dns_policy.bootstrap.clone()]
+    } else if tun || repo.routing_mode == "rules" {
         if repo.settings.dns_server == "system" {
-            #[cfg(windows)] { crate::platform::network::system_dns()? }
-            #[cfg(not(windows))] { return Err(BackendError::new("PLATFORM_UNSUPPORTED", "System DNS requires Windows")); }
-        } else { vec![repo.settings.dns_server.clone()] }
-    } else { vec![] };
+            #[cfg(windows)]
+            {
+                crate::platform::network::system_dns()?
+            }
+            #[cfg(not(windows))]
+            {
+                return Err(BackendError::new(
+                    "PLATFORM_UNSUPPORTED",
+                    "System DNS requires Windows",
+                ));
+            }
+        } else {
+            vec![repo.settings.dns_server.clone()]
+        }
+    } else {
+        vec![]
+    };
     // System/private resolvers stay reachable on the physical network. Explicit public
     // resolvers use the selected VPN, including balancers. This tag precedes self/LAN.
-    let dns = if tun || repo.routing_mode == "rules" {
-        let local = repo.settings.dns_server == "system" || dns_servers.iter().any(|s| {
-            s.parse::<std::net::IpAddr>().is_ok_and(|ip| match ip {
-                std::net::IpAddr::V4(ip) => ip.is_private() || ip.is_loopback() || ip.is_link_local(),
-                std::net::IpAddr::V6(ip) => ip.is_loopback() || ip.is_unique_local() || ip.is_unicast_link_local(),
-            })
-        });
+    let dns = if repo.settings.dns_policy.enabled {
+        Some(super::dns_policy::build(
+            repo,
+            target_field,
+            target_tag,
+            &mut rules,
+        )?)
+    } else if tun || repo.routing_mode == "rules" {
+        let local = repo.settings.dns_server == "system"
+            || dns_servers.iter().any(|s| {
+                s.parse::<std::net::IpAddr>().is_ok_and(|ip| match ip {
+                    std::net::IpAddr::V4(ip) => {
+                        ip.is_private() || ip.is_loopback() || ip.is_link_local()
+                    }
+                    std::net::IpAddr::V6(ip) => {
+                        ip.is_loopback() || ip.is_unique_local() || ip.is_unicast_link_local()
+                    }
+                })
+            });
         if tun || repo.routing_mode == "rules" {
-            rules.insert(0, if local {
-                json!({"type":"field","inboundTag":["dns-query"],"outboundTag":"direct"})
-            } else { json!({"type":"field","inboundTag":["dns-query"],target_field:target_tag}) });
+            rules.insert(
+                0,
+                if local {
+                    json!({"type":"field","inboundTag":["dns-query"],"outboundTag":"direct"})
+                } else {
+                    json!({"type":"field","inboundTag":["dns-query"],target_field:target_tag})
+                },
+            );
         }
-        let servers: Vec<_> = dns_servers.iter().map(|s| if s.contains(':') { format!("tcp://[{s}]") } else { format!("tcp://{s}") }).collect();
+        let servers: Vec<_> = dns_servers
+            .iter()
+            .map(|s| {
+                if s.contains(':') {
+                    format!("tcp://[{s}]")
+                } else {
+                    format!("tcp://{s}")
+                }
+            })
+            .collect();
         Some(json!({"tag":"dns-query","servers":servers}))
-    } else { None };
+    } else {
+        None
+    };
     // Hijack A/AAAA before LAN bypass, including queries originally sent to a local router.
     if tun || repo.routing_mode == "rules" {
         outbounds.push(json!({"tag":"dns","protocol":"dns"}));
     }
-    if repo.routing_mode == "rules" {
+    if repo.routing_mode == "rules" || (tun && repo.settings.dns_policy.enabled) {
         rules.push(json!({"type":"field","port":"53","outboundTag":"dns"}));
     }
     if repo.settings.bypass_lan {
         rules.push(json!({"type":"field","ip":["127.0.0.0/8","10.0.0.0/8","172.16.0.0/12","192.168.0.0/16","169.254.0.0/16","::1/128","fc00::/7","fe80::/10"],"outboundTag":"direct"}));
     }
     for rule in crate::services::catalog_service::ordered_rules(&repo.rules) {
-            let target = if ["direct", "block"].contains(&rule.server_id.as_str()) {
-                rule.server_id.clone()
-            } else if rule.server_id == "subscription"
-                || rule.server_id == selected
-                || rule.server_id.is_empty()
-            {
-                target_tag.to_string()
-            } else if let Some(target) =
-                repo.nodes
-                    .iter()
-                    .find(|n| n.id == rule.server_id)
-                    .or_else(|| {
-                        repo.nodes
-                            .iter()
-                            .find(|n| n.subscription_id == rule.server_id)
-                    })
-            {
-                if target.balancer.is_none() && !outbounds.iter().any(|o| o["tag"] == target.id) {
-                    if let Ok(ob) = outbound(target, &target.id) {
-                        outbounds.push(ob);
-                    }
+        let target = if ["direct", "block"].contains(&rule.server_id.as_str()) {
+            rule.server_id.clone()
+        } else if rule.server_id == "subscription"
+            || rule.server_id == selected
+            || rule.server_id.is_empty()
+        {
+            target_tag.to_string()
+        } else if let Some(target) =
+            repo.nodes
+                .iter()
+                .find(|n| n.id == rule.server_id)
+                .or_else(|| {
+                    repo.nodes
+                        .iter()
+                        .find(|n| n.subscription_id == rule.server_id)
+                })
+        {
+            if target.balancer.is_none() && !outbounds.iter().any(|o| o["tag"] == target.id) {
+                if let Ok(ob) = outbound(target, &target.id) {
+                    outbounds.push(ob);
                 }
-                target.id.clone()
-            } else {
-                target_tag.to_string()
-            };
-            // Keep an outbound available when its rule is temporarily disabled,
-            // so re-enabling it only replaces routing rules through the live API.
-            if !rule.enabled || repo.routing_mode != "rules" { continue; }
-            let is_balancer_target = balancer_tag.as_deref() == Some(&target);
-            let mut compiled = if is_balancer_target {
-                json!({"type":"field","balancerTag":target})
-            } else {
-                json!({"type":"field","outboundTag":target})
-            };
-            if rule.name.is_empty()
-                || rule.name.len() > 1024
-                || rule.name.chars().any(char::is_control)
-            {
-                return Err(BackendError::new("INVALID_RULE", "Invalid routing rule"));
             }
-            match rule.matcher {
-                crate::storage::repository::RuleMatcher::Domain => {
-                    let value = rule.name.trim();
-                    if let Some((address, prefix)) = value.split_once('/') {
-                        if let Ok(ip) = address.parse::<std::net::IpAddr>() {
-                            let prefix: u8 = prefix.parse().map_err(|_| {
-                                BackendError::new("INVALID_RULE", "Invalid network prefix")
-                            })?;
-                            if prefix > if ip.is_ipv4() { 32 } else { 128 } {
-                                return Err(BackendError::new(
-                                    "INVALID_RULE",
-                                    "Invalid network prefix",
-                                ));
-                            }
-                            compiled["ip"] = json!([value]);
-                        } else {
-                            compiled["domain"] = json!([domain_rule(value)?]);
+            target.id.clone()
+        } else {
+            target_tag.to_string()
+        };
+        // Keep an outbound available when its rule is temporarily disabled,
+        // so re-enabling it only replaces routing rules through the live API.
+        if !rule.enabled || repo.routing_mode != "rules" {
+            continue;
+        }
+        let is_balancer_target = balancer_tag.as_deref() == Some(&target);
+        let mut compiled = if is_balancer_target {
+            json!({"type":"field","balancerTag":target})
+        } else {
+            json!({"type":"field","outboundTag":target})
+        };
+        if rule.name.is_empty() || rule.name.len() > 1024 || rule.name.chars().any(char::is_control)
+        {
+            return Err(BackendError::new("INVALID_RULE", "Invalid routing rule"));
+        }
+        match rule.matcher {
+            crate::storage::repository::RuleMatcher::Domain => {
+                let value = rule.name.trim();
+                if let Some((address, prefix)) = value.split_once('/') {
+                    if let Ok(ip) = address.parse::<std::net::IpAddr>() {
+                        let prefix: u8 = prefix.parse().map_err(|_| {
+                            BackendError::new("INVALID_RULE", "Invalid network prefix")
+                        })?;
+                        if prefix > if ip.is_ipv4() { 32 } else { 128 } {
+                            return Err(BackendError::new(
+                                "INVALID_RULE",
+                                "Invalid network prefix",
+                            ));
                         }
-                    } else if value.parse::<std::net::IpAddr>().is_ok() {
                         compiled["ip"] = json!([value]);
                     } else {
                         compiled["domain"] = json!([domain_rule(value)?]);
                     }
-                }
-                crate::storage::repository::RuleMatcher::Application => {
-                    compiled["process"] = json!(rule
-                        .name
-                        .split(',')
-                        .map(|p| p.trim().replace('\\', "/"))
-                        .collect::<Vec<_>>());
-                }
-                crate::storage::repository::RuleMatcher::Geosite => {
-                    let tag = crate::storage::repository::normalize_geo_tag(&rule.name, "geosite")?;
-                    compiled["domain"] = json!([format!("geosite:{tag}")]);
-                }
-                crate::storage::repository::RuleMatcher::Geoip => {
-                    let tag = crate::storage::repository::normalize_geo_tag(&rule.name, "geoip")?;
-                    compiled["ip"] = json!([format!("geoip:{tag}")]);
+                } else if value.parse::<std::net::IpAddr>().is_ok() {
+                    compiled["ip"] = json!([value]);
+                } else {
+                    compiled["domain"] = json!([domain_rule(value)?]);
                 }
             }
-            rules.push(compiled);
+            crate::storage::repository::RuleMatcher::Application => {
+                compiled["process"] = json!(rule
+                    .name
+                    .split(',')
+                    .map(|p| p.trim().replace('\\', "/"))
+                    .collect::<Vec<_>>());
+            }
+            crate::storage::repository::RuleMatcher::Geosite => {
+                let tag = crate::storage::repository::normalize_geo_tag(&rule.name, "geosite")?;
+                compiled["domain"] = json!([format!("geosite:{tag}")]);
+            }
+            crate::storage::repository::RuleMatcher::Geoip => {
+                let tag = crate::storage::repository::normalize_geo_tag(&rule.name, "geoip")?;
+                compiled["ip"] = json!([format!("geoip:{tag}")]);
+            }
+        }
+        rules.push(compiled);
     }
     let default_field = if repo.routing_mode == "rules" || balancer_tag.is_none() {
         "outboundTag"
@@ -304,6 +361,22 @@ pub fn build(
         target_tag
     };
     rules.push(json!({"type":"field","network":"tcp,udp", default_field: default_val}));
+    if repo.settings.dns_policy.enabled {
+        for outbound in &mut outbounds {
+            if matches!(
+                outbound["protocol"].as_str(),
+                Some("vless" | "vmess" | "trojan" | "shadowsocks" | "hysteria")
+            ) {
+                if outbound.get("streamSettings").is_none() {
+                    outbound["streamSettings"] = json!({});
+                }
+                if outbound["streamSettings"].get("sockopt").is_none() {
+                    outbound["streamSettings"]["sockopt"] = json!({});
+                }
+                outbound["streamSettings"]["sockopt"]["domainStrategy"] = json!("UseIP");
+            }
+        }
+    }
     let mut inbounds = vec![
         json!({"tag":"probe","listen":"127.0.0.1","port":proxy_port,"protocol":"socks","settings":{"auth":"noauth","udp":true}}),
     ];
@@ -338,7 +411,7 @@ pub fn build(
         observatory,
     })
 }
-fn domain_rule(value: &str) -> Result<String> {
+pub(crate) fn domain_rule(value: &str) -> Result<String> {
     let value = value.trim_end_matches('/');
     let value = value.strip_prefix("*.").unwrap_or(value);
     let value = value.to_lowercase();

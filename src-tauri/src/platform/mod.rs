@@ -6,6 +6,8 @@ pub mod icons;
 #[cfg(windows)]
 pub mod network;
 #[cfg(windows)]
+pub mod network_watch;
+#[cfg(windows)]
 pub mod process;
 #[cfg(windows)]
 pub mod proxy;

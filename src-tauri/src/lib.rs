@@ -35,13 +35,35 @@ pub fn run_helper_if_requested() -> bool {
 }
 pub fn run_smoke_if_requested() -> bool {
     #[cfg(all(windows, debug_assertions))]
-    if matches!(std::env::args().nth(1).as_deref(), Some("--lumen-smoke-tun" | "--lumen-smoke-warm" | "--lumen-smoke-warm-live" | "--lumen-smoke-standby")) {
+    if matches!(
+        std::env::args().nth(1).as_deref(),
+        Some(
+            "--lumen-smoke-tun"
+                | "--lumen-smoke-warm"
+                | "--lumen-smoke-warm-live"
+                | "--lumen-smoke-standby"
+        )
+    ) {
         let warm = std::env::args().nth(1).as_deref() == Some("--lumen-smoke-warm");
         let live = std::env::args().nth(1).as_deref() == Some("--lumen-smoke-warm-live");
         let standby = std::env::args().nth(1).as_deref() == Some("--lumen-smoke-standby");
         match tokio::runtime::Runtime::new() {
-            Ok(runtime) => match runtime.block_on(async { if warm { platform::smoke::warm_route_cycle().await } else if live { platform::smoke::warm_live().await } else if standby { platform::smoke::warm_standby_isolation().await } else { platform::smoke::run().await } }) {
-                Ok(()) => if !warm && !live && !standby { println!("NATIVE_SMOKE_OK"); },
+            Ok(runtime) => match runtime.block_on(async {
+                if warm {
+                    platform::smoke::warm_route_cycle().await
+                } else if live {
+                    platform::smoke::warm_live().await
+                } else if standby {
+                    platform::smoke::warm_standby_isolation().await
+                } else {
+                    platform::smoke::run().await
+                }
+            }) {
+                Ok(()) => {
+                    if !warm && !live && !standby {
+                        println!("NATIVE_SMOKE_OK");
+                    }
+                }
                 Err(error) => {
                     eprintln!("{error}");
                     std::process::exit(1);
@@ -56,6 +78,17 @@ pub fn run_smoke_if_requested() -> bool {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let application = tauri::Builder::default()
+        .plugin(tauri_plugin_single_instance::init(|app, args, _| {
+            for arg in args {
+                commands::tools::queue_import_link(app, &arg);
+            }
+            if let Some(window) = app.get_webview_window("main") {
+                let _ = window.show();
+                let _ = window.unminimize();
+                let _ = window.set_focus();
+            }
+        }))
+        .plugin(tauri_plugin_deep_link::init())
         .plugin(
             tauri_plugin_log::Builder::default()
                 .level(log::LevelFilter::Info)
@@ -67,6 +100,14 @@ pub fn run() {
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_notification::init())
         .invoke_handler(tauri::generate_handler![
+            commands::tools::export_backup,
+            commands::tools::take_import_link,
+            commands::tools::preview_backup,
+            commands::tools::restore_backup,
+            commands::tools::get_maintenance_history,
+            commands::tools::export_diagnostic_report,
+            commands::tools::inspect_destination,
+            commands::tools::get_active_connections,
             vpn::connect,
             vpn::connect_exact,
             vpn::disconnect,
@@ -205,6 +246,18 @@ pub fn run() {
             }
 
             app.manage(state);
+            use tauri_plugin_deep_link::DeepLinkExt;
+            if let Ok(Some(urls)) = app.deep_link().get_current() {
+                for url in urls {
+                    commands::tools::queue_import_link(app.handle(), url.as_str());
+                }
+            }
+            let handle = app.handle().clone();
+            app.deep_link().on_open_url(move |event| {
+                for url in event.urls() {
+                    commands::tools::queue_import_link(&handle, url.as_str());
+                }
+            });
             Ok(())
         })
         .on_window_event(|window, event| {

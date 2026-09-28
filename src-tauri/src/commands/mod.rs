@@ -3,5 +3,6 @@ pub mod diagnostics;
 pub mod geo;
 pub mod notifications;
 pub mod settings;
+pub mod tools;
 pub mod updates;
 pub mod vpn;

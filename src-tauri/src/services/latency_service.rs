@@ -5,6 +5,31 @@ static PROBES: tokio::sync::Semaphore = tokio::sync::Semaphore::const_new(4);
 static PROBE_STARTUP: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
 pub async fn ping(state: &AppState, id: String) -> Result<serde_json::Value> {
+    let value = ping_inner(state, id.clone()).await?;
+    state
+        .latencies
+        .write()
+        .await
+        .insert(id.clone(), value.clone());
+    if state
+        .repository
+        .read()
+        .await
+        .nodes
+        .iter()
+        .any(|node| node.id == id)
+    {
+        state
+            .server_quality
+            .write()
+            .await
+            .entry(id)
+            .or_default()
+            .record(value.as_u64());
+    }
+    Ok(value)
+}
+async fn ping_inner(state: &AppState, id: String) -> Result<serde_json::Value> {
     let _permit = match PROBES.acquire().await {
         Ok(p) => p,
         Err(_) => return Ok(serde_json::json!("timeout")),
@@ -68,9 +93,6 @@ pub async fn ping(state: &AppState, id: String) -> Result<serde_json::Value> {
         None => serde_json::json!("timeout"),
     };
 
-    // Cache the measured latency in AppState so it is never lost on navigation
-    state.latencies.write().await.insert(id, val.clone());
-
     Ok(val)
 }
 
@@ -79,6 +101,7 @@ async fn probe_target(proxy_port: u16, custom_url: &str) -> Option<u64> {
     let client = reqwest::Client::builder()
         .no_proxy()
         .proxy(proxy)
+        .redirect(reqwest::redirect::Policy::none())
         .timeout(Duration::from_millis(2500))
         .build()
         .ok()?;
@@ -87,14 +110,18 @@ async fn probe_target(proxy_port: u16, custom_url: &str) -> Option<u64> {
     if !custom_url.is_empty() {
         endpoints.push(custom_url);
     }
-    endpoints.push("http://www.google.com/generate_204");
-    endpoints.push("http://cp.cloudflare.com/generate_204");
+    endpoints.push("https://www.google.com/generate_204");
+    endpoints.push("https://cp.cloudflare.com/generate_204");
 
     for endpoint in endpoints {
         let start = Instant::now();
         if let Ok(res) = client.get(endpoint).send().await {
             let status = res.status().as_u16();
-            if (200..=299).contains(&status) || status == 301 || status == 302 {
+            if if endpoint.ends_with("/generate_204") {
+                status == 204
+            } else {
+                (200..=299).contains(&status)
+            } {
                 return Some(start.elapsed().as_millis() as u64);
             }
         }

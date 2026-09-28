@@ -266,6 +266,29 @@ impl SubscriptionClient {
         &self.user_agent
     }
 
+    pub fn through_proxy(&self, port: u16) -> Result<Self> {
+        let client = reqwest::Client::builder()
+            .no_proxy()
+            .proxy(
+                reqwest::Proxy::all(format!("socks5h://127.0.0.1:{port}"))
+                    .map_err(|_| BackendError::invalid())?,
+            )
+            .timeout(Duration::from_secs(30))
+            .redirect(reqwest::redirect::Policy::none())
+            .build()
+            .map_err(|_| {
+                BackendError::new(
+                    "SUBSCRIPTION_FETCH_FAILED",
+                    "Could not initialize subscription transport",
+                )
+            })?;
+        Ok(Self {
+            client,
+            identity_provider: self.identity_provider.clone(),
+            user_agent: self.user_agent.clone(),
+        })
+    }
+
     /// Fetches a subscription and its metadata, applying HWID headers and redirect privacy.
     pub async fn fetch_with_metadata(&self, source: &str) -> Result<FetchedSubscription> {
         let source = source
@@ -417,6 +440,12 @@ impl SubscriptionClient {
         }
 
         // If no Remnawave HWID error headers were received, verify standard HTTP status
+        if response.status().is_client_error() && response.status().as_u16() != 429 {
+            return Err(BackendError::new(
+                "SUBSCRIPTION_ACCESS_DENIED",
+                "The subscription service rejected the request",
+            ));
+        }
         response = response.error_for_status().map_err(|_| error())?;
 
         let user_info = response.headers().iter().find_map(|(name, value)| {

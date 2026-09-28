@@ -3,6 +3,25 @@ import { get, writable } from 'svelte/store';
 import { createMaintenance } from '../../src/lib/services/maintenance';
 
 describe('subscription maintenance', () => {
+	it('does not retry provider rejection or device limits', async () => {
+		for (const code of ['SUBSCRIPTION_ACCESS_DENIED', 'HWID_DEVICE_LIMIT']) {
+			let calls = 0;
+			const maintenance = createMaintenance(
+				{
+					state: writable({ subscriptions: [{ id: 'a' }] }),
+					getServers: async () => [],
+					pingServer: async () => 0,
+					refreshSubscription: async () => {
+						calls++;
+						throw { code };
+					},
+				},
+				async () => {},
+			);
+			await maintenance.refreshAllSubscriptions();
+			expect(calls).toBe(1);
+		}
+	});
 	it('refreshes every subscription, retries failures and limits parallel fetches', async () => {
 		const attempts = new Map<string, number>();
 		let active = 0;
@@ -19,7 +38,8 @@ describe('subscription maintenance', () => {
 				await Promise.resolve();
 				active--;
 				attempts.set(id, (attempts.get(id) ?? 0) + 1);
-				if (id === 'b' && attempts.get(id) === 1) throw new Error('temporary');
+				if (id === 'b' && attempts.get(id) === 1)
+					throw { code: 'SUBSCRIPTION_FETCH_FAILED' };
 			},
 		};
 		const maintenance = createMaintenance(service, async () => {});

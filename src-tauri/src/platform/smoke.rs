@@ -21,9 +21,13 @@ async fn routing_rule_count(core: &std::path::Path, api_port: u16) -> Result<usi
             .args(["api", "lsrules", &format!("--server=127.0.0.1:{api_port}")])
             .output(),
     ).await.map_err(|_| error())?.map_err(|_| error())?;
-    if !output.status.success() { return Err(error()); }
-    let response: serde_json::Value = serde_json::from_slice(&output.stdout).map_err(|_| error())?;
-    response["rules"].as_array().map(Vec::len).ok_or_else(error)
+    if !output.status.success() {
+        return Err(BackendError::new("SMOKE_FAILED", "Routing API list command failed"));
+    }
+    let response: serde_json::Value = serde_json::from_slice(&output.stdout)
+        .map_err(|_| BackendError::new("SMOKE_FAILED", "Routing API list response is not JSON"))?;
+    response["rules"].as_array().map(Vec::len)
+        .ok_or_else(|| BackendError::new("SMOKE_FAILED", "Routing API list response has no rules array"))
 }
 async fn resolve_ip(proxy: Option<u16>) -> Result<String> {
     let mut builder = reqwest::Client::builder()
@@ -251,7 +255,9 @@ pub async fn warm_route_cycle() -> Result<()> {
 /// Check the background adapter, ordinary Internet and Xray's live routing API
 /// without installing a VPN default route or contacting a private server.
 pub async fn warm_standby_isolation() -> Result<()> {
+    eprintln!("STANDBY_CHECK baseline Internet");
     let original = public_ip().await?;
+    eprintln!("STANDBY_CHECK baseline Steam endpoint");
     steam_reachable().await?;
     let node = crate::subscription::uri::parse(
         "vless://00000000-0000-4000-8000-000000000001@example.com:443?encryption=none&security=tls&type=tcp&sni=example.com#offline-smoke",
@@ -284,20 +290,27 @@ pub async fn warm_standby_isolation() -> Result<()> {
         prepared = super::helper::start_standby(request, data.path()).await;
     }
     let mut helper = prepared?;
+    eprintln!("STANDBY_CHECK prepared adapter isolation");
     let result = async {
         if !super::network::standby_isolated() { return Err(error()); }
         if public_ip().await? != original { return Err(error()); }
         steam_reachable().await?;
+        eprintln!("STANDBY_CHECK live rule update");
         let old_count = routing_rule_count(&core, metrics_port + 2).await?;
         let patch = crate::xray::config::live_routing_patch(&before, &after, &selected)?
             .ok_or_else(error)?;
         crate::services::vpn_service::run_live_routing_patch(&core, metrics_port + 2, &patch).await?;
-        if routing_rule_count(&core, metrics_port + 2).await? + 1 != old_count { return Err(error()); }
+        let updated_count = routing_rule_count(&core, metrics_port + 2).await?;
+        if updated_count + 1 != old_count {
+            return Err(BackendError::new("SMOKE_FAILED", format!("Rule count after update: {updated_count}, before: {old_count}")));
+        }
+        eprintln!("STANDBY_CHECK rules to global");
         let mode_patch = crate::xray::config::live_routing_patch(&after, &global, &selected)?
             .ok_or_else(error)?;
         crate::services::vpn_service::run_live_routing_patch(&core, metrics_port + 2, &mode_patch).await?;
         let global_count = routing_rule_count(&core, metrics_port + 2).await?;
         if global_count >= old_count { return Err(error()); }
+        eprintln!("STANDBY_CHECK global to rules");
         let back_patch = crate::xray::config::live_routing_patch(&global, &after, &selected)?
             .ok_or_else(error)?;
         crate::services::vpn_service::run_live_routing_patch(&core, metrics_port + 2, &back_patch).await?;
@@ -306,6 +319,7 @@ pub async fn warm_standby_isolation() -> Result<()> {
         steam_reachable().await?;
         Ok(())
     }.await;
+    eprintln!("STANDBY_CHECK cleanup");
     let cleanup = helper.stop().await;
     result?;
     cleanup?;

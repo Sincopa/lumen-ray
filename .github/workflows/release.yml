@@ -81,14 +81,26 @@ jobs:
       - name: Verify frontend
         run: |
           npm run check
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           npm run lint
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           npm run format:check
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           npm test
 
       - name: Verify Rust backend
         run: |
           cargo test --locked --manifest-path src-tauri/Cargo.toml
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           cargo clippy --locked --manifest-path src-tauri/Cargo.toml --all-targets --all-features -- -D warnings
+
+      - name: Verify native local traffic and browser flows
+        run: |
+          npm run test:smoke
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          npm run build
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          npm run test:e2e
 
       - name: Build and publish signed release
         uses: tauri-apps/tauri-action@v1
