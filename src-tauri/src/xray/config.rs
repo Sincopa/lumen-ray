@@ -1,7 +1,7 @@
 use crate::{
     domain::{
         errors::{BackendError, Result},
-        node::{Protocol, VpnNode},
+        node::{NodeIndex, Protocol, VpnNode},
     },
     storage::repository::Repository,
 };
@@ -47,7 +47,7 @@ pub fn build_standby(
         .checked_add(2)
         .ok_or_else(BackendError::invalid)?;
     config.api = Some(
-        json!({"tag":"lumen-api","listen":format!("127.0.0.1:{api_port}"),"services":["RoutingService"]}),
+        json!({"tag":"lumen-api","listen":format!("127.0.0.1:{api_port}"),"services":["RoutingService","HandlerService"]}),
     );
     Ok(config)
 }
@@ -79,6 +79,8 @@ pub fn live_routing_patch(
 pub fn outbound(node: &VpnNode, tag: &str) -> Result<Value> {
     node.validate()?;
     let protocol = match node.protocol {
+        Protocol::Socks => "socks",
+        Protocol::Http => "http",
         Protocol::Vless => "vless",
         Protocol::Vmess => "vmess",
         Protocol::Trojan => "trojan",
@@ -87,6 +89,13 @@ pub fn outbound(node: &VpnNode, tag: &str) -> Result<Value> {
         Protocol::Wireguard => "wireguard",
     };
     let settings = match node.protocol {
+        Protocol::Socks | Protocol::Http => {
+            let mut server = json!({"address":node.address,"port":node.port});
+            if !node.method.is_empty() {
+                server["users"] = json!([{"user":node.method,"pass":node.credential}]);
+            }
+            json!({"servers":[server]})
+        }
         Protocol::Wireguard => {
             serde_json::to_value(node.wireguard.as_ref().ok_or_else(BackendError::invalid)?)
                 .map_err(|_| BackendError::invalid())?
@@ -266,6 +275,8 @@ pub fn build(
     if repo.settings.bypass_lan {
         rules.push(json!({"type":"field","ip":["127.0.0.0/8","10.0.0.0/8","172.16.0.0/12","192.168.0.0/16","169.254.0.0/16","::1/128","fc00::/7","fe80::/10"],"outboundTag":"direct"}));
     }
+    let mut nodes = None;
+    let mut outbound_tags: Option<std::collections::HashSet<String>> = None;
     for rule in crate::services::catalog_service::ordered_rules(&repo.rules) {
         let target = if ["direct", "block"].contains(&rule.server_id.as_str()) {
             rule.server_id.clone()
@@ -274,19 +285,22 @@ pub fn build(
             || rule.server_id.is_empty()
         {
             target_tag.to_string()
-        } else if let Some(target) =
-            repo.nodes
-                .iter()
-                .find(|n| n.id == rule.server_id)
-                .or_else(|| {
-                    repo.nodes
-                        .iter()
-                        .find(|n| n.subscription_id == rule.server_id)
-                })
+        } else if let Some(target) = nodes
+            .get_or_insert_with(|| NodeIndex::new(&repo.nodes))
+            .target(&rule.server_id)
         {
-            if target.balancer.is_none() && !outbounds.iter().any(|o| o["tag"] == target.id) {
-                if let Ok(ob) = outbound(target, &target.id) {
-                    outbounds.push(ob);
+            if target.balancer.is_none() {
+                let tags = outbound_tags.get_or_insert_with(|| {
+                    outbounds
+                        .iter()
+                        .filter_map(|outbound| outbound["tag"].as_str().map(str::to_owned))
+                        .collect()
+                });
+                if !tags.contains(&target.id) {
+                    if let Ok(ob) = outbound(target, &target.id) {
+                        tags.insert(target.id.clone());
+                        outbounds.push(ob);
+                    }
                 }
             }
             target.id.clone()

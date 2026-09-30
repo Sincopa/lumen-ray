@@ -25,7 +25,7 @@ impl BackendError {
     pub fn unsupported() -> Self {
         Self::new(
             "UNSUPPORTED_PROTOCOL",
-            "This node configuration cannot be safely converted to Xray",
+            "This node configuration contains unsupported protocol or transport parameters",
         )
     }
 }

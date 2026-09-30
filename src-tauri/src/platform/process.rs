@@ -93,7 +93,9 @@ impl Drop for Attributes {
 }
 impl CoreProcess {
     pub fn diagnostic_category(&self) -> Option<&'static str> {
-        self._logs.as_ref().and_then(crate::diagnostics::CoreLogs::last_category)
+        self._logs
+            .as_ref()
+            .and_then(crate::diagnostics::CoreLogs::last_category)
     }
     pub async fn spawn(core: &Path, config: &[u8]) -> Result<Self> {
         let (mut process, input, output) = Self::launch(core)?;
@@ -119,7 +121,10 @@ impl CoreProcess {
                     && !k.eq_ignore_ascii_case("GODEBUG")
             })
             .collect();
-        vars.push(("XRAY_LOCATION_ASSET".into(), crate::xray::geo::assets_for_core(core).into_os_string()));
+        vars.push((
+            "XRAY_LOCATION_ASSET".into(),
+            crate::xray::geo::assets_for_core(core).into_os_string(),
+        ));
         vars.push(("GOMEMLIMIT".into(), "100MiB".into()));
         vars.push(("GODEBUG".into(), "madvdontneed=1".into()));
         vars.sort_by_key(|(key, _)| key.to_string_lossy().to_uppercase());
@@ -234,7 +239,7 @@ impl CoreProcess {
         let executable = std::env::current_exe()?;
         let result = tokio::time::timeout(
             Duration::from_secs(2),
-            crate::services::vpn_service::command(&executable)
+            crate::core::xray::command(&executable)
                 .args(["--lumen-signal", &self.pid.to_string()])
                 .stdout(std::process::Stdio::null())
                 .stderr(std::process::Stdio::null())

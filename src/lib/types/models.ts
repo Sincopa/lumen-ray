@@ -22,7 +22,9 @@ export type VpnProtocol =
 	| 'Shadowsocks'
 	| 'Reality'
 	| 'Hysteria'
-	| 'WireGuard';
+	| 'WireGuard'
+	| 'SOCKS5'
+	| 'HTTP';
 
 export interface VpnServer {
 	id: string;

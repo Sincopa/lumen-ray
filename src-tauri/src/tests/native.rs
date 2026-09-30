@@ -4,8 +4,14 @@ use super::*;
 #[ignore = "Requires an explicit local DPAPI repository directory and a browser; never modifies user data"]
 fn private_geo_video_check() {
     let source = std::env::var_os("LUMEN_GEO_TEST_REPOSITORY").expect("Set repository directory");
-    let saved = RepositoryStore::new(std::path::Path::new(&source)).unwrap().load().unwrap();
-    let selected = saved.selected_server_id.clone().expect("Select a server first");
+    let saved = RepositoryStore::new(std::path::Path::new(&source))
+        .unwrap()
+        .load()
+        .unwrap();
+    let selected = saved
+        .selected_server_id
+        .clone()
+        .expect("Select a server first");
     let resources = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("resources/core");
     let isolated = tempfile::tempdir().unwrap();
     let core = core::prepare(&resources, isolated.path()).unwrap();
@@ -13,19 +19,39 @@ fn private_geo_video_check() {
         let mut repo = saved.clone();
         repo.routing_mode = if mode == "global" { "global" } else { "rules" }.into();
         if mode == "fixed-rules" {
-            let presets: std::collections::BTreeSet<_> = repo.rules.iter().filter_map(|r| r.preset_id.clone()).collect();
+            let presets: std::collections::BTreeSet<_> = repo
+                .rules
+                .iter()
+                .filter_map(|r| r.preset_id.clone())
+                .collect();
             repo.rules.retain(|r| r.preset_id.is_none());
             for preset in presets {
-                repo.rules.extend(crate::services::catalog_service::generate_preset_rules(&preset, "subscription").unwrap());
+                repo.rules.extend(
+                    crate::services::catalog_service::generate_preset_rules(
+                        &preset,
+                        "subscription",
+                    )
+                    .unwrap(),
+                );
             }
         }
-        let mut value = serde_json::to_value(config::build(&repo, &selected, 19876, 19877, false).unwrap()).unwrap();
+        let mut value =
+            serde_json::to_value(config::build(&repo, &selected, 19876, 19877, false).unwrap())
+                .unwrap();
         if mode == "baseline-rules" {
             value.as_object_mut().unwrap().remove("dns");
-            value["outbounds"].as_array_mut().unwrap().retain(|o| o["tag"] != "dns");
+            value["outbounds"]
+                .as_array_mut()
+                .unwrap()
+                .retain(|o| o["tag"] != "dns");
             let rules = value["routing"]["rules"].as_array_mut().unwrap();
-            rules.retain(|r| r["outboundTag"] != "dns" && r["inboundTag"] != serde_json::json!(["dns-query"]));
-            rules.insert(rules.len()-1, serde_json::json!({"type":"field","port":"53","outboundTag":"proxy"}));
+            rules.retain(|r| {
+                r["outboundTag"] != "dns" && r["inboundTag"] != serde_json::json!(["dns-query"])
+            });
+            rules.insert(
+                rules.len() - 1,
+                serde_json::json!({"type":"field","port":"53","outboundTag":"proxy"}),
+            );
             value["routing"]["domainStrategy"] = serde_json::json!("IPIfNonMatch");
         }
         value["log"]["loglevel"] = serde_json::json!("info");
@@ -33,8 +59,14 @@ fn private_geo_video_check() {
         std::fs::write(&path, serde_json::to_vec(&value).unwrap()).unwrap();
         let status = std::process::Command::new("node")
             .arg(resources.join("../../../scripts/geo-video-check.mjs"))
-            .args([core.as_os_str(), crate::xray::geo::assets_for_core(&core).as_os_str(), path.as_os_str(), std::ffi::OsStr::new(mode)])
-            .status().unwrap();
+            .args([
+                core.as_os_str(),
+                crate::xray::geo::assets_for_core(&core).as_os_str(),
+                path.as_os_str(),
+                std::ffi::OsStr::new(mode),
+            ])
+            .status()
+            .unwrap();
         assert!(status.success(), "Browser diagnostic runner failed");
     }
 }
@@ -88,9 +120,9 @@ async fn private_subscription_config_validation() {
         let bytes =
             serde_json::to_vec(&config::build(&repo, &node.id, 10808, 10809, false).unwrap())
                 .unwrap();
-        if let Err(error) = vpn_service::validate(&core, &bytes).await {
+        if let Err(error) = crate::core::xray::validate(&core, &bytes).await {
             use tokio::io::AsyncWriteExt;
-            let mut child = vpn_service::command(&core)
+            let mut child = crate::core::xray::command(&core)
                 .args(["run", "-test", "-config", "stdin:"])
                 .stdin(std::process::Stdio::piped())
                 .stdout(std::process::Stdio::piped())
@@ -176,13 +208,13 @@ async fn private_proxy_traffic_smoke() {
         let bytes =
             serde_json::to_vec(&config::build(&repo, &node.id, proxy, metrics, false).unwrap())
                 .unwrap();
-        vpn_service::validate(&core, &bytes).await.unwrap();
-        let mut session = vpn_service::Session::default();
-        let result = vpn_service::start(&core, &mut session, &bytes, proxy, metrics).await;
+        crate::core::xray::validate(&core, &bytes).await.unwrap();
+        let mut session = crate::core::xray::XraySession::default();
+        let result = crate::core::xray::start(&core, &mut session, &bytes, proxy, metrics).await;
         if result.is_ok() {
             let second = vpn_service::public_ip(proxy).await;
-            let counters = crate::services::stats_service::counters(&client, metrics).await;
-            vpn_service::stop(&mut session).await.unwrap();
+            let counters = crate::core::xray::counters(&client, metrics).await;
+            crate::core::xray::stop(&mut session).await.unwrap();
             assert!(second.is_ok());
             let (up, down) = counters.unwrap();
             assert!(up > 0 && down > 0);
@@ -195,7 +227,7 @@ async fn private_proxy_traffic_smoke() {
             connected = true;
             break;
         }
-        vpn_service::stop(&mut session).await.unwrap();
+        crate::core::xray::stop(&mut session).await.unwrap();
         eprintln!("Node {index}: unreachable (credentials redacted)");
     }
     assert!(
@@ -220,9 +252,18 @@ fn tunnel_asset_staging_benchmark() {
         core::prepare(&resources, target.path()).unwrap();
         let prepared = started.elapsed().as_millis();
         crate::xray::geo::install_trusted_snapshot(
-            target.path(), metadata.clone(), &geoip, &geosite,
-        ).unwrap();
-        eprintln!("TUN staging: geo_init={} ms, core_files={} ms, transferred_geo={} ms", geo_initialized, prepared - geo_initialized, started.elapsed().as_millis() - prepared);
+            target.path(),
+            metadata.clone(),
+            &geoip,
+            &geosite,
+        )
+        .unwrap();
+        eprintln!(
+            "TUN staging: geo_init={} ms, core_files={} ms, transferred_geo={} ms",
+            geo_initialized,
+            prepared - geo_initialized,
+            started.elapsed().as_millis() - prepared
+        );
 
         let fast = tempfile::tempdir().unwrap();
         let fast_started = std::time::Instant::now();
@@ -231,10 +272,13 @@ fn tunnel_asset_staging_benchmark() {
         assert!(executable.is_file());
         assert!(executable.parent().unwrap().join("wintun.dll").is_file());
         assert!(!crate::xray::geo::metadata_path(fast.path()).exists());
-        crate::xray::geo::install_trusted_snapshot(
-            fast.path(), metadata.clone(), &geoip, &geosite,
-        ).unwrap();
+        crate::xray::geo::install_trusted_snapshot(fast.path(), metadata.clone(), &geoip, &geosite)
+            .unwrap();
         assert!(crate::xray::geo::info(fast.path()).valid);
-        eprintln!("TUN fast staging: core={} ms, transferred_geo_and_verify={} ms", fast_core, fast_started.elapsed().as_millis() - fast_core);
+        eprintln!(
+            "TUN fast staging: core={} ms, transferred_geo_and_verify={} ms",
+            fast_core,
+            fast_started.elapsed().as_millis() - fast_core
+        );
     }
 }

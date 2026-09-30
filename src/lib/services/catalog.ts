@@ -236,9 +236,17 @@ export function validateSubscription(input: string): void {
 			return;
 		}
 		if (
-			['vless:', 'vmess:', 'trojan:', 'ss:', 'hysteria2:', 'hy2:'].includes(
-				url.protocol,
-			) &&
+			[
+				'vless:',
+				'vmess:',
+				'trojan:',
+				'ss:',
+				'hysteria2:',
+				'hy2:',
+				'socks:',
+				'socks5:',
+				'http-proxy:',
+			].includes(url.protocol) &&
 			url.host
 		) {
 			return;
@@ -255,7 +263,9 @@ export function validateSubscription(input: string): void {
 	if (
 		lines.length > 0 &&
 		lines.every((line) =>
-			/^(vless|vmess|trojan|ss|hysteria2|hy2):\/\/\S+$/i.test(line),
+			/^(vless|vmess|trojan|ss|hysteria2|hy2|socks|socks5|http-proxy):\/\/\S+$/i.test(
+				line,
+			),
 		)
 	) {
 		return;
@@ -279,7 +289,9 @@ export function validateSubscription(input: string): void {
 				.map((l) => l.trim())
 				.filter((l) => l.length > 0 && !l.startsWith('#'))
 				.every((line) =>
-					/^(vless|vmess|trojan|ss|hysteria2|hy2):\/\/\S+$/i.test(line),
+					/^(vless|vmess|trojan|ss|hysteria2|hy2|socks|socks5|http-proxy):\/\/\S+$/i.test(
+						line,
+					),
 				)
 		) {
 			return;

@@ -18,7 +18,7 @@ pub fn monitor(state: Arc<AppState>, app: tauri::AppHandle) {
             Ok(c) => c,
             Err(_) => return,
         };
-        let mut previous = (0u16, 0u64, 0u64, Instant::now());
+        let mut previous = (0u64, 0u64, 0u64, Instant::now());
         let mut last_health = Instant::now();
         let mut last_tick = Instant::now();
         let mut generation = 0;
@@ -44,30 +44,23 @@ pub fn monitor(state: Arc<AppState>, app: tauri::AppHandle) {
                     let mut session=std::mem::take(&mut *state.session.lock().await);
                     let active_id = state.snapshot.read().await.info.as_ref().map(|info| info.server_id.clone());
                     let mut failed_id = None;
-                    #[cfg(windows)] if session.helper.as_ref().is_some_and(|h|h.exited()) {
+                    if session.failed() {
                         failed_id = active_id.clone();
+                        log::warn!("engine={:?} backend stopped unexpectedly", session.engine());
                         let _=stop(&mut session).await;
                         *state.traffic.write().await=Default::default();
                         if active_id.is_some() {
-                            publish(&state,&app,Snapshot{status:"error".into(),info:None,error:Some(BackendError::new("CORE_CRASHED","Tunnel helper stopped unexpectedly"))}).await;
+                            publish(&state,&app,Snapshot{status:"error".into(),info:None,error:Some(BackendError::new("CORE_CRASHED","Networking engine stopped unexpectedly"))}).await;
                         }
                     }
-                    if let Some(child)=session.child.as_mut(){
-                        if let Ok(Some(exit))=child.try_wait(){
-                            failed_id = active_id.clone();
-                            log::warn!("Xray exited with status {exit}");
-                            let _=stop(&mut session).await;
-                            *state.traffic.write().await=Default::default();
-                            publish(&state,&app,Snapshot{status:"error".into(),info:None,error:Some(BackendError::new("CORE_CRASHED","Xray stopped unexpectedly"))}).await;
-                        }
-                    }
-                    let active=session.started.map(|s|(session.metrics_port,session.proxy_port,s.elapsed().as_secs(),session.generation));
+                    let source = session.stats_source();
+                    let active=session.started().map(|s|(session.proxy_port(),s.elapsed().as_secs(),session.generation,session.is_tun()));
                     *state.session.lock().await=session;
                     drop(operation);
                     if let Some(id) = failed_id {
                         schedule_recovery(state.clone(), app.clone(), id);
                     }
-                    if let Some((port,proxy_port,duration,active_generation))=active{
+                    if let Some((proxy_port,duration,active_generation,is_tun))=active{
                         if generation != active_generation {
                             generation = active_generation; unhealthy = 0; network_dirty = false; physical_changed = false; last_health = Instant::now();
                             #[cfg(windows)] { physical = crate::platform::network_watch::physical_fingerprint(); }
@@ -81,7 +74,7 @@ pub fn monitor(state: Arc<AppState>, app: tauri::AppHandle) {
                                     physical_changed |= physical.is_some() && now.is_some() && physical != now;
                                     if now.is_some() { physical=now; }
                                 }
-                                let outcome = super::health::verify(proxy_port, settings.network_mode == "tun").await;
+                                let outcome = super::health::verify(proxy_port, is_tun).await;
                                 if outcome.is_ok() { unhealthy = 0; }
                                 else { unhealthy = unhealthy.saturating_add(1); }
                                 let failed = unhealthy >= 3 || (network_dirty && outcome.is_err()) || (physical_changed && settings.auto_reconnect);
@@ -89,7 +82,7 @@ pub fn monitor(state: Arc<AppState>, app: tauri::AppHandle) {
                                 if failed {
                                     let Ok(operation) = state.connection_operation.try_acquire() else { continue };
                                     let mut current = state.session.lock().await;
-                                    if current.started.is_some() && current.generation == active_generation {
+                                    if current.started().is_some() && current.generation == active_generation {
                                         let id = state.snapshot.read().await.info.as_ref().map(|info| info.server_id.clone());
                                         if let Some(id) = &id {
                                             state.latencies.write().await.insert(id.clone(), serde_json::json!("timeout"));
@@ -109,15 +102,16 @@ pub fn monitor(state: Arc<AppState>, app: tauri::AppHandle) {
                             }
                         }
                         let mut traffic=super::stats_service::TrafficStats{duration_seconds:duration,..Default::default()};
-                        if let Ok((up,down))=super::stats_service::counters(&client,port).await{
+                        if let Some(source)=source { if let Ok((up,down))=source.counters(&client).await{
                             let dt=previous.3.elapsed().as_secs_f64().max(0.001);
                             traffic.available=true;traffic.upload=up;traffic.download=down;
-                            if previous.0==port{traffic.upload_speed=up.saturating_sub(previous.1) as f64/dt;traffic.download_speed=down.saturating_sub(previous.2) as f64/dt;}
-                            previous=(port,up,down,Instant::now());
+                            if previous.0==active_generation{traffic.upload_speed=up.saturating_sub(previous.1) as f64/dt;traffic.download_speed=down.saturating_sub(previous.2) as f64/dt;}
+                            previous=(active_generation,up,down,Instant::now());
+                        }
                         }
                         let Ok(_publish_operation)=state.connection_operation.try_acquire()else{continue};
                         let current=state.session.lock().await;
-                        if current.started.is_none()||current.generation!=active_generation{continue;}
+                        if current.started().is_none()||current.generation!=active_generation{continue;}
                         drop(current);
                         *state.traffic.write().await=traffic.clone();
                         if app.emit("vpn://stats",traffic).is_err(){log::warn!("Unable to deliver metrics event");}

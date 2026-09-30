@@ -1,5 +1,6 @@
 mod app;
 mod commands;
+mod core;
 mod diagnostics;
 mod domain;
 mod platform;

@@ -10,6 +10,7 @@ pub struct SettingsDto {
     #[serde(flatten)]
     pub settings: Settings,
     pub core_version: String,
+    pub core_engines: Vec<crate::core::CoreCapabilities>,
 }
 #[tauri::command]
 pub async fn get_settings(state: tauri::State<'_, Arc<AppState>>) -> Result<SettingsDto> {
@@ -20,6 +21,13 @@ pub async fn get_settings(state: tauri::State<'_, Arc<AppState>>) -> Result<Sett
     }
     Ok(SettingsDto {
         settings,
+        core_engines: [
+            crate::core::CoreEngine::Lumen,
+            crate::core::CoreEngine::Xray,
+        ]
+        .into_iter()
+        .map(|engine| crate::core::backend(engine).capabilities())
+        .collect(),
         core_version: super::updates::version(&state.core.read().await),
     })
 }
@@ -99,6 +107,13 @@ pub async fn set_settings(
     }
     Ok(SettingsDto {
         settings,
+        core_engines: [
+            crate::core::CoreEngine::Lumen,
+            crate::core::CoreEngine::Xray,
+        ]
+        .into_iter()
+        .map(|engine| crate::core::backend(engine).capabilities())
+        .collect(),
         core_version: super::updates::version(&state.core.read().await),
     })
 }

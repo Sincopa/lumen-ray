@@ -129,7 +129,13 @@ pub fn resolve_from(base: Option<&Path>) -> Result<RuntimePaths> {
             candidates.push(parent.join("..").join("..").join("runtime"));
             candidates.push(parent.join("..").join("..").join("..").join("runtime"));
             // Dev layout relative to target/<profile>: target/<profile>/../../src-tauri/runtime
-            candidates.push(parent.join("..").join("..").join("src-tauri").join("runtime"));
+            candidates.push(
+                parent
+                    .join("..")
+                    .join("..")
+                    .join("src-tauri")
+                    .join("runtime"),
+            );
         }
     }
 

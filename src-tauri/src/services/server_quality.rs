@@ -23,10 +23,16 @@ impl Quality {
         if !self.fresh() {
             return u64::MAX / 2;
         }
-        let mut success: Vec<_> = self.samples.iter().flatten().copied().collect();
-        if success.is_empty() {
+        let mut success = [0; 8];
+        let mut count = 0;
+        for &latency in self.samples.iter().flatten() {
+            success[count] = latency;
+            count += 1;
+        }
+        if count == 0 {
             return u64::MAX;
         }
+        let success = &mut success[..count];
         success.sort_unstable();
         let failures = self.samples.len() - success.len();
         success[success.len() / 2]
@@ -39,7 +45,7 @@ pub fn rank(
     quality: &HashMap<String, Quality>,
 ) -> Vec<String> {
     let score = |id: &str| quality.get(id).map_or(u64::MAX / 2, Quality::score);
-    candidates.sort_by_key(|id| (score(id), id != selected));
+    candidates.sort_by_cached_key(|id| (score(id), id != selected));
     if let Some(best) = candidates.first() {
         let current = score(selected);
         let best = score(best);
@@ -63,6 +69,31 @@ pub fn rank(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn scores_keep_upper_median_failure_penalty_and_eight_sample_window() {
+        let mut quality = Quality::default();
+        assert_eq!(quality.score(), u64::MAX / 2);
+        quality.record(None);
+        assert_eq!(quality.score(), u64::MAX);
+        quality.record(Some(20));
+        quality.record(Some(40));
+        quality.record(Some(10));
+        assert_eq!(quality.score(), 270);
+        quality.record(Some(30));
+        assert_eq!(quality.score(), 230);
+        for i in 1..=8 {
+            quality.record(Some(i));
+        }
+        assert_eq!(quality.score(), 5);
+        quality.record(Some(u64::MAX));
+        assert_eq!(quality.score(), 6);
+        for _ in 0..8 {
+            quality.record(Some(u64::MAX));
+        }
+        assert_eq!(quality.score(), u64::MAX);
+        quality.updated = Some(Instant::now() - Duration::from_secs(301));
+        assert_eq!(quality.score(), u64::MAX / 2);
+    }
     #[test]
     fn avoids_switching_for_small_gains_and_penalizes_failures() {
         let mut q = HashMap::new();

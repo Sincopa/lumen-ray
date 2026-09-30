@@ -86,16 +86,20 @@ pub fn system_dns() -> crate::domain::errors::Result<Vec<String>> {
                             let address = (*dns).Address.lpSockaddr;
                             if !address.is_null() {
                                 let ip = match (*address).sa_family {
-                                    AF_INET => Some(std::net::IpAddr::V4(std::net::Ipv4Addr::from(
-                                        (*(address.cast::<SOCKADDR_IN>()))
-                                            .sin_addr
-                                            .S_un
-                                            .S_addr
-                                            .to_ne_bytes(),
-                                    ))),
-                                    AF_INET6 => Some(std::net::IpAddr::V6(std::net::Ipv6Addr::from(
-                                        (*(address.cast::<SOCKADDR_IN6>())).sin6_addr.u.Byte,
-                                    ))),
+                                    AF_INET => {
+                                        Some(std::net::IpAddr::V4(std::net::Ipv4Addr::from(
+                                            (*(address.cast::<SOCKADDR_IN>()))
+                                                .sin_addr
+                                                .S_un
+                                                .S_addr
+                                                .to_ne_bytes(),
+                                        )))
+                                    }
+                                    AF_INET6 => {
+                                        Some(std::net::IpAddr::V6(std::net::Ipv6Addr::from(
+                                            (*(address.cast::<SOCKADDR_IN6>())).sin6_addr.u.Byte,
+                                        )))
+                                    }
                                     _ => None,
                                 };
                                 if let Some(ip) = ip.filter(|ip| !ip.is_unspecified()) {
@@ -172,12 +176,25 @@ pub fn tunnel_adapter_ready() -> bool {
         return false;
     };
     unsafe {
-        let mut row = MIB_IPINTERFACE_ROW::default();
-        InitializeIpInterfaceEntry(&mut row);
-        row.Family = AF_INET;
-        row.InterfaceLuid = luid;
-        GetIpInterfaceEntry(&mut row) == 0 && row.Connected
+        [AF_INET, AF_INET6].into_iter().all(|family| {
+            let mut row = MIB_IPINTERFACE_ROW::default();
+            InitializeIpInterfaceEntry(&mut row);
+            row.Family = family;
+            row.InterfaceLuid = luid;
+            GetIpInterfaceEntry(&mut row) == 0 && row.Connected
+        })
     }
+}
+
+fn set_tunnel_interface(
+    interface: &mut windows_sys::Win32::NetworkManagement::IpHelper::MIB_IPINTERFACE_ROW,
+) -> u32 {
+    // GetIpInterfaceEntry can return an IPv4 SitePrefixLength that the setter
+    // rejects. Windows requires zero when writing an IPv4 interface row.
+    if interface.Family == AF_INET {
+        interface.SitePrefixLength = 0;
+    }
+    unsafe { windows_sys::Win32::NetworkManagement::IpHelper::SetIpInterfaceEntry(interface) }
 }
 
 /// Owns only the two default routes created for a prepared TUN session.
@@ -193,7 +210,6 @@ impl TunnelRoutes {
         use crate::domain::errors::BackendError;
         use windows_sys::Win32::NetworkManagement::IpHelper::{
             GetIpInterfaceEntry, InitializeIpInterfaceEntry, MIB_IPINTERFACE_ROW,
-            SetIpInterfaceEntry,
         };
         let luid = tunnel_luid()
             .ok_or_else(|| BackendError::new("TUN_FAILED", "Tunnel adapter is unavailable"))?;
@@ -201,19 +217,31 @@ impl TunnelRoutes {
         // sockets. A prepared adapter must rank behind the physical network.
         for family in [AF_INET, AF_INET6] {
             let mut interface = MIB_IPINTERFACE_ROW::default();
-            unsafe { InitializeIpInterfaceEntry(&mut interface); }
+            unsafe {
+                InitializeIpInterfaceEntry(&mut interface);
+            }
             interface.Family = family;
             interface.InterfaceLuid = luid;
             if unsafe { GetIpInterfaceEntry(&mut interface) } != 0 {
-                return Err(BackendError::new("TUN_FAILED", "Tunnel interface is not ready"));
+                return Err(BackendError::new(
+                    "TUN_FAILED",
+                    "Tunnel interface is not ready",
+                ));
             }
             interface.UseAutomaticMetric = false;
             interface.Metric = 5_000;
-            if unsafe { SetIpInterfaceEntry(&mut interface) } != 0 {
-                return Err(BackendError::new("TUN_FAILED", "Could not lower standby tunnel priority"));
+            if set_tunnel_interface(&mut interface) != 0 {
+                return Err(BackendError::new(
+                    "TUN_FAILED",
+                    "Could not lower standby tunnel priority",
+                ));
             }
         }
-        Ok(Self { luid, rows: Vec::new(), metrics: Vec::new() })
+        Ok(Self {
+            luid,
+            rows: Vec::new(),
+            metrics: Vec::new(),
+        })
     }
 
     pub fn activate(&mut self) -> crate::domain::errors::Result<()> {
@@ -221,30 +249,45 @@ impl TunnelRoutes {
         use windows_sys::Win32::NetworkManagement::IpHelper::{
             CreateIpForwardEntry2, GetIpInterfaceEntry, InitializeIpForwardEntry,
             InitializeIpInterfaceEntry, MIB_IPFORWARD_ROW2, MIB_IPINTERFACE_ROW,
-            SetIpInterfaceEntry,
         };
-        if self.rows.len() == 2 { return Ok(()); }
+        if self.rows.len() == 2 {
+            return Ok(());
+        }
         if !self.rows.is_empty() || !self.metrics.is_empty() {
-            return Err(BackendError::new("TUN_FAILED", "Tunnel route cleanup is incomplete"));
+            return Err(BackendError::new(
+                "TUN_FAILED",
+                "Tunnel route cleanup is incomplete",
+            ));
         }
         for family in [AF_INET, AF_INET6] {
             let mut interface = MIB_IPINTERFACE_ROW::default();
-            unsafe { InitializeIpInterfaceEntry(&mut interface); }
+            unsafe {
+                InitializeIpInterfaceEntry(&mut interface);
+            }
             interface.Family = family;
             interface.InterfaceLuid = self.luid;
             if unsafe { GetIpInterfaceEntry(&mut interface) } != 0 {
                 let _ = self.deactivate();
-                return Err(BackendError::new("TUN_FAILED", "Tunnel interface is not ready"));
+                return Err(BackendError::new(
+                    "TUN_FAILED",
+                    "Tunnel interface is not ready",
+                ));
             }
-            self.metrics.push((family, interface.UseAutomaticMetric, interface.Metric));
+            self.metrics
+                .push((family, interface.UseAutomaticMetric, interface.Metric));
             interface.UseAutomaticMetric = false;
             interface.Metric = 0;
-            if unsafe { SetIpInterfaceEntry(&mut interface) } != 0 {
+            if set_tunnel_interface(&mut interface) != 0 {
                 let _ = self.deactivate();
-                return Err(BackendError::new("TUN_FAILED", "Could not configure tunnel priority"));
+                return Err(BackendError::new(
+                    "TUN_FAILED",
+                    "Could not configure tunnel priority",
+                ));
             }
             let mut route = MIB_IPFORWARD_ROW2::default();
-            unsafe { InitializeIpForwardEntry(&mut route); }
+            unsafe {
+                InitializeIpForwardEntry(&mut route);
+            }
             route.InterfaceLuid = self.luid;
             route.DestinationPrefix.PrefixLength = 0;
             if family == AF_INET {
@@ -257,11 +300,32 @@ impl TunnelRoutes {
             route.Metric = 0;
             if unsafe { CreateIpForwardEntry2(&route) } != 0 {
                 let _ = self.deactivate();
-                return Err(BackendError::new("TUN_FAILED", "Could not enable tunnel route"));
+                return Err(BackendError::new(
+                    "TUN_FAILED",
+                    "Could not enable tunnel route",
+                ));
             }
             self.rows.push(route);
         }
-        if let Err(error) = verify_tunnel_routes() {
+        // Windows can publish the new default routes before GetBestRoute2
+        // starts selecting them. A single immediate check used to reject a
+        // healthy server switch and force a second, slow helper startup.
+        let mut last_conflict = None;
+        for attempt in 0..30 {
+            last_conflict = tunnel_route_conflict();
+            if last_conflict.is_none() {
+                if attempt > 0 {
+                    log::info!(
+                        "Lumen tunnel route selection settled after {} ms",
+                        attempt * 50
+                    );
+                }
+                return Ok(());
+            }
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        }
+        if let Some(reason) = last_conflict {
+            let error = route_conflict_error(reason);
             let _ = self.deactivate();
             return Err(error);
         }
@@ -273,7 +337,7 @@ impl TunnelRoutes {
         use windows_sys::Win32::Foundation::ERROR_NOT_FOUND;
         use windows_sys::Win32::NetworkManagement::IpHelper::{
             DeleteIpForwardEntry2, GetIpInterfaceEntry, InitializeIpInterfaceEntry,
-            MIB_IPINTERFACE_ROW, SetIpInterfaceEntry,
+            MIB_IPINTERFACE_ROW,
         };
         let mut failed = false;
         let mut remaining_routes = Vec::new();
@@ -288,42 +352,60 @@ impl TunnelRoutes {
         let mut remaining_metrics = Vec::new();
         for (family, automatic, metric) in self.metrics.drain(..) {
             let mut interface = MIB_IPINTERFACE_ROW::default();
-            unsafe { InitializeIpInterfaceEntry(&mut interface); }
+            unsafe {
+                InitializeIpInterfaceEntry(&mut interface);
+            }
             interface.Family = family;
             interface.InterfaceLuid = self.luid;
             if unsafe { GetIpInterfaceEntry(&mut interface) } == 0 {
                 interface.UseAutomaticMetric = automatic;
                 interface.Metric = metric;
-                if unsafe { SetIpInterfaceEntry(&mut interface) } != 0 {
+                if set_tunnel_interface(&mut interface) != 0 {
                     failed = true;
                     remaining_metrics.push((family, automatic, metric));
                 }
             }
         }
         self.metrics = remaining_metrics;
-        if failed { Err(BackendError::new("TUN_FAILED", "Could not remove tunnel routes")) }
-        else { Ok(()) }
+        if failed {
+            Err(BackendError::new(
+                "TUN_FAILED",
+                "Could not remove tunnel routes",
+            ))
+        } else {
+            Ok(())
+        }
     }
 }
 
 /// Check the route Windows would actually select, without binding it to our adapter.
 /// A competing VPN can leave our defaults installed but shadow them with split routes.
 pub fn verify_tunnel_routes() -> crate::domain::errors::Result<()> {
-    use crate::domain::errors::BackendError;
+    if let Some(reason) = tunnel_route_conflict() {
+        return Err(route_conflict_error(reason));
+    }
+    Ok(())
+}
+
+fn route_conflict_error(reason: &'static str) -> crate::domain::errors::BackendError {
+    log::warn!("Lumen tunnel route verification failed: {reason}");
+    crate::domain::errors::BackendError::new(
+        "ROUTING_CONFLICT",
+        format!("Windows selected a route outside Lumen: {reason}"),
+    )
+}
+
+fn tunnel_route_conflict() -> Option<&'static str> {
     use windows_sys::Win32::{
         NetworkManagement::IpHelper::GetBestRoute2, Networking::WinSock::SOCKADDR_INET,
     };
-    let error = || {
-        BackendError::new(
-            "ROUTING_CONFLICT",
-            "Another network route bypasses Lumen. Disconnect the other VPN and retry",
-        )
+    let Some(luid) = tunnel_luid() else {
+        return Some("LumenTun unavailable");
     };
-    let luid = tunnel_luid().ok_or_else(error)?;
     unsafe {
-        for ip in [
-            std::net::Ipv4Addr::new(1, 1, 1, 1),
-            std::net::Ipv4Addr::new(8, 8, 8, 8),
+        for (ip, label) in [
+            (std::net::Ipv4Addr::new(1, 1, 1, 1), "cloudflare"),
+            (std::net::Ipv4Addr::new(8, 8, 8, 8), "google"),
         ] {
             let mut destination = SOCKADDR_INET::default();
             destination.Ipv4.sin_family = AF_INET;
@@ -339,11 +421,21 @@ pub fn verify_tunnel_routes() -> crate::domain::errors::Result<()> {
                 &mut route,
                 &mut source,
             ) != 0
-                || route.InterfaceLuid.Value != luid.Value
             {
-                return Err(error());
+                return Some(if label == "cloudflare" {
+                    "cloudflare lookup"
+                } else {
+                    "google lookup"
+                });
+            }
+            if route.InterfaceLuid.Value != luid.Value {
+                return Some(if label == "cloudflare" {
+                    "cloudflare selected another interface"
+                } else {
+                    "google selected another interface"
+                });
             }
         }
     }
-    Ok(())
+    None
 }

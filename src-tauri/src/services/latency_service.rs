@@ -5,7 +5,7 @@ static PROBES: tokio::sync::Semaphore = tokio::sync::Semaphore::const_new(4);
 static PROBE_STARTUP: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
 pub async fn ping(state: &AppState, id: String) -> Result<serde_json::Value> {
-    let value = ping_inner(state, id.clone()).await?;
+    let value = ping_inner(state, &id).await?;
     state
         .latencies
         .write()
@@ -29,22 +29,34 @@ pub async fn ping(state: &AppState, id: String) -> Result<serde_json::Value> {
     }
     Ok(value)
 }
-async fn ping_inner(state: &AppState, id: String) -> Result<serde_json::Value> {
+async fn ping_inner(state: &AppState, id: &str) -> Result<serde_json::Value> {
     let _permit = match PROBES.acquire().await {
         Ok(p) => p,
         Err(_) => return Ok(serde_json::json!("timeout")),
     };
 
-    let repo = state.repository.read().await.clone();
+    let mut repo = state.repository.read().await.clone();
+    if repo.settings.core_engine == crate::core::CoreEngine::Lumen {
+        repo.settings.network_mode = "proxy".into();
+        let result = match crate::core::lumen::LumenBackend::start_native(&repo, id).await {
+            Ok(session) => {
+                let value = probe_target(session.port, &repo.settings.ping_url).await;
+                session.shutdown().await;
+                value
+            }
+            Err(_) => None,
+        };
+        return Ok(result.map_or(serde_json::json!("timeout"), |v| serde_json::json!(v)));
+    }
     // Port discovery releases its temporary listeners before Xray binds them.
     // Serialize only that short startup window so concurrent probes cannot be
     // assigned the same just-released Windows ephemeral ports.
     let startup = PROBE_STARTUP.lock().await;
-    let (proxy, metrics) = match super::vpn_service::ports() {
+    let (proxy, metrics) = match crate::core::xray::ports() {
         Ok(p) => p,
         Err(_) => return Ok(serde_json::json!("timeout")),
     };
-    let config = match crate::xray::config::build(&repo, &id, proxy, metrics, false) {
+    let config = match crate::xray::config::build(&repo, id, proxy, metrics, false) {
         Ok(c) => c,
         Err(_) => return Ok(serde_json::json!("timeout")),
     };
@@ -79,9 +91,8 @@ async fn ping_inner(state: &AppState, id: String) -> Result<serde_json::Value> {
     }
     drop(startup);
 
-    let ping_url = repo.settings.ping_url.trim().to_string();
     let result = if ready {
-        probe_target(proxy, &ping_url).await
+        probe_target(proxy, repo.settings.ping_url.trim()).await
     } else {
         None
     };
@@ -106,14 +117,13 @@ async fn probe_target(proxy_port: u16, custom_url: &str) -> Option<u64> {
         .build()
         .ok()?;
 
-    let mut endpoints: Vec<&str> = Vec::new();
-    if !custom_url.is_empty() {
-        endpoints.push(custom_url);
-    }
-    endpoints.push("https://www.google.com/generate_204");
-    endpoints.push("https://cp.cloudflare.com/generate_204");
-
-    for endpoint in endpoints {
+    for endpoint in std::iter::once(custom_url)
+        .filter(|url| !url.is_empty())
+        .chain([
+            "https://www.google.com/generate_204",
+            "https://cp.cloudflare.com/generate_204",
+        ])
+    {
         let start = Instant::now();
         if let Ok(res) = client.get(endpoint).send().await {
             let status = res.status().as_u16();

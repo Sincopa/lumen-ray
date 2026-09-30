@@ -2,7 +2,7 @@ import { test, expect } from '@playwright/test';
 
 test('dropdown starts closed, toggles on click, dismisses on outside click and on scroll', async ({
 	page,
-}) => {
+}, testInfo) => {
 	await page.goto('/');
 	await page.getByRole('button', { name: 'Настройки', exact: true }).click();
 	await page.waitForTimeout(300);
@@ -26,7 +26,7 @@ test('dropdown starts closed, toggles on click, dismisses on outside click and o
 	await langTrigger.click();
 	await expect(langList).toBeVisible();
 	await page.screenshot({
-		path: 'C:/Users/user/.gemini/antigravity/brain/313795e2-8fd5-4114-b3af-5c82fe56fd3c/verify-dropdown-opened.png',
+		path: testInfo.outputPath('verify-dropdown-opened.png'),
 	});
 
 	// 3. Click trigger again to close
@@ -51,6 +51,6 @@ test('dropdown starts closed, toggles on click, dismisses on outside click and o
 
 	// 6. Screenshot clean settings view
 	await page.screenshot({
-		path: 'C:/Users/user/.gemini/antigravity/brain/313795e2-8fd5-4114-b3af-5c82fe56fd3c/verify-dropdown-closed.png',
+		path: testInfo.outputPath('verify-dropdown-closed.png'),
 	});
 });

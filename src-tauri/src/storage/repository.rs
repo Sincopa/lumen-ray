@@ -162,7 +162,9 @@ fn default_server_selection() -> String {
 #[serde(rename_all = "camelCase")]
 pub struct Settings {
     #[serde(default)]
-    pub dns_policy: crate::xray::dns_policy::DnsPolicy,
+    pub core_engine: crate::core::CoreEngine,
+    #[serde(default)]
+    pub dns_policy: crate::core::dns::DnsPolicy,
     #[serde(default = "default_subscription_transport")]
     pub subscription_transport: String,
     pub network_mode: String,
@@ -199,6 +201,7 @@ pub struct Settings {
 impl Default for Settings {
     fn default() -> Self {
         Self {
+            core_engine: Default::default(),
             network_mode: "tun".into(),
             dns_policy: Default::default(),
             subscription_transport: default_subscription_transport(),
@@ -300,7 +303,10 @@ impl RepositoryStore {
     }
     fn load_from(&self, path: &Path) -> Result<Repository> {
         let encrypted = std::fs::read(path).map_err(|_| error())?;
-        let bytes = OsSecretStore.unprotect(&encrypted)?;
+        self.decode(&encrypted)
+    }
+    fn decode(&self, encrypted: &[u8]) -> Result<Repository> {
+        let bytes = zeroize::Zeroizing::new(OsSecretStore.unprotect(encrypted)?);
         let mut repo: Repository = serde_json::from_slice(&bytes).map_err(|_| error())?;
         if repo.version != 1 {
             return Err(BackendError::new(
@@ -319,18 +325,19 @@ impl RepositoryStore {
         Ok(repo)
     }
     pub fn save(&self, repo: &Repository) -> Result<()> {
-        let bytes = serde_json::to_vec(repo).map_err(|_| error())?;
+        let bytes = zeroize::Zeroizing::new(serde_json::to_vec(repo).map_err(|_| error())?);
         let encrypted = OsSecretStore.protect(&bytes)?;
         let mut temporary = tempfile::NamedTempFile::new_in(self.path.parent().ok_or_else(error)?)
             .map_err(|_| error())?;
         temporary.write_all(&encrypted).map_err(|_| error())?;
         temporary.as_file().sync_all().map_err(|_| error())?;
-        if self.path.exists() && self.load_from(&self.path).is_ok() {
-            let previous = std::fs::read(&self.path).map_err(|_| error())?;
-            crate::xray::updater::atomic_write(
-                &self.path.with_extension("previous.dpapi"),
-                &previous,
-            )?;
+        if let Ok(previous) = std::fs::read(&self.path) {
+            if self.decode(&previous).is_ok() {
+                crate::xray::updater::atomic_write(
+                    &self.path.with_extension("previous.dpapi"),
+                    &previous,
+                )?;
+            }
         }
         temporary.persist(&self.path).map_err(|_| error())?;
         Ok(())

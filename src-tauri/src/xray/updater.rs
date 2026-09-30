@@ -31,15 +31,20 @@ fn error() -> BackendError {
         "Could not verify or install the Xray update",
     )
 }
-fn version_parts(version: &str) -> Result<Vec<u32>> {
+fn version_parts(version: &str) -> Result<[u32; 3]> {
     if version.len() > 32 {
         return Err(error());
     }
-    let values = version
-        .split('.')
-        .map(|s| s.parse::<u32>().map_err(|_| error()))
-        .collect::<Result<Vec<_>>>()?;
-    if values.len() != 3 {
+    let mut parts = version.split('.');
+    let mut values = [0; 3];
+    for value in &mut values {
+        *value = parts
+            .next()
+            .ok_or_else(error)?
+            .parse()
+            .map_err(|_| error())?;
+    }
+    if parts.next().is_some() {
         return Err(error());
     }
     Ok(values)
@@ -158,7 +163,7 @@ pub async fn prepare(version: &str, directory: &Path) -> Result<PathBuf> {
     let executable = staging.path().join("xray.exe");
     let output = tokio::time::timeout(
         Duration::from_secs(10),
-        crate::services::vpn_service::command(&executable)
+        crate::core::xray::command(&executable)
             .arg("version")
             .output(),
     )
@@ -197,7 +202,7 @@ pub async fn prepare(version: &str, directory: &Path) -> Result<PathBuf> {
         }
     }
     crate::xray::geo::validate_geo_files_sync(&executable, staging.path())?;
-    crate::services::vpn_service::validate(
+    crate::core::xray::validate(
         &executable,
         br#"{"inbounds":[],"outbounds":[{"protocol":"freedom"}]}"#,
     )
@@ -297,7 +302,18 @@ mod tests {
     }
     #[test]
     fn rejects_version_paths() {
-        for value in ["../1.2", "1/2/3", "https://example.com", "1.2", "1.2.3.4"] {
+        assert_eq!(version_parts("26.9.9").unwrap(), [26, 9, 9]);
+        assert_eq!(version_parts("0.001.4294967295").unwrap(), [0, 1, u32::MAX]);
+        for value in [
+            "../1.2",
+            "1/2/3",
+            "https://example.com",
+            "1.2",
+            "1.2.3.4",
+            "",
+            "1..3",
+            "1.2.4294967296",
+        ] {
             assert!(version_parts(value).is_err());
         }
     }

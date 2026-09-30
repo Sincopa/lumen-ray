@@ -22,6 +22,8 @@ pub fn parse(v: &Value, subscription: &str) -> Result<VpnNode> {
         return super::advanced::parse(v, subscription);
     }
     let protocol = match v["protocol"].as_str() {
+        Some("socks") => Protocol::Socks,
+        Some("http") => Protocol::Http,
         Some("vless") => Protocol::Vless,
         Some("vmess") => Protocol::Vmess,
         Some("trojan") => Protocol::Trojan,
@@ -49,6 +51,19 @@ pub fn parse(v: &Value, subscription: &str) -> Result<VpnNode> {
             .ok_or_else(BackendError::unsupported)?
     } else {
         endpoint
+    };
+    let proxy_auth = if matches!(protocol, Protocol::Socks | Protocol::Http) {
+        if let Some(users) = endpoint.get("users") {
+            let users = users
+                .as_array()
+                .filter(|users| users.len() <= 1)
+                .ok_or_else(BackendError::unsupported)?;
+            users.first().unwrap_or(&Value::Null)
+        } else {
+            &Value::Null
+        }
+    } else {
+        &Value::Null
     };
     let stream = &v["streamSettings"];
     keys(
@@ -156,20 +171,28 @@ pub fn parse(v: &Value, subscription: &str) -> Result<VpnNode> {
             .as_u64()
             .and_then(|p| u16::try_from(p).ok())
             .ok_or_else(BackendError::invalid)?,
-        credential: user[if matches!(protocol, Protocol::Vless | Protocol::Vmess) {
-            "id"
+        credential: if matches!(protocol, Protocol::Socks | Protocol::Http) {
+            proxy_auth["pass"].as_str().unwrap_or_default().into()
         } else {
-            "password"
-        }]
-        .as_str()
-        .ok_or_else(BackendError::invalid)?
-        .into(),
-        protocol,
-        method: user["method"]
+            user[if matches!(protocol, Protocol::Vless | Protocol::Vmess) {
+                "id"
+            } else {
+                "password"
+            }]
             .as_str()
-            .or_else(|| user["security"].as_str())
-            .unwrap_or("auto")
-            .into(),
+            .ok_or_else(BackendError::invalid)?
+            .into()
+        },
+        protocol,
+        method: if matches!(protocol, Protocol::Socks | Protocol::Http) {
+            proxy_auth["user"].as_str().unwrap_or_default().into()
+        } else {
+            user["method"]
+                .as_str()
+                .or_else(|| user["security"].as_str())
+                .unwrap_or("auto")
+                .into()
+        },
         flow: user["flow"].as_str().unwrap_or_default().into(),
         transport: Transport {
             network: network.into(),

@@ -12,22 +12,35 @@ async fn steam_reachable() -> Result<()> {
         Duration::from_secs(8),
         tokio::net::TcpStream::connect(("api.steampowered.com", 443)),
     )
-    .await.map_err(|_| error())?.map_err(|_| error())?;
+    .await
+    .map_err(|_| error())?
+    .map_err(|_| error())?;
     Ok(())
 }
 async fn routing_rule_count(core: &std::path::Path, api_port: u16) -> Result<usize> {
-    let output = tokio::time::timeout(Duration::from_secs(5),
-        crate::services::vpn_service::command(core)
+    let output = tokio::time::timeout(
+        Duration::from_secs(5),
+        crate::core::xray::command(core)
             .args(["api", "lsrules", &format!("--server=127.0.0.1:{api_port}")])
             .output(),
-    ).await.map_err(|_| error())?.map_err(|_| error())?;
+    )
+    .await
+    .map_err(|_| error())?
+    .map_err(|_| error())?;
     if !output.status.success() {
-        return Err(BackendError::new("SMOKE_FAILED", "Routing API list command failed"));
+        return Err(BackendError::new(
+            "SMOKE_FAILED",
+            "Routing API list command failed",
+        ));
     }
     let response: serde_json::Value = serde_json::from_slice(&output.stdout)
         .map_err(|_| BackendError::new("SMOKE_FAILED", "Routing API list response is not JSON"))?;
-    response["rules"].as_array().map(Vec::len)
-        .ok_or_else(|| BackendError::new("SMOKE_FAILED", "Routing API list response has no rules array"))
+    response["rules"].as_array().map(Vec::len).ok_or_else(|| {
+        BackendError::new(
+            "SMOKE_FAILED",
+            "Routing API list response has no rules array",
+        )
+    })
 }
 async fn resolve_ip(proxy: Option<u16>) -> Result<String> {
     let mut builder = reqwest::Client::builder()
@@ -98,13 +111,16 @@ pub async fn run() -> Result<()> {
         };
         let proxy_port = port()?;
         let metrics_port = port()?;
-        let mut helper = super::helper::start(super::helper::StartTunnel {
-            core_version: crate::xray::core::VERSION.into(),
-            repository: repo.clone(),
-            selected: id.clone(),
-            proxy_port,
-            metrics_port,
-        }, data.path())
+        let mut helper = super::helper::start(
+            super::helper::StartTunnel {
+                core_version: crate::xray::core::VERSION.into(),
+                repository: repo.clone(),
+                selected: id.clone(),
+                proxy_port,
+                metrics_port,
+            },
+            data.path(),
+        )
         .await?;
         let result = async {
             for _ in 0..100 {
@@ -179,8 +195,7 @@ pub async fn run() -> Result<()> {
                 .timeout(Duration::from_secs(2))
                 .build()
                 .map_err(|_| error())?;
-            let (up, down) =
-                crate::services::stats_service::counters(&client, metrics_port).await?;
+            let (up, down) = crate::core::xray::counters(&client, metrics_port).await?;
             if up == 0 || down == 0 {
                 return Err(error());
             }
@@ -210,43 +225,61 @@ pub async fn warm_route_cycle() -> Result<()> {
         "offline-smoke",
     )?;
     let selected = node.id.clone();
-    let repository = Repository { nodes: vec![node], ..Default::default() };
+    let repository = Repository {
+        nodes: vec![node],
+        ..Default::default()
+    };
     let data = tempfile::tempdir().map_err(|_| error())?;
     let runtime = crate::runtime::resolve()?;
     crate::xray::geo::ensure_initialized(&runtime, data.path())?;
-    let (proxy_port, metrics_port) = crate::services::vpn_service::ports()?;
+    let (proxy_port, metrics_port) = crate::core::xray::ports()?;
     let started = std::time::Instant::now();
     let request = super::helper::StartTunnel {
-        core_version: crate::xray::core::VERSION.into(), repository, selected,
-        proxy_port, metrics_port,
+        core_version: crate::xray::core::VERSION.into(),
+        repository,
+        selected,
+        proxy_port,
+        metrics_port,
     };
     let mut prepared = super::helper::start_standby(request.clone(), data.path()).await;
-    if prepared.as_ref().err().is_some_and(|failure|
-        ["TUN_ADAPTER_TIMEOUT", "CORE_START_FAILED", "TUN_FAILED"].contains(&failure.code)) {
+    if prepared.as_ref().err().is_some_and(|failure| {
+        ["TUN_ADAPTER_TIMEOUT", "CORE_START_FAILED", "TUN_FAILED"].contains(&failure.code)
+    }) {
         prepared = super::helper::start_standby(request, data.path()).await;
     }
     let mut helper = prepared?;
     let prepared_ms = started.elapsed().as_millis();
     let cycle = async {
         if public_ip().await? != original {
-            return Err(BackendError::new("SMOKE_FAILED", "Direct Internet changed while tunnel was prepared"));
+            return Err(BackendError::new(
+                "SMOKE_FAILED",
+                "Direct Internet changed while tunnel was prepared",
+            ));
         }
         let mut activation_ms = Vec::new();
         for _ in 0..3 {
-            if super::network::tunnel_ready() { return Err(error()); }
+            if super::network::tunnel_ready() {
+                return Err(error());
+            }
             let activated = std::time::Instant::now();
             helper.activate().await?;
             activation_ms.push(activated.elapsed().as_millis());
             super::network::verify_tunnel_routes()?;
             helper.deactivate().await?;
-            if super::network::tunnel_ready() { return Err(error()); }
+            if super::network::tunnel_ready() {
+                return Err(error());
+            }
             if public_ip().await? != original {
-                return Err(BackendError::new("SMOKE_FAILED", "Direct Internet changed after tunnel disconnect"));
+                return Err(BackendError::new(
+                    "SMOKE_FAILED",
+                    "Direct Internet changed after tunnel disconnect",
+                ));
             }
         }
         println!("WARM_TUN_ROUTE_OK prepare={prepared_ms}ms activate={activation_ms:?}ms");
         Ok(())
-    }.await;
+    }
+    .await;
     let cleanup = helper.stop().await;
     cycle?;
     cleanup
@@ -264,13 +297,19 @@ pub async fn warm_standby_isolation() -> Result<()> {
         "offline-smoke",
     )?;
     let selected = node.id.clone();
-    let mut before = Repository { nodes: vec![node], ..Default::default() };
+    let mut before = Repository {
+        nodes: vec![node],
+        ..Default::default()
+    };
     before.routing_mode = "rules".into();
     before.rules.push(Rule {
-        id: "steam-smoke".into(), name: "steam.exe".into(),
+        id: "steam-smoke".into(),
+        name: "steam.exe".into(),
         matcher: crate::storage::repository::RuleMatcher::Application,
-        server_id: "subscription".into(), enabled: true,
-        preset_id: None, is_domain: false,
+        server_id: "subscription".into(),
+        enabled: true,
+        preset_id: None,
+        is_domain: false,
     });
     let mut after = before.clone();
     after.rules[0].enabled = false;
@@ -279,87 +318,119 @@ pub async fn warm_standby_isolation() -> Result<()> {
     let data = tempfile::tempdir().map_err(|_| error())?;
     let runtime = crate::runtime::resolve()?;
     let core = crate::xray::core::prepare(&runtime, data.path())?;
-    let (proxy_port, metrics_port) = crate::services::vpn_service::ports()?;
+    let (proxy_port, metrics_port) = crate::core::xray::ports()?;
     let request = super::helper::StartTunnel {
-        core_version: crate::xray::core::VERSION.into(), repository: before.clone(),
-        selected: selected.clone(), proxy_port, metrics_port,
+        core_version: crate::xray::core::VERSION.into(),
+        repository: before.clone(),
+        selected: selected.clone(),
+        proxy_port,
+        metrics_port,
     };
     let mut prepared = super::helper::start_standby(request.clone(), data.path()).await;
-    if prepared.as_ref().err().is_some_and(|failure|
-        ["TUN_ADAPTER_TIMEOUT", "CORE_START_FAILED", "TUN_FAILED"].contains(&failure.code)) {
+    if prepared.as_ref().err().is_some_and(|failure| {
+        ["TUN_ADAPTER_TIMEOUT", "CORE_START_FAILED", "TUN_FAILED"].contains(&failure.code)
+    }) {
         prepared = super::helper::start_standby(request, data.path()).await;
     }
     let mut helper = prepared?;
     eprintln!("STANDBY_CHECK prepared adapter isolation");
     let result = async {
-        if !super::network::standby_isolated() { return Err(error()); }
-        if public_ip().await? != original { return Err(error()); }
+        if !super::network::standby_isolated() {
+            return Err(error());
+        }
+        if public_ip().await? != original {
+            return Err(error());
+        }
         steam_reachable().await?;
         eprintln!("STANDBY_CHECK live rule update");
         let old_count = routing_rule_count(&core, metrics_port + 2).await?;
         let patch = crate::xray::config::live_routing_patch(&before, &after, &selected)?
             .ok_or_else(error)?;
-        crate::services::vpn_service::run_live_routing_patch(&core, metrics_port + 2, &patch).await?;
+        crate::core::xray::run_live_routing_patch(&core, metrics_port + 2, &patch).await?;
         let updated_count = routing_rule_count(&core, metrics_port + 2).await?;
         if updated_count + 1 != old_count {
-            return Err(BackendError::new("SMOKE_FAILED", format!("Rule count after update: {updated_count}, before: {old_count}")));
+            return Err(BackendError::new(
+                "SMOKE_FAILED",
+                format!("Rule count after update: {updated_count}, before: {old_count}"),
+            ));
         }
         eprintln!("STANDBY_CHECK rules to global");
         let mode_patch = crate::xray::config::live_routing_patch(&after, &global, &selected)?
             .ok_or_else(error)?;
-        crate::services::vpn_service::run_live_routing_patch(&core, metrics_port + 2, &mode_patch).await?;
+        crate::core::xray::run_live_routing_patch(&core, metrics_port + 2, &mode_patch).await?;
         let global_count = routing_rule_count(&core, metrics_port + 2).await?;
-        if global_count >= old_count { return Err(error()); }
+        if global_count >= old_count {
+            return Err(error());
+        }
         eprintln!("STANDBY_CHECK global to rules");
         let back_patch = crate::xray::config::live_routing_patch(&global, &after, &selected)?
             .ok_or_else(error)?;
-        crate::services::vpn_service::run_live_routing_patch(&core, metrics_port + 2, &back_patch).await?;
-        if routing_rule_count(&core, metrics_port + 2).await? + 1 != old_count { return Err(error()); }
-        if public_ip().await? != original || !super::network::standby_isolated() { return Err(error()); }
+        crate::core::xray::run_live_routing_patch(&core, metrics_port + 2, &back_patch).await?;
+        if routing_rule_count(&core, metrics_port + 2).await? + 1 != old_count {
+            return Err(error());
+        }
+        if public_ip().await? != original || !super::network::standby_isolated() {
+            return Err(error());
+        }
         steam_reachable().await?;
         Ok(())
-    }.await;
+    }
+    .await;
     eprintln!("STANDBY_CHECK cleanup");
     let cleanup = helper.stop().await;
     result?;
     cleanup?;
-    if public_ip().await? != original { return Err(error()); }
+    if public_ip().await? != original {
+        return Err(error());
+    }
     steam_reachable().await?;
-    println!("WARM_TUN_STANDBY_OK direct Internet, Steam endpoint, live rules, mode changes and cleanup");
+    println!(
+        "WARM_TUN_STANDBY_OK direct Internet, Steam endpoint, live rules, mode changes and cleanup"
+    );
     Ok(())
 }
 
 /// Opt-in live check against the locally selected encrypted repository node.
 /// Prints no server address, credentials, subscription URL, or public IP.
 pub async fn warm_live() -> Result<()> {
-    let data = std::path::PathBuf::from(
-        std::env::var_os("LUMEN_TEST_DATA_DIR").ok_or_else(error)?,
-    );
-    let mut repository = crate::storage::repository::RepositoryStore::new(&data.join("data"))?.load()?;
+    let data = std::path::PathBuf::from(std::env::var_os("LUMEN_TEST_DATA_DIR").ok_or_else(error)?);
+    let mut repository =
+        crate::storage::repository::RepositoryStore::new(&data.join("data"))?.load()?;
     let selected = repository.selected_server_id.clone().ok_or_else(error)?;
     repository.sources.clear();
-    let (proxy_port, metrics_port) = crate::services::vpn_service::ports()?;
+    let (proxy_port, metrics_port) = crate::core::xray::ports()?;
     let request = super::helper::StartTunnel {
         core_version: crate::xray::updater::current(&data.join("core")),
-        repository, selected, proxy_port, metrics_port,
+        repository,
+        selected,
+        proxy_port,
+        metrics_port,
     };
     let mut prepared = super::helper::start_standby(request.clone(), &data).await;
-    if prepared.as_ref().err().is_some_and(|failure|
-        ["TUN_ADAPTER_TIMEOUT", "CORE_START_FAILED", "TUN_FAILED"].contains(&failure.code)) {
+    if prepared.as_ref().err().is_some_and(|failure| {
+        ["TUN_ADAPTER_TIMEOUT", "CORE_START_FAILED", "TUN_FAILED"].contains(&failure.code)
+    }) {
         prepared = super::helper::start_standby(request, &data).await;
     }
     let mut helper = prepared?;
     let result = async {
-        if super::network::tunnel_ready() { return Err(error()); }
+        if super::network::tunnel_ready() {
+            return Err(error());
+        }
         helper.activate().await?;
         super::network::verify_tunnel_routes()?;
         let ip = crate::services::vpn_service::public_ip(proxy_port).await?;
-        if ip.is_empty() { return Err(error()); }
+        if ip.is_empty() {
+            return Err(error());
+        }
         helper.deactivate().await?;
-        if super::network::tunnel_ready() { return Err(error()); }
+        if super::network::tunnel_ready() {
+            return Err(error());
+        }
         println!("WARM_TUN_LIVE_OK");
         Ok(())
-    }.await;
+    }
+    .await;
     let cleanup = helper.stop().await;
     result?;
     cleanup

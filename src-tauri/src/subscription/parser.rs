@@ -47,13 +47,12 @@ pub fn parse(input: &str, subscription: &str) -> Result<ParsedSubscription> {
             }
             if let Some(outbounds) = root.get("outbounds").and_then(|v| v.as_array()) {
                 let remarks = root.get("remarks").and_then(|r| r.as_str());
-                let proxy_outbounds: Vec<serde_json::Value> = outbounds
+                let proxy_outbounds: Vec<&serde_json::Value> = outbounds
                     .iter()
                     .filter(|o| {
                         ![Some("freedom"), Some("blackhole"), Some("dns")]
                             .contains(&o["protocol"].as_str())
                     })
-                    .cloned()
                     .collect();
 
                 if proxy_outbounds.is_empty() {
@@ -68,7 +67,7 @@ pub fn parse(input: &str, subscription: &str) -> Result<ParsedSubscription> {
 
                 if has_balancers || proxy_outbounds.len() > 1 {
                     // Auto / Balanced node representing a cluster of servers
-                    let mut first_entry = proxy_outbounds[0].clone();
+                    let mut first_entry = (*proxy_outbounds[0]).clone();
                     if let (Some(rem), Some(obj)) = (remarks, first_entry.as_object_mut()) {
                         obj.insert("remarks".to_string(), serde_json::json!(rem));
                     }
@@ -110,7 +109,7 @@ pub fn parse(input: &str, subscription: &str) -> Result<ParsedSubscription> {
                                 selector,
                                 strategy,
                                 observatory: root.get("observatory").cloned(),
-                                outbounds: proxy_outbounds,
+                                outbounds: proxy_outbounds.into_iter().cloned().collect(),
                             });
                             let _ = node.identify();
                             parsed_entries.push(Ok(node));
@@ -119,7 +118,7 @@ pub fn parse(input: &str, subscription: &str) -> Result<ParsedSubscription> {
                     }
                 } else {
                     // Single server config
-                    let mut entry = proxy_outbounds[0].clone();
+                    let mut entry = (*proxy_outbounds[0]).clone();
                     if let (Some(rem), Some(obj)) = (remarks, entry.as_object_mut()) {
                         obj.insert("remarks".to_string(), serde_json::json!(rem));
                     }
@@ -149,17 +148,14 @@ pub fn parse(input: &str, subscription: &str) -> Result<ParsedSubscription> {
             .map(|v| super::clash::parse(v, subscription))
             .collect()
     } else {
-        let lines: Vec<_> = text
+        let lines = text
             .lines()
-            .filter(|l| !l.trim().is_empty() && !l.trim().starts_with('#'))
-            .collect();
-        if lines.len() > MAX_NODES {
+            .map(str::trim)
+            .filter(|line| !line.is_empty() && !line.starts_with('#'));
+        if lines.clone().take(MAX_NODES + 1).count() > MAX_NODES {
             return Err(BackendError::invalid());
         }
-        lines
-            .iter()
-            .map(|line| uri::parse(line.trim(), subscription))
-            .collect()
+        lines.map(|line| uri::parse(line, subscription)).collect()
     };
     let mut result = ParsedSubscription {
         nodes: vec![],

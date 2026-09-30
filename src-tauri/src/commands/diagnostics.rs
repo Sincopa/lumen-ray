@@ -12,6 +12,8 @@ pub struct NetworkDiagnostics {
     status: String,
     network_mode: String,
     core_version: String,
+    core_engine: crate::core::CoreEngine,
+    selected_core_engine: crate::core::CoreEngine,
     public_ipv4: Option<String>,
     public_ipv6: Option<String>,
     system_dns: Vec<String>,
@@ -38,12 +40,21 @@ pub async fn get_network_diagnostics(
     let snapshot = state.snapshot.read().await.clone();
     let settings = state.repository.read().await.settings.clone();
     let session = state.session.lock().await;
-    let port = session.started.map(|_| session.proxy_port);
+    let port = session.started().map(|_| session.proxy_port());
+    let active_engine = session
+        .started()
+        .map(|_| session.engine())
+        .unwrap_or(settings.core_engine);
+    let network_mode = if session.started().is_some() {
+        if session.is_tun() { "tun" } else { "proxy" }.to_string()
+    } else {
+        settings.network_mode.clone()
+    };
     #[cfg(windows)]
     let (system_dns, tunnel_ready, routes_ready, system_proxy_enabled, proxy_managed) = (
         crate::platform::network::system_dns().unwrap_or_default(),
         crate::platform::network::tunnel_ready(),
-        settings.network_mode == "tun"
+        network_mode == "tun"
             && snapshot.status == "connected"
             && crate::platform::network::verify_tunnel_routes().is_ok(),
         crate::platform::proxy::is_enabled().unwrap_or(false),
@@ -75,13 +86,13 @@ pub async fn get_network_diagnostics(
     } else {
         (None, None)
     };
-    let routing_conflict = settings.network_mode == "tun"
-        && snapshot.status == "connected"
-        && tunnel_ready
-        && !routes_ready;
+    let routing_conflict =
+        network_mode == "tun" && snapshot.status == "connected" && tunnel_ready && !routes_ready;
     Ok(NetworkDiagnostics {
         status: snapshot.status,
-        network_mode: settings.network_mode,
+        network_mode,
+        core_engine: active_engine,
+        selected_core_engine: settings.core_engine,
         core_version: super::updates::version(&state.core.read().await),
         public_ipv4,
         public_ipv6,

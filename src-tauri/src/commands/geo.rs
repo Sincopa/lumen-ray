@@ -1,6 +1,6 @@
 use crate::{
     app::state::AppState,
-    domain::errors::Result,
+    domain::errors::{BackendError, Result},
     xray::geo::{self, GeoDatabaseInfo},
 };
 use std::sync::Arc;
@@ -9,7 +9,11 @@ use std::sync::Arc;
 pub async fn get_geo_database_info(
     state: tauri::State<'_, Arc<AppState>>,
 ) -> Result<GeoDatabaseInfo> {
-    Ok(geo::info(&state.data))
+    let data = state.data.clone();
+    // Verifying both databases performs disk I/O and hashes up to 96 MiB.
+    tokio::task::spawn_blocking(move || geo::info(&data))
+        .await
+        .map_err(|_| BackendError::new("GEO_UPDATE_FAILED", "Could not inspect geo databases"))
 }
 
 #[tauri::command]
@@ -35,7 +39,7 @@ pub async fn update_geo_databases(
         let repo = state.repository.read().await.clone();
         if let Some(id) = &repo.selected_server_id {
             let config = crate::xray::config::build(&repo, id, 10808, 10809, false)?;
-            crate::services::vpn_service::validate(
+            crate::core::xray::validate(
                 &core,
                 &serde_json::to_vec(&config)
                     .map_err(|_| crate::domain::errors::BackendError::invalid())?,

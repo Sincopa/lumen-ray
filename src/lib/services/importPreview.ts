@@ -26,6 +26,9 @@ export function importPreview(raw: string): {
 			'ss:',
 			'hysteria2:',
 			'hy2:',
+			'socks:',
+			'socks5:',
+			'http-proxy:',
 		].includes(url.protocol)
 	)
 		throw new Error('INVALID_IMPORT');

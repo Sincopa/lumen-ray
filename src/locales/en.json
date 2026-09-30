@@ -94,6 +94,10 @@
 		"timeout": "—"
 	},
 	"settings": {
+		"coreEngine": "Core Engine",
+		"coreEngineDesc": "Applies on the next connection.",
+		"experimental": "Experimental",
+		"lumenCoreSupport": "Native TCP proxy: SOCKS5 / HTTP CONNECT servers, domain and IP rules. TUN, UDP, GeoIP/GeoSite and application rules are not available yet. Use Xray Core for other configurations.",
 		"title": "Settings",
 		"generalSection": "General",
 		"networkSection": "Network",
@@ -109,7 +113,7 @@
 		"autoConnect": "Auto Connect",
 		"autoConnectDesc": "Connect automatically on application launch",
 		"autoReconnect": "Reconnect after interruption",
-		"autoReconnectDesc": "Retry after network loss or Xray exit",
+		"autoReconnectDesc": "Retry after network loss or the selected engine stops",
 		"serverSelection": "Server selection",
 		"serverSelectionDesc": "Applied on the next connection",
 		"serverManual": "Manual",
@@ -227,7 +231,8 @@
 		"export": "Demo metadata without connection credentials. Select text to copy."
 	},
 	"errors": {
-		"routingConflict": "Another VPN is intercepting traffic. Disconnect it and try again.",
+		"lumenUnsupported": "This configuration is not supported by Lumen Core yet. Select Xray Core in Settings.",
+		"routingConflict": "A Windows route bypasses Lumen. Retry the connection or check competing routes.",
 		"tunAdapterTimeout": "Windows could not start the VPN adapter. Check for another active VPN, then try again.",
 		"ruleUpdateFailed": "Could not apply the rule to the current connection. The connection was kept; retry the change.",
 		"unavailable": "Operation unavailable. Try again.",

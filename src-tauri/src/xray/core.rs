@@ -33,9 +33,8 @@ pub fn prepare_for_tunnel(runtime: impl Into<RuntimePaths>, data: &Path) -> Resu
 
 fn prepare_files(runtime: &RuntimePaths, data: &Path, tunnel: bool) -> Result<PathBuf> {
     // Trust anchor is compiled into the application, never a mutable runtime manifest.
-    let manifest: Manifest =
-        serde_json::from_str(include_str!("../../runtime/xray/manifest.json"))
-            .map_err(|_| error())?;
+    let manifest: Manifest = serde_json::from_str(include_str!("../../runtime/xray/manifest.json"))
+        .map_err(|_| error())?;
     if manifest.architecture != std::env::consts::ARCH || manifest.version != VERSION {
         return Err(error());
     }
@@ -68,8 +67,8 @@ fn prepare_files(runtime: &RuntimePaths, data: &Path, tunnel: bool) -> Result<Pa
             }
             continue;
         }
-        let valid = std::fs::read(&dest)
-            .is_ok_and(|bytes| format!("{:x}", Sha256::digest(bytes)) == hash);
+        let valid =
+            std::fs::read(&dest).is_ok_and(|bytes| format!("{:x}", Sha256::digest(bytes)) == hash);
         if !valid {
             let source = match name.as_str() {
                 "xray.exe" => runtime.xray_binary(),
@@ -89,8 +88,7 @@ fn prepare_files(runtime: &RuntimePaths, data: &Path, tunnel: bool) -> Result<Pa
     if !directory.join("xray.exe").is_file()
         || !directory.join("wintun.dll").is_file()
         || (!tunnel
-            && (!directory.join("geoip.dat").is_file()
-                || !directory.join("geosite.dat").is_file()))
+            && (!directory.join("geoip.dat").is_file() || !directory.join("geosite.dat").is_file()))
     {
         return Err(error());
     }
@@ -103,4 +101,3 @@ fn error() -> BackendError {
         "Verified bundled Xray runtime is missing or invalid",
     )
 }
-

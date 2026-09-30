@@ -89,21 +89,33 @@ pub async fn mutate_catalog(
                         });
                         return Ok(value);
                     }
-                    if after.settings.network_mode == "tun" && !after.settings.dns_policy.enabled {
-                        restore_catalog_if_unchanged(&state, &app, before, &after).await?;
-                        return Err(BackendError::new(
-                            "RULE_UPDATE_FAILED",
-                            "Routing change could not be applied without restarting the tunnel",
-                        ));
-                    }
+                    // Live patching is an optimization. A full reconnect is the
+                    // supported fallback when the active core has changed.
                 }
                 Err(error) => {
-                    restore_catalog_if_unchanged(&state, &app, before, &after).await?;
-                    return Err(error);
+                    log::warn!("Routing change needs reconnect after {}", error.code);
                 }
             }
         }
-        crate::services::vpn_service::connect_if_current(&state, &app, id, generation).await?;
+        if let Err(error) =
+            crate::services::vpn_service::connect_if_current(&state, &app, id.clone(), generation)
+                .await
+        {
+            if let Some(before) = previous.as_ref() {
+                let after = state.repository.read().await.clone();
+                restore_catalog_if_unchanged(&state, &app, before, &after).await?;
+            }
+            if error.code != "CANCELLED" && state.snapshot.read().await.status != "connected" {
+                let _ = crate::services::vpn_service::connect_if_current(
+                    &state,
+                    &app,
+                    id,
+                    generation + 1,
+                )
+                .await;
+            }
+            return Err(error);
+        }
     } else {
         let state = state.inner().clone();
         tauri::async_runtime::spawn(async move {

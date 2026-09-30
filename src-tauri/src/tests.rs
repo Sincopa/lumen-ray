@@ -125,9 +125,11 @@ fn encrypted_repository_roundtrip() {
 #[tokio::test]
 async fn bundled_core_validation() {
     let directory = tempfile::tempdir().unwrap();
-    let runtime = crate::runtime::RuntimePaths::new(std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("runtime"));
+    let runtime = crate::runtime::RuntimePaths::new(
+        std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("runtime"),
+    );
     let path = core::prepare(&runtime, directory.path()).unwrap();
-    let version = vpn_service::command(&path)
+    let version = crate::core::xray::command(&path)
         .arg("version")
         .output()
         .await
@@ -140,17 +142,25 @@ async fn bundled_core_validation() {
     };
     let bytes =
         serde_json::to_vec(&config::build(&repo, &node.id, 10808, 10809, false).unwrap()).unwrap();
-    vpn_service::validate(&path, &bytes).await.unwrap();
+    crate::core::xray::validate(&path, &bytes).await.unwrap();
     #[cfg(windows)]
     {
         let standby = config::build_standby(&repo, &node.id, 10808, 10809).unwrap();
         let value = serde_json::to_value(&standby).unwrap();
-        let tun = value["inbounds"].as_array().unwrap().iter()
-            .find(|inbound| inbound["protocol"] == "tun").unwrap();
+        let tun = value["inbounds"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|inbound| inbound["protocol"] == "tun")
+            .unwrap();
         assert!(tun["settings"].get("autoSystemRoutingTable").is_none());
-        vpn_service::validate(&path, &serde_json::to_vec(&standby).unwrap()).await.unwrap();
+        crate::core::xray::validate(&path, &serde_json::to_vec(&standby).unwrap())
+            .await
+            .unwrap();
     }
-    assert!(vpn_service::validate(&path, b"{invalid").await.is_err());
+    assert!(crate::core::xray::validate(&path, b"{invalid")
+        .await
+        .is_err());
     let advanced = [
         "hysteria2://test-password@example.com:443?sni=example.com".to_owned(),
         "vmess://eyJ2IjoiMiIsImFkZCI6ImV4YW1wbGUuY29tIiwicG9ydCI6NDQzLCJpZCI6IjAwMDAwMDAwLTAwMDAtNDAwMC04MDAwLTAwMDAwMDAwMDAwMSIsIm5ldCI6ImtjcCIsInRscyI6Im5vbmUifQ==".to_owned(),
@@ -171,7 +181,7 @@ async fn bundled_core_validation() {
         let bytes =
             serde_json::to_vec(&config::build(&repo, &node.id, 10808, 10809, false).unwrap())
                 .unwrap();
-        vpn_service::validate(&path, &bytes).await.unwrap();
+        crate::core::xray::validate(&path, &bytes).await.unwrap();
     }
 }
 
@@ -179,9 +189,11 @@ async fn bundled_core_validation() {
 #[tokio::test]
 async fn core_readiness_does_not_wait_for_external_ip() {
     let directory = tempfile::tempdir().unwrap();
-    let runtime = crate::runtime::RuntimePaths::new(std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("runtime"));
+    let runtime = crate::runtime::RuntimePaths::new(
+        std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("runtime"),
+    );
     let path = core::prepare(&runtime, directory.path()).unwrap();
-    let (proxy_port, metrics_port) = vpn_service::ports().unwrap();
+    let (proxy_port, metrics_port) = crate::core::xray::ports().unwrap();
     let bytes = serde_json::to_vec(&serde_json::json!({
         "log": { "loglevel": "none" },
         "inbounds": [{
@@ -196,15 +208,18 @@ async fn core_readiness_does_not_wait_for_external_ip() {
     let mut samples = Vec::new();
     for _ in 0..9 {
         let started = std::time::Instant::now();
-        let mut session = vpn_service::Session::default();
-        vpn_service::start(&path, &mut session, &bytes, proxy_port, metrics_port)
+        let mut session = crate::core::xray::XraySession::default();
+        crate::core::xray::start(&path, &mut session, &bytes, proxy_port, metrics_port)
             .await
             .unwrap();
         samples.push(started.elapsed().as_millis());
-        vpn_service::stop(&mut session).await.unwrap();
+        crate::core::xray::stop(&mut session).await.unwrap();
     }
     samples.sort_unstable();
-    eprintln!("Local Xray process + SOCKS readiness: median={} ms, p95={} ms (n=9)", samples[4], samples[8]);
+    eprintln!(
+        "Local Xray process + SOCKS readiness: median={} ms, p95={} ms (n=9)",
+        samples[4], samples[8]
+    );
     assert!(samples[8] < 3000);
 }
 
@@ -252,7 +267,11 @@ fn ip_rules_and_default_direct() {
         } else {
             "ip"
         };
-        assert!(value["routing"]["rules"].as_array().unwrap().iter().any(|r| r[key].is_array() && r["outboundTag"] == "proxy"));
+        assert!(value["routing"]["rules"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|r| r[key].is_array() && r["outboundTag"] == "proxy"));
     }
     repo.rules[0].name = "203.0.113.0/99".into();
     assert!(config::build(&repo, &node.id, 10808, 10809, true).is_err());
@@ -263,22 +282,39 @@ fn disabling_a_rule_can_replace_live_routing_without_restarting_tun() {
     use crate::storage::repository::{Rule, RuleMatcher};
     let node = uri::parse(VLESS, "sub").unwrap();
     let mut before = Repository {
-        nodes: vec![node.clone()], routing_mode: "rules".into(), ..Default::default()
+        nodes: vec![node.clone()],
+        routing_mode: "rules".into(),
+        ..Default::default()
     };
     before.rules.push(Rule {
-        id: "steam".into(), name: "steam.exe".into(), matcher: RuleMatcher::Application,
-        server_id: "subscription".into(), enabled: true, preset_id: None, is_domain: false,
+        id: "steam".into(),
+        name: "steam.exe".into(),
+        matcher: RuleMatcher::Application,
+        server_id: "subscription".into(),
+        enabled: true,
+        preset_id: None,
+        is_domain: false,
     });
     let mut after = before.clone();
     after.rules[0].enabled = false;
-    let patch = config::live_routing_patch(&before, &after, &node.id).unwrap().unwrap();
-    assert!(!patch["routing"]["rules"].as_array().unwrap().iter().any(|rule|
-        rule["process"].as_array().is_some_and(|processes|
-            processes.iter().any(|process| process == "steam.exe"))));
-    assert!(config::live_routing_patch(&after, &before, &node.id).unwrap().is_some());
+    let patch = config::live_routing_patch(&before, &after, &node.id)
+        .unwrap()
+        .unwrap();
+    assert!(!patch["routing"]["rules"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|rule| rule["process"]
+            .as_array()
+            .is_some_and(|processes| processes.iter().any(|process| process == "steam.exe"))));
+    assert!(config::live_routing_patch(&after, &before, &node.id)
+        .unwrap()
+        .is_some());
     let mut removed = before.clone();
     removed.rules.clear();
-    assert!(config::live_routing_patch(&before, &removed, &node.id).unwrap().is_some());
+    assert!(config::live_routing_patch(&before, &removed, &node.id)
+        .unwrap()
+        .is_some());
 }
 #[cfg(windows)]
 #[test]
@@ -286,26 +322,63 @@ fn switching_routing_modes_keeps_the_active_tun_configuration() {
     use crate::storage::repository::{Rule, RuleMatcher};
     let node = uri::parse(VLESS, "sub").unwrap();
     let mut rules = Repository {
-        nodes: vec![node.clone()], routing_mode: "rules".into(), ..Default::default()
+        nodes: vec![node.clone()],
+        routing_mode: "rules".into(),
+        ..Default::default()
     };
     rules.rules.push(Rule {
-        id: "steam".into(), name: "steam.exe".into(), matcher: RuleMatcher::Application,
-        server_id: "subscription".into(), enabled: true, preset_id: None, is_domain: false,
+        id: "steam".into(),
+        name: "steam.exe".into(),
+        matcher: RuleMatcher::Application,
+        server_id: "subscription".into(),
+        enabled: true,
+        preset_id: None,
+        is_domain: false,
     });
     let mut global = rules.clone();
     global.routing_mode = "global".into();
-    let rules_config = serde_json::to_value(config::build(&rules, &node.id, 10808, 10809, true).unwrap()).unwrap();
-    let global_config = serde_json::to_value(config::build(&global, &node.id, 10808, 10809, true).unwrap()).unwrap();
+    let rules_config =
+        serde_json::to_value(config::build(&rules, &node.id, 10808, 10809, true).unwrap()).unwrap();
+    let global_config =
+        serde_json::to_value(config::build(&global, &node.id, 10808, 10809, true).unwrap())
+            .unwrap();
     for field in ["inbounds", "outbounds", "dns"] {
-        assert_eq!(rules_config[field], global_config[field], "{field} changed across modes");
+        assert_eq!(
+            rules_config[field], global_config[field],
+            "{field} changed across modes"
+        );
     }
-    assert_eq!(rules_config["routing"]["domainStrategy"], global_config["routing"]["domainStrategy"]);
+    assert_eq!(
+        rules_config["routing"]["domainStrategy"],
+        global_config["routing"]["domainStrategy"]
+    );
     assert_eq!(global_config["routing"]["domainStrategy"], "IPOnDemand");
-    assert_eq!(global_config["routing"]["rules"][0]["inboundTag"][0], "dns-query");
-    assert!(config::live_routing_patch(&rules, &global, &node.id).unwrap().is_some());
-    assert!(config::live_routing_patch(&global, &rules, &node.id).unwrap().is_some());
-    assert_eq!(global_config["routing"]["rules"].as_array().unwrap().last().unwrap()["outboundTag"], "proxy");
-    assert_eq!(rules_config["routing"]["rules"].as_array().unwrap().last().unwrap()["outboundTag"], "direct");
+    assert_eq!(
+        global_config["routing"]["rules"][0]["inboundTag"][0],
+        "dns-query"
+    );
+    assert!(config::live_routing_patch(&rules, &global, &node.id)
+        .unwrap()
+        .is_some());
+    assert!(config::live_routing_patch(&global, &rules, &node.id)
+        .unwrap()
+        .is_some());
+    assert_eq!(
+        global_config["routing"]["rules"]
+            .as_array()
+            .unwrap()
+            .last()
+            .unwrap()["outboundTag"],
+        "proxy"
+    );
+    assert_eq!(
+        rules_config["routing"]["rules"]
+            .as_array()
+            .unwrap()
+            .last()
+            .unwrap()["outboundTag"],
+        "direct"
+    );
 }
 #[test]
 fn balanced_xray_subscription_and_clean_names() {
@@ -354,7 +427,10 @@ fn balanced_xray_subscription_and_clean_names() {
     assert_eq!(parsed.nodes[1].name, "🇫🇮 Финляндия");
     assert!(parsed.nodes[1].balancer.is_none());
 
-    let repo = Repository { nodes: parsed.nodes, ..Default::default() };
+    let repo = Repository {
+        nodes: parsed.nodes,
+        ..Default::default()
+    };
     let snap = crate::services::catalog_service::snapshot(&repo, &Default::default());
     let servers = snap["servers"].as_array().unwrap();
     assert_eq!(servers[0]["name"], "🚀 Автоматический сервер | Европа");
@@ -534,8 +610,19 @@ fn preset_application_idempotency_and_preservation() {
 
     let rules = generate_preset_rules("russia-optimized", "sub-1").unwrap();
     assert_eq!(rules.len(), 8);
-    assert_eq!(rules.iter().map(|r| r.name.as_str()).collect::<Vec<_>>(),
-        vec!["private", "youtube", "antifilter", "antifilter-community", "category-ru", "antifilter", "antifilter-community", "ru"]);
+    assert_eq!(
+        rules.iter().map(|r| r.name.as_str()).collect::<Vec<_>>(),
+        vec![
+            "private",
+            "youtube",
+            "antifilter",
+            "antifilter-community",
+            "category-ru",
+            "antifilter",
+            "antifilter-community",
+            "ru"
+        ]
+    );
     assert_eq!(rules[1].server_id, "sub-1");
     // Check all preset rules have preset_id populated
     for r in &rules {
@@ -547,7 +634,10 @@ fn preset_application_idempotency_and_preservation() {
     assert_eq!(bb.len(), 5);
     assert_eq!(bb[0].name, "youtube");
     let rd = generate_preset_rules("russia-direct", "sub-1").unwrap();
-    assert_eq!(rd.iter().map(|r| r.name.as_str()).collect::<Vec<_>>(), vec!["private", "category-ru", "ru"]);
+    assert_eq!(
+        rd.iter().map(|r| r.name.as_str()).collect::<Vec<_>>(),
+        vec!["private", "category-ru", "ru"]
+    );
 
     // Check case-insensitive prefix normalization
     assert_eq!(
@@ -595,28 +685,62 @@ async fn geo_presets_real_xray_outbound_selection_and_dns_priority() {
     use crate::storage::repository::{Rule, RuleMatcher};
     use tokio::io::AsyncWriteExt;
     let node = uri::parse(VLESS, "sub").unwrap();
-    let mut repo = Repository { nodes:vec![node.clone()], routing_mode:"rules".into(), ..Default::default() };
-    let manual = Rule { id:"manual".into(), name:"203.0.113.10".into(), matcher:RuleMatcher::Domain,
-        server_id:"block".into(), enabled:true, preset_id:None, is_domain:true };
+    let mut repo = Repository {
+        nodes: vec![node.clone()],
+        routing_mode: "rules".into(),
+        ..Default::default()
+    };
+    let manual = Rule {
+        id: "manual".into(),
+        name: "203.0.113.10".into(),
+        matcher: RuleMatcher::Domain,
+        server_id: "block".into(),
+        enabled: true,
+        preset_id: None,
+        is_domain: true,
+    };
     let mut expected = None;
-    for order in [["russia-direct", "bypass-blocking"], ["bypass-blocking", "russia-direct"]] {
+    for order in [
+        ["russia-direct", "bypass-blocking"],
+        ["bypass-blocking", "russia-direct"],
+    ] {
         repo.rules = vec![manual.clone()];
-        for preset in order { repo.rules.extend(generate_preset_rules(preset, "subscription").unwrap()); }
+        for preset in order {
+            repo.rules
+                .extend(generate_preset_rules(preset, "subscription").unwrap());
+        }
         let ordered: Vec<_> = ordered_rules(&repo.rules).into_iter().cloned().collect();
-        if let Some(expected) = &expected { assert_eq!(&ordered, expected); } else { expected = Some(ordered); }
+        if let Some(expected) = &expected {
+            assert_eq!(&ordered, expected);
+        } else {
+            expected = Some(ordered);
+        }
     }
-    let runtime = crate::runtime::RuntimePaths::new(std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("runtime"));
+    let runtime = crate::runtime::RuntimePaths::new(
+        std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("runtime"),
+    );
     let data = tempfile::tempdir().unwrap();
     let core = core::prepare(&runtime, data.path()).unwrap();
     let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let port = listener.local_addr().unwrap().port();
-    let mut config = serde_json::to_value(config::build(&repo, &node.id, 10808, 10809, false).unwrap()).unwrap();
+    let mut config =
+        serde_json::to_value(config::build(&repo, &node.id, 10808, 10809, false).unwrap()).unwrap();
     let rules = config["routing"]["rules"].as_array().unwrap();
-    assert!(rules.iter().position(|r| r["outboundTag"] == "dns").unwrap() < rules.iter().position(|r| r["ip"].is_array()).unwrap());
+    assert!(
+        rules
+            .iter()
+            .position(|r| r["outboundTag"] == "dns")
+            .unwrap()
+            < rules.iter().position(|r| r["ip"].is_array()).unwrap()
+    );
     assert_eq!(rules[0]["inboundTag"][0], "dns-query");
-    vpn_service::validate(&core, &serde_json::to_vec(&config).unwrap()).await.unwrap();
+    crate::core::xray::validate(&core, &serde_json::to_vec(&config).unwrap())
+        .await
+        .unwrap();
     let tun = config::build(&repo, &node.id, 10808, 10809, true).unwrap();
-    vpn_service::validate(&core, &serde_json::to_vec(&tun).unwrap()).await.unwrap();
+    crate::core::xray::validate(&core, &serde_json::to_vec(&tun).unwrap())
+        .await
+        .unwrap();
     // Exercise the real router, with deterministic DNS and inert outbounds; no private node required.
     config["log"] = serde_json::json!({"loglevel":"info"});
     config["inbounds"] = serde_json::json!([{"tag":"diagnostic","protocol":"http","listen":"127.0.0.1","port":port}]);
@@ -632,34 +756,72 @@ async fn geo_presets_real_xray_outbound_selection_and_dns_priority() {
     config.as_object_mut().unwrap().remove("metrics");
     let output = tempfile::tempfile().unwrap();
     drop(listener);
-    let mut child = vpn_service::command(&core).args(["run", "-config", "stdin:"])
-        .stdin(std::process::Stdio::piped()).stdout(output.try_clone().unwrap()).stderr(output.try_clone().unwrap()).spawn().unwrap();
-    child.stdin.take().unwrap().write_all(&serde_json::to_vec(&config).unwrap()).await.unwrap();
+    let mut child = crate::core::xray::command(&core)
+        .args(["run", "-config", "stdin:"])
+        .stdin(std::process::Stdio::piped())
+        .stdout(output.try_clone().unwrap())
+        .stderr(output.try_clone().unwrap())
+        .spawn()
+        .unwrap();
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(&serde_json::to_vec(&config).unwrap())
+        .await
+        .unwrap();
     for _ in 0..100 {
-        if tokio::net::TcpStream::connect((std::net::Ipv4Addr::LOCALHOST, port)).await.is_ok() { break; }
+        if tokio::net::TcpStream::connect((std::net::Ipv4Addr::LOCALHOST, port))
+            .await
+            .is_ok()
+        {
+            break;
+        }
         tokio::time::sleep(std::time::Duration::from_millis(20)).await;
     }
-    let client = reqwest::Client::builder().no_proxy().proxy(reqwest::Proxy::all(format!("http://127.0.0.1:{port}")).unwrap())
-        .timeout(std::time::Duration::from_secs(2)).build().unwrap();
-    let cases = [("ip-only.test","block"), ("www.youtube.com","proxy"), ("rr1.googlevideo.com","proxy"),
-        ("youtubei.googleapis.com","proxy"), ("i.ytimg.com","proxy"), ("yandex.ru","direct"), ("fallback.test","direct")];
-    for (host, _) in cases { let _ = client.get(format!("http://{host}/")).send().await; }
+    let client = reqwest::Client::builder()
+        .no_proxy()
+        .proxy(reqwest::Proxy::all(format!("http://127.0.0.1:{port}")).unwrap())
+        .timeout(std::time::Duration::from_secs(2))
+        .build()
+        .unwrap();
+    let cases = [
+        ("ip-only.test", "block"),
+        ("www.youtube.com", "proxy"),
+        ("rr1.googlevideo.com", "proxy"),
+        ("youtubei.googleapis.com", "proxy"),
+        ("i.ytimg.com", "proxy"),
+        ("yandex.ru", "direct"),
+        ("fallback.test", "direct"),
+    ];
+    for (host, _) in cases {
+        let _ = client.get(format!("http://{host}/")).send().await;
+    }
     child.kill().await.unwrap();
     child.wait().await.unwrap();
     use std::io::{Read, Seek};
     let mut output = output;
     output.rewind().unwrap();
-    let mut logs = String::new(); output.read_to_string(&mut logs).unwrap();
-    for (host, target) in cases { assert!(logs.contains(&format!("taking detour [{target}] for [tcp:{host}:80]")), "No expected route for {host}"); }
+    let mut logs = String::new();
+    output.read_to_string(&mut logs).unwrap();
+    for (host, target) in cases {
+        assert!(
+            logs.contains(&format!("taking detour [{target}] for [tcp:{host}:80]")),
+            "No expected route for {host}"
+        );
+    }
     // Compiling old saved presets must not recreate a deleted service row.
     repo.rules.retain(|r| r.name != "youtube");
-    let value = serde_json::to_value(config::build(&repo, &node.id, 10808, 10809, false).unwrap()).unwrap();
+    let value =
+        serde_json::to_value(config::build(&repo, &node.id, 10808, 10809, false).unwrap()).unwrap();
     assert!(!value.to_string().contains("geosite:youtube"));
 }
 
 #[tokio::test]
 async fn geo_database_delivery_and_initialization() {
-    let runtime = crate::runtime::RuntimePaths::new(std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("runtime"));
+    let runtime = crate::runtime::RuntimePaths::new(
+        std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("runtime"),
+    );
     let temp_data = tempfile::tempdir().unwrap();
 
     // Verify initial state is missing
@@ -676,8 +838,12 @@ async fn geo_database_delivery_and_initialization() {
     assert_eq!(info.source, crate::xray::geo::GEO_SOURCE_NAME);
 
     // Verify files exist and have non-zero size
-    let geoip = crate::xray::geo::active_dir(temp_data.path()).unwrap().join("geoip.dat");
-    let geosite = crate::xray::geo::active_dir(temp_data.path()).unwrap().join("geosite.dat");
+    let geoip = crate::xray::geo::active_dir(temp_data.path())
+        .unwrap()
+        .join("geoip.dat");
+    let geosite = crate::xray::geo::active_dir(temp_data.path())
+        .unwrap()
+        .join("geosite.dat");
     assert!(geoip.is_file());
     assert!(geosite.is_file());
     assert!(std::fs::metadata(&geoip).unwrap().len() > 100_000);
@@ -984,7 +1150,9 @@ mod hwid_tests {
         .await;
 
         let temp_dir = tempfile::tempdir().unwrap();
-        let runtime = crate::runtime::RuntimePaths::new(std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("runtime"));
+        let runtime = crate::runtime::RuntimePaths::new(
+            std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("runtime"),
+        );
         let state = AppState::open(temp_dir.path().to_path_buf(), runtime).unwrap();
 
         // 1. Initial subscription import
@@ -1328,7 +1496,9 @@ mod hwid_tests {
             MockHttpServer::start(|_path, _headers| (200, vec![], VALID_SUB_BASE64.into())).await;
 
         let temp_dir = tempfile::tempdir().unwrap();
-        let runtime = crate::runtime::RuntimePaths::new(std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("runtime"));
+        let runtime = crate::runtime::RuntimePaths::new(
+            std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("runtime"),
+        );
         let state = AppState::open(temp_dir.path().to_path_buf(), runtime).unwrap();
 
         // 1. URL fragment name

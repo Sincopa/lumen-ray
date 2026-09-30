@@ -1,8 +1,9 @@
 use super::errors::{BackendError, Result};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
+use std::collections::HashMap;
 
-#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq, Hash)]
 #[serde(rename_all = "lowercase")]
 pub enum Protocol {
     Vless,
@@ -11,6 +12,8 @@ pub enum Protocol {
     Shadowsocks,
     Hysteria,
     Wireguard,
+    Socks,
+    Http,
 }
 
 /// Credentials never cross IPC. Only the encrypted repository persists this model.
@@ -32,6 +35,32 @@ pub struct VpnNode {
     pub wireguard: Option<WireguardOptions>,
     #[serde(default)]
     pub balancer: Option<BalancerOptions>,
+}
+
+/// Temporary lookup for compiling many rules. Keep the same first-match and
+/// server-before-subscription precedence as the ordered repository scans.
+pub(crate) struct NodeIndex<'a> {
+    ids: HashMap<&'a str, &'a VpnNode>,
+    subscriptions: HashMap<&'a str, &'a VpnNode>,
+}
+impl<'a> NodeIndex<'a> {
+    pub(crate) fn new(nodes: &'a [VpnNode]) -> Self {
+        let mut ids = HashMap::with_capacity(nodes.len());
+        let mut subscriptions = HashMap::new();
+        for node in nodes {
+            ids.entry(node.id.as_str()).or_insert(node);
+            subscriptions
+                .entry(node.subscription_id.as_str())
+                .or_insert(node);
+        }
+        Self { ids, subscriptions }
+    }
+    pub(crate) fn target(&self, id: &str) -> Option<&'a VpnNode> {
+        self.ids
+            .get(id)
+            .or_else(|| self.subscriptions.get(id))
+            .copied()
+    }
 }
 #[derive(Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -107,8 +136,17 @@ impl VpnNode {
             || self.address.len() > 253
             || self.address.chars().any(char::is_whitespace)
             || self.port == 0
-            || self.credential.is_empty()
+            || (self.credential.is_empty()
+                && !matches!(self.protocol, Protocol::Socks | Protocol::Http))
             || self.credential.len() > 4096
+        {
+            return Err(BackendError::invalid());
+        }
+        if matches!(self.protocol, Protocol::Socks | Protocol::Http)
+            && (self.method.is_empty() != self.credential.is_empty()
+                || self.method.len() > 255
+                || self.method.contains(':')
+                || (self.protocol == Protocol::Socks && self.credential.len() > 255))
         {
             return Err(BackendError::invalid());
         }
@@ -162,5 +200,28 @@ impl VpnNode {
         res.map_err(|_| BackendError::invalid())?;
         self.id = format!("{:x}", hasher.finalize());
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn node_index_preserves_first_match_and_server_precedence() {
+        let first =
+            crate::subscription::uri::parse("socks5://first.example:1080", "shared").unwrap();
+        let mut second = first.clone();
+        second.address = "second.example".into();
+        let mut server = first.clone();
+        server.id = "shared".into();
+        server.address = "server.example".into();
+        let nodes = vec![first, second, server];
+        let index = NodeIndex::new(&nodes);
+        assert!(std::ptr::eq(index.target(&nodes[0].id).unwrap(), &nodes[0]));
+        assert!(std::ptr::eq(index.target("shared").unwrap(), &nodes[2]));
+        assert!(index.target("missing").is_none());
+        let index = NodeIndex::new(&nodes[..2]);
+        assert!(std::ptr::eq(index.target("shared").unwrap(), &nodes[0]));
     }
 }

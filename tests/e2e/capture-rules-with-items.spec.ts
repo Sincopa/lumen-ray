@@ -1,6 +1,6 @@
 import { test } from '@playwright/test';
 
-test('capture rule row with switch', async ({ page }) => {
+test('capture rule row with switch', async ({ page }, testInfo) => {
 	await page.goto('/');
 	await page.getByRole('button', { name: 'Правила', exact: true }).click();
 	await page.waitForTimeout(200);
@@ -16,6 +16,6 @@ test('capture rule row with switch', async ({ page }) => {
 	await page.waitForTimeout(300);
 
 	await page.screenshot({
-		path: 'C:/Users/user/.gemini/antigravity/brain/313795e2-8fd5-4114-b3af-5c82fe56fd3c/verify-rules-with-switch.png',
+		path: testInfo.outputPath('verify-rules-with-switch.png'),
 	});
 });

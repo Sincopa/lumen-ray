@@ -110,9 +110,13 @@ pub fn assets_for_core(core: &Path) -> PathBuf {
 fn verify_pair(dir: &Path, meta: &GeoDatabaseMetadata) -> Result<(Vec<u8>, Vec<u8>)> {
     let ip = std::fs::read(dir.join("geoip.dat")).map_err(|_| error())?;
     let site = std::fs::read(dir.join("geosite.dat")).map_err(|_| error())?;
-    if ip.len() < 1024 || ip.len() > MAX_GEOIP_SIZE || site.len() < 1024 || site.len() > MAX_GEOSITE_SIZE
+    if ip.len() < 1024
+        || ip.len() > MAX_GEOIP_SIZE
+        || site.len() < 1024
+        || site.len() > MAX_GEOSITE_SIZE
         || format!("{:x}", Sha256::digest(&ip)) != meta.geoip_sha256
-        || format!("{:x}", Sha256::digest(&site)) != meta.geosite_sha256 {
+        || format!("{:x}", Sha256::digest(&site)) != meta.geosite_sha256
+    {
         return Err(error());
     }
     Ok((ip, site))
@@ -121,22 +125,47 @@ pub fn info(data: &Path) -> GeoDatabaseInfo {
     let verified = snapshot(data).map(|(m, ip, site)| (m, ip.len() as u64, site.len() as u64));
     match verified {
         Ok((m, ip, site)) => GeoDatabaseInfo {
-            version:m.version, source:m.source, updated_at:m.updated_at,
-            status:"ready".into(), error:None, valid:true, geoip_size:ip, geosite_size:site,
+            version: m.version,
+            source: m.source,
+            updated_at: m.updated_at,
+            status: "ready".into(),
+            error: None,
+            valid: true,
+            geoip_size: ip,
+            geosite_size: site,
         },
         Err(_) => GeoDatabaseInfo {
-            version:"none".into(), source:GEO_SOURCE_NAME.into(), updated_at:0,
-            status:if metadata_path(data).exists() { "corrupted" } else { "missing" }.into(),
-            error:Some("Geo databases are missing or have not passed validation".into()),
-            valid:false, geoip_size:0, geosite_size:0,
+            version: "none".into(),
+            source: GEO_SOURCE_NAME.into(),
+            updated_at: 0,
+            status: if metadata_path(data).exists() {
+                "corrupted"
+            } else {
+                "missing"
+            }
+            .into(),
+            error: Some("Geo databases are missing or have not passed validation".into()),
+            valid: false,
+            geoip_size: 0,
+            geosite_size: 0,
         },
     }
 }
 fn lock(data: &Path) -> Result<std::fs::File> {
     std::fs::create_dir_all(geo_dir(data)).map_err(|_| error())?;
-    let file = std::fs::OpenOptions::new().create(true).truncate(false).read(true).write(true)
-        .open(geo_dir(data).join("update.lock")).map_err(|_| error())?;
-    fs2::FileExt::try_lock_exclusive(&file).map_err(|_| BackendError::new("GEO_UPDATE_BUSY", "A geo database update is already running"))?;
+    let file = std::fs::OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .read(true)
+        .write(true)
+        .open(geo_dir(data).join("update.lock"))
+        .map_err(|_| error())?;
+    fs2::FileExt::try_lock_exclusive(&file).map_err(|_| {
+        BackendError::new(
+            "GEO_UPDATE_BUSY",
+            "A geo database update is already running",
+        )
+    })?;
     Ok(file)
 }
 fn commit(data: &Path, staging: tempfile::TempDir, mut meta: GeoDatabaseMetadata) -> Result<()> {
@@ -151,7 +180,9 @@ pub fn restore_metadata(data: &Path, bytes: &[u8]) -> Result<()> {
     let _lock = lock(data)?;
     let meta: GeoDatabaseMetadata = serde_json::from_slice(bytes).map_err(|_| error())?;
     let id = meta.generation.as_ref().ok_or_else(error)?;
-    if uuid::Uuid::parse_str(id).is_err() { return Err(error()); }
+    if uuid::Uuid::parse_str(id).is_err() {
+        return Err(error());
+    }
     verify_pair(&geo_dir(data).join(id), &meta)?;
     crate::xray::updater::atomic_write(&metadata_path(data), bytes)
 }
@@ -165,7 +196,13 @@ pub fn snapshot(data: &Path) -> Result<(GeoDatabaseMetadata, Vec<u8>, Vec<u8>)> 
     Ok((meta, ip, site))
 }
 #[allow(dead_code)]
-pub fn install_snapshot(data: &Path, core: &Path, meta: GeoDatabaseMetadata, ip: &[u8], site: &[u8]) -> Result<()> {
+pub fn install_snapshot(
+    data: &Path,
+    core: &Path,
+    meta: GeoDatabaseMetadata,
+    ip: &[u8],
+    site: &[u8],
+) -> Result<()> {
     let _lock = lock(data)?;
     let staging = tempfile::tempdir_in(geo_dir(data)).map_err(|_| error())?;
     crate::xray::updater::atomic_write(&staging.path().join("geoip.dat"), ip)?;
@@ -174,7 +211,12 @@ pub fn install_snapshot(data: &Path, core: &Path, meta: GeoDatabaseMetadata, ip:
     validate_geo_files_sync(core, staging.path())?;
     commit(data, staging, meta)
 }
-pub fn install_trusted_snapshot(data: &Path, meta: GeoDatabaseMetadata, ip: &[u8], site: &[u8]) -> Result<()> {
+pub fn install_trusted_snapshot(
+    data: &Path,
+    meta: GeoDatabaseMetadata,
+    ip: &[u8],
+    site: &[u8],
+) -> Result<()> {
     let _lock = lock(data)?;
     let staging = tempfile::tempdir_in(geo_dir(data)).map_err(|_| error())?;
     crate::xray::updater::atomic_write(&staging.path().join("geoip.dat"), ip)?;
@@ -182,22 +224,40 @@ pub fn install_trusted_snapshot(data: &Path, meta: GeoDatabaseMetadata, ip: &[u8
     verify_pair(staging.path(), &meta)?;
     commit(data, staging, meta)
 }
-pub fn ensure_initialized(runtime: impl Into<crate::runtime::RuntimePaths>, data: &Path) -> Result<()> {
+pub fn ensure_initialized(
+    runtime: impl Into<crate::runtime::RuntimePaths>,
+    data: &Path,
+) -> Result<()> {
     let runtime = runtime.into();
     let _lock = lock(data)?;
-    if info(data).valid { return Ok(()); }
+    if info(data).valid {
+        return Ok(());
+    }
     let core = runtime.xray_binary();
     let staging = tempfile::tempdir_in(geo_dir(data)).map_err(|_| error())?;
     let legacy = metadata(data).ok().and_then(|m| {
         let pair = verify_pair(&active_dir(data).ok()?, &m).ok()?;
         Some((m, pair))
     });
-    let (meta, (ip, site)) = if let Some(legacy) = legacy { legacy } else {
-        let manifest: serde_json::Value = serde_json::from_str(include_str!("../../runtime/xray/manifest.json")).map_err(|_| error())?;
+    let (meta, (ip, site)) = if let Some(legacy) = legacy {
+        legacy
+    } else {
+        let manifest: serde_json::Value =
+            serde_json::from_str(include_str!("../../runtime/xray/manifest.json"))
+                .map_err(|_| error())?;
         let meta = GeoDatabaseMetadata {
-            version:BUNDLED_GEO_VERSION.into(), source:GEO_SOURCE_NAME.into(), updated_at:now_ms(),
-            geoip_sha256:manifest["files"]["geoip.dat"].as_str().ok_or_else(error)?.into(),
-            geosite_sha256:manifest["files"]["geosite.dat"].as_str().ok_or_else(error)?.into(), generation:None,
+            version: BUNDLED_GEO_VERSION.into(),
+            source: GEO_SOURCE_NAME.into(),
+            updated_at: now_ms(),
+            geoip_sha256: manifest["files"]["geoip.dat"]
+                .as_str()
+                .ok_or_else(error)?
+                .into(),
+            geosite_sha256: manifest["files"]["geosite.dat"]
+                .as_str()
+                .ok_or_else(error)?
+                .into(),
+            generation: None,
         };
         let pair = verify_pair(&runtime.xray_dir(), &meta)?;
         (meta, pair)
@@ -210,7 +270,9 @@ pub fn ensure_initialized(runtime: impl Into<crate::runtime::RuntimePaths>, data
 
 pub async fn update(data: &Path, core_path: &Path) -> Result<GeoDatabaseInfo> {
     let _lock = lock(data)?;
-    if !core_path.is_file() { return Err(error()); }
+    if !core_path.is_file() {
+        return Err(error());
+    }
     let release_url = format!("{GEO_REPOSITORY}/releases/latest");
     let release: Release = client()?
         .get(&release_url)
@@ -263,8 +325,12 @@ pub async fn update(data: &Path, core_path: &Path) -> Result<GeoDatabaseInfo> {
     validate_geo_files_sync(core_path, staging.path())?;
 
     let meta = GeoDatabaseMetadata {
-        version:release.tag_name, source:GEO_SOURCE_NAME.into(), updated_at:now_ms(),
-        geoip_sha256:geoip_hash, geosite_sha256:geosite_hash, generation:None,
+        version: release.tag_name,
+        source: GEO_SOURCE_NAME.into(),
+        updated_at: now_ms(),
+        geoip_sha256: geoip_hash,
+        geosite_sha256: geosite_hash,
+        generation: None,
     };
     commit(data, staging, meta)?;
     Ok(info(data))
@@ -273,10 +339,18 @@ pub async fn update(data: &Path, core_path: &Path) -> Result<GeoDatabaseInfo> {
 // Old NetworkKeeper releases predate GitHub asset digests. Only the exact bundled
 // release is accepted without a published digest, using the compiled trust anchor.
 fn verify_download(asset: &Asset, actual: &str) -> Result<()> {
-    let manifest: serde_json::Value = serde_json::from_str(include_str!("../../runtime/xray/manifest.json")).map_err(|_| error())?;
-    let expected = asset.digest.as_deref().and_then(|s| s.strip_prefix("sha256:"))
-        .or_else(|| manifest["files"][&asset.name].as_str()).ok_or_else(error)?;
-    if expected != actual { return Err(error()); }
+    let manifest: serde_json::Value =
+        serde_json::from_str(include_str!("../../runtime/xray/manifest.json"))
+            .map_err(|_| error())?;
+    let expected = asset
+        .digest
+        .as_deref()
+        .and_then(|s| s.strip_prefix("sha256:"))
+        .or_else(|| manifest["files"][&asset.name].as_str())
+        .ok_or_else(error)?;
+    if expected != actual {
+        return Err(error());
+    }
     Ok(())
 }
 
@@ -334,7 +408,8 @@ pub fn validate_geo_files_sync(core_path: &Path, asset_dir: &Path) -> Result<()>
 
     let config_bytes = serde_json::to_vec(&test_config).map_err(|_| error())?;
     let mut cmd = std::process::Command::new(core_path);
-    #[cfg(windows)] {
+    #[cfg(windows)]
+    {
         use std::os::windows::process::CommandExt;
         cmd.creation_flags(0x08000000);
     }
@@ -346,17 +421,48 @@ pub fn validate_geo_files_sync(core_path: &Path, asset_dir: &Path) -> Result<()>
         .stderr(std::process::Stdio::null());
     let mut child = cmd.spawn().map_err(|_| error())?;
     use std::io::Write;
-    let sent = child.stdin.take().ok_or_else(error)?.write_all(&config_bytes);
-    if sent.is_err() { let _ = child.kill(); let _ = child.wait(); return Err(error()); }
+    let sent = child
+        .stdin
+        .take()
+        .ok_or_else(error)?
+        .write_all(&config_bytes);
+    if sent.is_err() {
+        let _ = child.kill();
+        let _ = child.wait();
+        return Err(error());
+    }
     let deadline = std::time::Instant::now() + Duration::from_secs(10);
     loop {
         match child.try_wait() {
-            Ok(Some(status)) => return if status.success() { Ok(()) } else {
-                Err(BackendError::new("GEO_UPDATE_FAILED", "Xray rejected the geo database validation configuration"))
-            },
-            Ok(None) if std::time::Instant::now() < deadline => std::thread::sleep(Duration::from_millis(20)),
-            Ok(None) => { let _ = child.kill(); let _ = child.wait(); return Err(BackendError::new("GEO_UPDATE_FAILED", "Xray geo database validation timed out")); }
-            Err(_) => { let _ = child.kill(); let _ = child.wait(); return Err(BackendError::new("GEO_UPDATE_FAILED", "Cannot inspect Xray geo validation process")); }
+            Ok(Some(status)) => {
+                return if status.success() {
+                    Ok(())
+                } else {
+                    Err(BackendError::new(
+                        "GEO_UPDATE_FAILED",
+                        "Xray rejected the geo database validation configuration",
+                    ))
+                }
+            }
+            Ok(None) if std::time::Instant::now() < deadline => {
+                std::thread::sleep(Duration::from_millis(20))
+            }
+            Ok(None) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err(BackendError::new(
+                    "GEO_UPDATE_FAILED",
+                    "Xray geo database validation timed out",
+                ));
+            }
+            Err(_) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err(BackendError::new(
+                    "GEO_UPDATE_FAILED",
+                    "Cannot inspect Xray geo validation process",
+                ));
+            }
         }
     }
 }
@@ -380,10 +486,26 @@ mod tests {
         ensure_initialized(&rt, data.path()).unwrap();
         assert_eq!(std::fs::read(metadata_path(data.path())).unwrap(), previous);
         assert!(info(data.path()).valid);
-        assert!(install_snapshot(data.path(), &rt.xray_binary(), meta.clone(), &ip, b"invalid").is_err());
-        assert!(install_snapshot(data.path(), &rt.xray_dir().join("absent.exe"), meta.clone(), &ip, &site).is_err());
+        assert!(install_snapshot(
+            data.path(),
+            &rt.xray_binary(),
+            meta.clone(),
+            &ip,
+            b"invalid"
+        )
+        .is_err());
+        assert!(install_snapshot(
+            data.path(),
+            &rt.xray_dir().join("absent.exe"),
+            meta.clone(),
+            &ip,
+            &site
+        )
+        .is_err());
         let guard = lock(data.path()).unwrap();
-        assert!(install_snapshot(data.path(), &rt.xray_binary(), meta.clone(), &ip, &site).is_err());
+        assert!(
+            install_snapshot(data.path(), &rt.xray_binary(), meta.clone(), &ip, &site).is_err()
+        );
         drop(guard);
         assert_eq!(std::fs::read(metadata_path(data.path())).unwrap(), previous);
         install_snapshot(data.path(), &rt.xray_binary(), meta, &ip, &site).unwrap();
@@ -400,9 +522,18 @@ mod tests {
         let (meta, ip, site) = snapshot(data.path()).unwrap();
         install_snapshot(data.path(), &core, meta, &ip, &site).unwrap();
         assert_eq!(assets_for_core(&core), active_dir(data.path()).unwrap());
-        std::fs::write(active_dir(data.path()).unwrap().join("geosite.dat"), vec![1; 2000]).unwrap();
+        std::fs::write(
+            active_dir(data.path()).unwrap().join("geosite.dat"),
+            vec![1; 2000],
+        )
+        .unwrap();
         assert!(!info(data.path()).valid);
-        let asset = Asset { name:"geoip.dat".into(), size:1024, browser_download_url:String::new(), digest:Some(format!("sha256:{}", "a".repeat(64))) };
+        let asset = Asset {
+            name: "geoip.dat".into(),
+            size: 1024,
+            browser_download_url: String::new(),
+            digest: Some(format!("sha256:{}", "a".repeat(64))),
+        };
         assert!(verify_download(&asset, &"b".repeat(64)).is_err());
     }
 }

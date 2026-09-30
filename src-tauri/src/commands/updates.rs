@@ -110,7 +110,7 @@ pub async fn install_core_update(
             10809,
             repo.settings.network_mode == "tun",
         )?;
-        crate::services::vpn_service::validate(
+        crate::core::xray::validate(
             &candidate,
             &serde_json::to_vec(&config).map_err(|_| BackendError::invalid())?,
         )

@@ -306,7 +306,7 @@ pub async fn mutate(state: &AppState, mutation: Mutation) -> Result<Value> {
         }
     }
     if let Some(id) = &next.selected_server_id {
-        crate::xray::config::build(&next, id, 10808, 10809, false)?;
+        crate::xray::config::build(&next, id, 10808, 10809, next.settings.network_mode == "tun")?;
     }
     state.store.save(&next)?;
     let latencies = state.latencies.read().await;
@@ -428,13 +428,11 @@ pub async fn import(
     if refresh_id.is_some() && !next.sources.contains_key(&id) {
         return Err(BackendError::invalid());
     }
-    let old: Vec<_> = next
-        .nodes
-        .iter()
-        .filter(|n| n.subscription_id == id)
-        .cloned()
-        .collect();
-    let change = reconcile_nodes(&old, &mut parsed.nodes, &id);
+    let change = reconcile_nodes(
+        next.nodes.iter().filter(|n| n.subscription_id == id),
+        &mut parsed.nodes,
+        &id,
+    );
     next.subscription_changes.push(change);
     let overflow = next.subscription_changes.len().saturating_sub(100);
     next.subscription_changes.drain(..overflow);
@@ -478,18 +476,10 @@ pub async fn import(
         .map(|info| info.server_id.clone())
     {
         if next.nodes.iter().any(|node| node.id == active) {
-            let config = crate::xray::config::build(
-                &next,
-                &active,
-                10808,
-                10809,
-                next.settings.network_mode == "tun",
-            )?;
-            super::vpn_service::validate(
-                &state.core.read().await,
-                &serde_json::to_vec(&config).map_err(|_| BackendError::invalid())?,
-            )
-            .await?;
+            let engine = state.session.lock().await.engine();
+            crate::core::backend(engine)
+                .validate_runtime(state, &next, &active)
+                .await?;
         }
     }
     state.store.save(&next)?;
@@ -699,7 +689,7 @@ async fn fetch_subscription(
         .clone();
     let port = {
         let session = state.session.lock().await;
-        session.started.map(|_| session.proxy_port)
+        session.started().map(|_| session.proxy_port())
     };
     if transport == "proxy" {
         let port = port.ok_or_else(|| {
@@ -730,41 +720,52 @@ async fn fetch_subscription(
     }
 }
 
-fn reconcile_nodes(
-    old: &[crate::domain::node::VpnNode],
+fn reconcile_nodes<'a>(
+    old: impl IntoIterator<Item = &'a crate::domain::node::VpnNode>,
     incoming: &mut [crate::domain::node::VpnNode],
     subscription_id: &str,
 ) -> crate::storage::repository::SubscriptionChange {
-    let mut claimed = std::collections::HashSet::new();
+    use crate::domain::node::{Protocol, VpnNode};
+    use std::collections::{HashMap, HashSet};
+    fn endpoint(node: &VpnNode) -> (&str, u16, Protocol, &str) {
+        (&node.address, node.port, node.protocol, &node.name)
+    }
+    let old = old.into_iter();
+    let mut by_id = HashMap::with_capacity(old.size_hint().0);
+    let mut by_endpoint: HashMap<_, Vec<_>> = HashMap::new();
+    let mut old_count = 0;
+    for previous in old {
+        old_count += 1;
+        by_id.entry(previous.id.as_str()).or_insert(previous);
+        by_endpoint
+            .entry(endpoint(previous))
+            .or_default()
+            .push(previous);
+    }
+    let mut claimed = HashSet::with_capacity(old_count);
     let mut added = 0;
     let mut updated = 0;
     for node in incoming {
-        let same_id = old
-            .iter()
-            .find(|previous| previous.id == node.id && !claimed.contains(&previous.id));
-        let matches: Vec<_> = old
-            .iter()
-            .filter(|previous| {
-                !claimed.contains(&previous.id)
-                    && previous.address == node.address
-                    && previous.port == node.port
-                    && previous.protocol == node.protocol
-                    && previous.name == node.name
-            })
-            .collect();
+        let same_id = by_id
+            .get(node.id.as_str())
+            .copied()
+            .filter(|previous| !claimed.contains(previous.id.as_str()));
         let previous = same_id.or_else(|| {
-            if matches.len() == 1 {
-                matches.first().copied()
-            } else {
-                None
-            }
+            let mut matches = by_endpoint
+                .get(&endpoint(node))?
+                .iter()
+                .copied()
+                .filter(|previous| !claimed.contains(previous.id.as_str()));
+            let first = matches.next()?;
+            // Ambiguous endpoints must never merge two different accounts.
+            matches.next().is_none().then_some(first)
         });
         if let Some(previous) = previous {
             node.id = previous.id.clone();
             if previous != node {
                 updated += 1;
             }
-            claimed.insert(previous.id.clone());
+            claimed.insert(previous.id.as_str());
         } else {
             added += 1;
         }
@@ -774,13 +775,116 @@ fn reconcile_nodes(
         at: now(),
         added,
         updated,
-        removed: old.len().saturating_sub(claimed.len()),
+        removed: old_count.saturating_sub(claimed.len()),
     }
 }
 
 #[cfg(test)]
 mod refresh_tests {
     use super::*;
+
+    // Preserve the previous algorithm as an oracle for ambiguous endpoints,
+    // duplicate IDs and rotations that have already claimed a previous row.
+    fn reference_reconcile(
+        old: &[crate::domain::node::VpnNode],
+        incoming: &mut [crate::domain::node::VpnNode],
+    ) -> (usize, usize, usize) {
+        let mut claimed = std::collections::HashSet::new();
+        let (mut added, mut updated) = (0, 0);
+        for node in incoming {
+            let same_id = old
+                .iter()
+                .find(|previous| previous.id == node.id && !claimed.contains(&previous.id));
+            let matches: Vec<_> = old
+                .iter()
+                .filter(|previous| {
+                    !claimed.contains(&previous.id)
+                        && previous.address == node.address
+                        && previous.port == node.port
+                        && previous.protocol == node.protocol
+                        && previous.name == node.name
+                })
+                .collect();
+            let previous = same_id.or_else(|| (matches.len() == 1).then(|| matches[0]));
+            if let Some(previous) = previous {
+                node.id = previous.id.clone();
+                updated += usize::from(previous != node);
+                claimed.insert(previous.id.clone());
+            } else {
+                added += 1;
+            }
+        }
+        (added, updated, old.len().saturating_sub(claimed.len()))
+    }
+
+    #[test]
+    fn indexed_refresh_matches_previous_algorithm_on_collisions_and_reordering() {
+        let old: Vec<_> = (0..12)
+            .map(|i| {
+                crate::subscription::uri::parse(
+                    &format!(
+                        "trojan://password-{i}@host-{}.example:443#Server-{}",
+                        i / 3,
+                        i / 3
+                    ),
+                    "sub",
+                )
+                .unwrap()
+            })
+            .collect();
+        for duplicate_ids in [false, true] {
+            let mut old = old.clone();
+            if duplicate_ids {
+                old[1].id = old[0].id.clone();
+            }
+            for rotation in 0..old.len() {
+                let mut incoming = old.clone();
+                incoming.rotate_left(rotation);
+                incoming.truncate(9);
+                for (i, node) in incoming.iter_mut().enumerate() {
+                    if i % 2 == 0 {
+                        node.credential = "rotated-password".into();
+                        node.identify().unwrap();
+                    }
+                }
+                incoming.push(old[0].clone());
+                incoming.push(
+                    crate::subscription::uri::parse("socks5://new.example:1080", "sub").unwrap(),
+                );
+                let mut expected = incoming.clone();
+                let counts = reference_reconcile(&old, &mut expected);
+                let change = reconcile_nodes(&old, &mut incoming, "sub");
+                assert!(incoming == expected);
+                assert_eq!((change.added, change.updated, change.removed), counts);
+            }
+        }
+    }
+
+    #[test]
+    #[ignore = "Performance diagnostic; compares a 4096-server refresh with the previous algorithm"]
+    fn indexed_refresh_benchmark() {
+        let template = crate::subscription::uri::parse("socks5://example.org:1080", "sub").unwrap();
+        let old: Vec<_> = (0..4096)
+            .map(|i| {
+                let mut node = template.clone();
+                node.id = i.to_string();
+                node.address = format!("server-{i}.example");
+                node
+            })
+            .collect();
+        let mut incoming = old.clone();
+        incoming.reverse();
+        let mut expected = incoming.clone();
+        let before = std::time::Instant::now();
+        let counts = reference_reconcile(&old, &mut expected);
+        let baseline = before.elapsed();
+        let before = std::time::Instant::now();
+        let change = reconcile_nodes(&old, &mut incoming, "sub");
+        let optimized = before.elapsed();
+        assert!(incoming == expected);
+        assert_eq!((change.added, change.updated, change.removed), counts);
+        println!("4096-server refresh: previous={baseline:?}, indexed={optimized:?}");
+    }
     #[test]
     fn credential_rotation_preserves_selection_and_reports_change() {
         let old =

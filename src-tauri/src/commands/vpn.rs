@@ -27,7 +27,9 @@ pub async fn disconnect(
 ) -> Result<()> {
     service::disconnect(&state, &app).await?;
     let state = state.inner().clone();
-    tauri::async_runtime::spawn(async move { service::prewarm(&state).await; });
+    tauri::async_runtime::spawn(async move {
+        service::prewarm(&state).await;
+    });
     Ok(())
 }
 #[tauri::command]

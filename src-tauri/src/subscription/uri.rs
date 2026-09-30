@@ -50,6 +50,8 @@ pub fn parse(input: &str, subscription: &str) -> Result<VpnNode> {
     };
     let url = Url::parse(normalized).map_err(|_| BackendError::invalid())?;
     let protocol = match url.scheme() {
+        "socks" | "socks5" => Protocol::Socks,
+        "http-proxy" => Protocol::Http,
         "vless" => Protocol::Vless,
         "trojan" => Protocol::Trojan,
         "ss" => Protocol::Shadowsocks,
@@ -104,6 +106,13 @@ pub fn parse(input: &str, subscription: &str) -> Result<VpnNode> {
         let (m, p) = auth.split_once(':').ok_or_else(BackendError::invalid)?;
         method = m.to_owned();
         credential = p.to_owned();
+    }
+    if matches!(protocol, Protocol::Socks | Protocol::Http) {
+        method = credential;
+        credential = unescape(url.password().unwrap_or_default())?;
+        if method.is_empty() != credential.is_empty() {
+            return Err(BackendError::invalid());
+        }
     }
     let default_security = if matches!(protocol, Protocol::Trojan | Protocol::Hysteria) {
         "tls"

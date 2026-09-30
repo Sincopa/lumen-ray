@@ -3,7 +3,10 @@ use crate::{
     domain::errors::{BackendError, Result},
     storage::repository::Repository,
 };
-use std::{os::windows::io::AsRawHandle, time::{Duration, Instant}};
+use std::{
+    os::windows::io::AsRawHandle,
+    time::{Duration, Instant},
+};
 use tokio::{
     io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt},
     net::windows::named_pipe::{ClientOptions, NamedPipeClient, NamedPipeServer, ServerOptions},
@@ -50,25 +53,52 @@ impl Drop for ProcessHandle {
     }
 }
 impl Helper {
-    pub fn is_standby(&self) -> bool { self.standby }
+    pub fn is_standby(&self) -> bool {
+        self.standby
+    }
     pub async fn activate(&mut self) -> Result<()> {
-        if !self.standby { return Err(error()); }
+        if !self.standby {
+            return Err(error());
+        }
         self.pipe.write_u8(1).await.map_err(|_| error())?;
         let reply = tokio::time::timeout(Duration::from_secs(5), self.pipe.read_u8())
-            .await.map_err(|_| error())?.map_err(|_| error())?;
+            .await
+            .map_err(|_| error())?
+            .map_err(|_| error())?;
         match reply {
             1 => Ok(()),
-            2 => Err(BackendError::new("TUN_ADAPTER_TIMEOUT", "Windows did not make the tunnel adapter ready")),
-            4 => Err(BackendError::new("ROUTING_CONFLICT", "Another network route bypasses Lumen. Disconnect the other VPN and retry")),
+            2 => Err(BackendError::new(
+                "TUN_ADAPTER_TIMEOUT",
+                "Windows did not make the tunnel adapter ready",
+            )),
+            4 => {
+                if let Ok(Ok(bytes)) =
+                    tokio::time::timeout(Duration::from_secs(1), read_frame(&mut self.pipe)).await
+                {
+                    log_route_reason(&bytes);
+                }
+                Err(BackendError::new(
+                    "ROUTING_CONFLICT",
+                    "Windows selected a route outside Lumen. Retry or check competing routes",
+                ))
+            }
             _ => Err(error()),
         }
     }
     pub async fn deactivate(&mut self) -> Result<()> {
-        if !self.standby { return Err(error()); }
+        if !self.standby {
+            return Err(error());
+        }
         self.pipe.write_u8(2).await.map_err(|_| error())?;
         let reply = tokio::time::timeout(Duration::from_secs(5), self.pipe.read_u8())
-            .await.map_err(|_| error())?.map_err(|_| error())?;
-        if reply == 1 { Ok(()) } else { Err(error()) }
+            .await
+            .map_err(|_| error())?
+            .map_err(|_| error())?;
+        if reply == 1 {
+            Ok(())
+        } else {
+            Err(error())
+        }
     }
     pub async fn stop(&mut self) -> Result<()> {
         self.pipe.write_u8(0).await.map_err(|_| error())?;
@@ -87,6 +117,23 @@ fn error() -> BackendError {
         "TUN_FAILED",
         "The tunnel helper could not complete the operation",
     )
+}
+
+fn log_route_reason(bytes: &[u8]) {
+    if let Ok(message) = std::str::from_utf8(bytes) {
+        for reason in [
+            "LumenTun unavailable",
+            "cloudflare lookup",
+            "cloudflare selected another interface",
+            "google lookup",
+            "google selected another interface",
+        ] {
+            if message == format!("Windows selected a route outside Lumen: {reason}") {
+                log::warn!("Lumen tunnel route verification failed: {reason}");
+                break;
+            }
+        }
+    }
 }
 fn wide(input: &std::ffi::OsStr) -> Vec<u16> {
     use std::os::windows::ffi::OsStrExt;
@@ -126,11 +173,22 @@ pub async fn start(request: StartTunnel, data: &std::path::Path) -> Result<Helpe
 pub async fn start_standby(request: StartTunnel, data: &std::path::Path) -> Result<Helper> {
     start_internal(request, data, true).await
 }
-async fn start_internal(request: StartTunnel, data: &std::path::Path, standby: bool) -> Result<Helper> {
+async fn start_internal(
+    request: StartTunnel,
+    data: &std::path::Path,
+    standby: bool,
+) -> Result<Helper> {
     let started_at = std::time::Instant::now();
     let (geo, geoip, geosite) = crate::xray::geo::snapshot(data)?;
-    log::info!("VPN timing: TUN assets verified {} ms", started_at.elapsed().as_millis());
-    let request = StartRequest { tunnel: request, geo, standby };
+    log::info!(
+        "VPN timing: TUN assets verified {} ms",
+        started_at.elapsed().as_millis()
+    );
+    let request = StartRequest {
+        tunnel: request,
+        geo,
+        standby,
+    };
     let id = uuid::Uuid::new_v4().to_string();
     let mut pipe = ServerOptions::new()
         .first_pipe_instance(true)
@@ -140,12 +198,18 @@ async fn start_internal(request: StartTunnel, data: &std::path::Path, standby: b
     let process = tokio::task::spawn_blocking(move || launch(id))
         .await
         .map_err(|_| error())??;
-    log::info!("VPN timing: TUN helper launched {} ms", started_at.elapsed().as_millis());
+    log::info!(
+        "VPN timing: TUN helper launched {} ms",
+        started_at.elapsed().as_millis()
+    );
     tokio::time::timeout(Duration::from_secs(30), pipe.connect())
         .await
         .map_err(|_| error())?
         .map_err(|_| error())?;
-    log::info!("VPN timing: TUN pipe connected {} ms", started_at.elapsed().as_millis());
+    log::info!(
+        "VPN timing: TUN pipe connected {} ms",
+        started_at.elapsed().as_millis()
+    );
     let mut pid = 0;
     unsafe {
         if GetNamedPipeClientProcessId(pipe.as_raw_handle() as _, &mut pid) == 0
@@ -161,32 +225,62 @@ async fn start_internal(request: StartTunnel, data: &std::path::Path, standby: b
     .await?;
     write_asset(&mut pipe, &geoip, crate::xray::geo::MAX_GEOIP_SIZE).await?;
     write_asset(&mut pipe, &geosite, crate::xray::geo::MAX_GEOSITE_SIZE).await?;
-    log::info!("VPN timing: TUN assets transferred {} ms", started_at.elapsed().as_millis());
+    log::info!(
+        "VPN timing: TUN assets transferred {} ms",
+        started_at.elapsed().as_millis()
+    );
     let ready = tokio::time::timeout(Duration::from_secs(120), pipe.read_u8())
         .await
         .map_err(|_| error())?
         .map_err(|_| error())?;
     if ready != 1 {
-        let core_failure = if ready == 3 {
+        let core_failure = if ready == 3 || ready == 4 || ready == 5 {
             tokio::time::timeout(Duration::from_secs(1), read_frame(&mut pipe))
-                .await.ok().and_then(std::result::Result::ok)
+                .await
+                .ok()
+                .and_then(std::result::Result::ok)
                 .and_then(|bytes| String::from_utf8(bytes).ok())
-                .filter(|value| [
-                    "Windows tunnel route setup failed",
-                    "Windows tunnel address setup failed",
-                    "Windows tunnel DNS setup failed",
-                    "Windows tunnel interface is not ready",
-                    "Wintun adapter startup failed",
-                    "startup failure",
-                    "core error (details withheld)",
-                    "core warning (details withheld)",
-                    "Xray exited before the tunnel was ready",
-                ].contains(&value.as_str()))
-        } else { None };
+                .filter(|value| {
+                    if ready == 4 {
+                        log_route_reason(value.as_bytes());
+                    }
+                    [
+                        "Windows tunnel route setup failed",
+                        "Windows tunnel address setup failed",
+                        "Windows tunnel DNS setup failed",
+                        "Windows tunnel interface is not ready",
+                        "Wintun adapter startup failed",
+                        "startup failure",
+                        "core error (details withheld)",
+                        "core warning (details withheld)",
+                        "Xray exited before the tunnel was ready",
+                        "Tunnel adapter is unavailable",
+                        "Tunnel interface is not ready",
+                        "Could not lower standby tunnel priority",
+                        "Prepared tunnel is not isolated from normal networking",
+                    ]
+                    .contains(&value.as_str())
+                })
+        } else {
+            None
+        };
         return Err(match ready {
-            2 => BackendError::new("TUN_ADAPTER_TIMEOUT", "Windows did not make the tunnel adapter ready"),
-            3 => BackendError::new("CORE_START_FAILED", core_failure.unwrap_or_else(|| "Xray exited before the tunnel was ready".into())),
-            4 => BackendError::new("ROUTING_CONFLICT", "Another network route bypasses Lumen. Disconnect the other VPN and retry"),
+            2 => BackendError::new(
+                "TUN_ADAPTER_TIMEOUT",
+                "Windows did not make the tunnel adapter ready",
+            ),
+            3 => BackendError::new(
+                "CORE_START_FAILED",
+                core_failure.unwrap_or_else(|| "Xray exited before the tunnel was ready".into()),
+            ),
+            4 => BackendError::new(
+                "ROUTING_CONFLICT",
+                "Windows selected a route outside Lumen. Retry or check competing routes",
+            ),
+            5 => BackendError::new(
+                "TUN_FAILED",
+                core_failure.unwrap_or_else(|| error().message),
+            ),
             _ => error(),
         });
     }
@@ -200,20 +294,38 @@ async fn start_internal(request: StartTunnel, data: &std::path::Path, standby: b
     .await
     .map_err(|_| error())??;
     log::info!(
-        "VPN timing: TUN worker request={} assets={} config={} core={} geo={} xray={} routes={} ms",
+        "engine=xray VPN timing: TUN worker request={} assets={} config={} core={} geo={} xray={} routes={} ms",
         stages[0], stages[1], stages[2], stages[3], stages[4], stages[5], stages[6]
     );
-    log::info!("VPN timing: TUN helper acknowledged {} ms", started_at.elapsed().as_millis());
-    Ok(Helper { pipe, process, standby })
+    log::info!(
+        "VPN timing: TUN helper acknowledged {} ms",
+        started_at.elapsed().as_millis()
+    );
+    Ok(Helper {
+        pipe,
+        process,
+        standby,
+    })
 }
-async fn write_asset<W: AsyncWrite + Unpin>(writer: &mut W, bytes: &[u8], limit: usize) -> Result<()> {
-    if bytes.len() > limit { return Err(error()); }
-    writer.write_u32(bytes.len() as u32).await.map_err(|_| error())?;
+async fn write_asset<W: AsyncWrite + Unpin>(
+    writer: &mut W,
+    bytes: &[u8],
+    limit: usize,
+) -> Result<()> {
+    if bytes.len() > limit {
+        return Err(error());
+    }
+    writer
+        .write_u32(bytes.len() as u32)
+        .await
+        .map_err(|_| error())?;
     writer.write_all(bytes).await.map_err(|_| error())
 }
 async fn read_asset<R: AsyncRead + Unpin>(reader: &mut R, limit: usize) -> Result<Vec<u8>> {
     let size = reader.read_u32().await.map_err(|_| error())? as usize;
-    if size < 1024 || size > limit { return Err(error()); }
+    if size < 1024 || size > limit {
+        return Err(error());
+    }
     let mut bytes = vec![0; size];
     reader.read_exact(&mut bytes).await.map_err(|_| error())?;
     Ok(bytes)
@@ -283,30 +395,55 @@ pub async fn run(id: &str, parent: u32) -> Result<()> {
             "TUN_ADAPTER_TIMEOUT" => 2,
             "CORE_START_FAILED" => 3,
             "ROUTING_CONFLICT" => 4,
+            "TUN_FAILED" => 5,
             _ => 0,
         };
         let _ = pipe.write_u8(status).await;
-        if status == 3 {
+        if status == 3 || status == 4 || status == 5 {
             let _ = write_frame(&mut pipe, failure.message.as_bytes()).await;
         }
     }
     result
 }
 
-async fn run_session(mut pipe: &mut NamedPipeClient, envelope: StartRequest, worker_started: Instant) -> Result<()> {
+async fn run_session(
+    mut pipe: &mut NamedPipeClient,
+    envelope: StartRequest,
+    worker_started: Instant,
+) -> Result<()> {
     let standby = envelope.standby;
     let request_ready = worker_started.elapsed().as_millis() as u32;
     let (geoip, geosite) = tokio::time::timeout(Duration::from_secs(30), async {
         let ip = read_asset(&mut pipe, crate::xray::geo::MAX_GEOIP_SIZE).await?;
         let site = read_asset(&mut pipe, crate::xray::geo::MAX_GEOSITE_SIZE).await?;
         Ok::<_, BackendError>((ip, site))
-    }).await.map_err(|_| error())??;
+    })
+    .await
+    .map_err(|_| error())??;
     let assets_ready = worker_started.elapsed().as_millis() as u32;
     let request = envelope.tunnel;
+    // The existing worker owns Xray only. Never interpret a native-engine request as Xray.
+    if request.repository.settings.core_engine != crate::core::CoreEngine::Xray {
+        return Err(BackendError::new(
+            "CORE_ENGINE_UNSUPPORTED",
+            "This helper session requires Xray Core",
+        ));
+    }
     let config = if standby {
-        crate::xray::config::build_standby(&request.repository, &request.selected, request.proxy_port, request.metrics_port)?
+        crate::xray::config::build_standby(
+            &request.repository,
+            &request.selected,
+            request.proxy_port,
+            request.metrics_port,
+        )?
     } else {
-        crate::xray::config::build(&request.repository, &request.selected, request.proxy_port, request.metrics_port, true)?
+        crate::xray::config::build(
+            &request.repository,
+            &request.selected,
+            request.proxy_port,
+            request.metrics_port,
+            true,
+        )?
     };
     let bytes = serde_json::to_vec(&config).map_err(|_| error())?;
     let config_ready = worker_started.elapsed().as_millis() as u32;
@@ -336,14 +473,32 @@ async fn run_session(mut pipe: &mut NamedPipeClient, envelope: StartRequest, wor
     for _ in 0..if standby { 800 } else { 400 } {
         if child.try_wait().map_err(|_| error())?.is_some() {
             tokio::time::sleep(Duration::from_millis(20)).await;
-            return Err(BackendError::new("CORE_START_FAILED", child.diagnostic_category().unwrap_or("Xray exited before the tunnel was ready")));
+            return Err(BackendError::new(
+                "CORE_START_FAILED",
+                child
+                    .diagnostic_category()
+                    .unwrap_or("Xray exited before the tunnel was ready"),
+            ));
         }
         let network_ready = if standby {
-            if routes.is_none() && super::network::tunnel_adapter_ready() {
-                routes = Some(super::network::TunnelRoutes::new()?);
+            // Xray configures both IP families before opening the SOCKS listener.
+            // Do not race its interface setup by changing metrics as soon as the
+            // IPv4 adapter appears: Xray can still overwrite them afterwards.
+            if super::network::tunnel_adapter_ready()
+                && tokio::net::TcpStream::connect((
+                    std::net::Ipv4Addr::LOCALHOST,
+                    request.proxy_port,
+                ))
+                .await
+                .is_ok()
+            {
+                if routes.is_none() {
+                    routes = Some(super::network::TunnelRoutes::new()?);
+                }
+                true
+            } else {
+                false
             }
-            routes.is_some()
-                && tokio::net::TcpStream::connect((std::net::Ipv4Addr::LOCALHOST, request.proxy_port)).await.is_ok()
         } else {
             super::network::tunnel_ready() && super::network::verify_tunnel_routes().is_ok()
         };
@@ -357,14 +512,28 @@ async fn run_session(mut pipe: &mut NamedPipeClient, envelope: StartRequest, wor
         if !standby && super::network::tunnel_ready() {
             super::network::verify_tunnel_routes()?;
         }
-        return Err(BackendError::new("TUN_ADAPTER_TIMEOUT", "Windows did not make the tunnel adapter ready"));
+        return Err(BackendError::new(
+            "TUN_ADAPTER_TIMEOUT",
+            "Windows did not make the tunnel adapter ready",
+        ));
     }
     if standby && !super::network::standby_isolated() {
-        return Err(BackendError::new("TUN_FAILED", "Prepared tunnel is not isolated from normal networking"));
+        return Err(BackendError::new(
+            "TUN_FAILED",
+            "Prepared tunnel is not isolated from normal networking",
+        ));
     }
     let routes_ready = worker_started.elapsed().as_millis() as u32;
     pipe.write_u8(1).await.map_err(|_| error())?;
-    for stage in [request_ready, assets_ready, config_ready, core_ready, geo_ready, xray_spawned, routes_ready] {
+    for stage in [
+        request_ready,
+        assets_ready,
+        config_ready,
+        core_ready,
+        geo_ready,
+        xray_spawned,
+        routes_ready,
+    ] {
         pipe.write_u32(stage).await.map_err(|_| error())?;
     }
     if standby {
@@ -379,8 +548,16 @@ async fn run_session(mut pipe: &mut NamedPipeClient, envelope: StartRequest, wor
                             tokio::time::sleep(Duration::from_millis(25)).await;
                             result = routes.activate();
                         }
-                        let code = match result { Ok(()) => 1, Err(e) if e.code == "ROUTING_CONFLICT" => 4, Err(e) if e.code == "TUN_FAILED" => 2, Err(_) => 0 };
+                        let (code, detail) = match result {
+                            Ok(()) => (1, None),
+                            Err(e) if e.code == "ROUTING_CONFLICT" => (4, Some(e.message)),
+                            Err(e) if e.code == "TUN_FAILED" => (2, None),
+                            Err(_) => (0, None),
+                        };
                         pipe.write_u8(code).await.map_err(|_| error())?;
+                        if let Some(detail) = detail {
+                            write_frame(&mut pipe, detail.as_bytes()).await?;
+                        }
                     }
                     Ok(2) => {
                         pipe.write_u8(if routes.deactivate().is_ok() && super::network::standby_isolated() { 1 } else { 0 }).await.map_err(|_| error())?;

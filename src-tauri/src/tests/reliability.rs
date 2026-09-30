@@ -40,14 +40,14 @@ async fn native_local_proxy_smoke() {
             .await
             .unwrap();
     });
-    let (proxy, metrics) = vpn_service::ports().unwrap();
+    let (proxy, metrics) = crate::core::xray::ports().unwrap();
     let bytes = serde_json::to_vec(&serde_json::json!({
         "log":{"loglevel":"none"},
         "inbounds":[{"listen":"127.0.0.1","port":proxy,"protocol":"socks","settings":{"auth":"noauth"}}],
         "outbounds":[{"protocol":"freedom"}]
     })).unwrap();
-    let mut session = vpn_service::Session::default();
-    vpn_service::start(&core, &mut session, &bytes, proxy, metrics)
+    let mut session = crate::core::xray::XraySession::default();
+    crate::core::xray::start(&core, &mut session, &bytes, proxy, metrics)
         .await
         .unwrap();
     let result = crate::services::health::client(Some(proxy))
@@ -60,7 +60,7 @@ async fn native_local_proxy_smoke() {
         Ok(response) => response.text().await,
         Err(error) => Err(error),
     };
-    vpn_service::stop(&mut session).await.unwrap();
+    crate::core::xray::stop(&mut session).await.unwrap();
     assert_eq!(body.unwrap(), "lumen-native");
     tokio::time::timeout(std::time::Duration::from_secs(5), origin)
         .await
@@ -95,7 +95,7 @@ async fn split_dns_is_accepted_by_bundled_core() {
                 repo.routing_mode = mode.into();
                 repo.settings.dns_policy.ipv6 = ipv6.into();
                 let config = config::build(&repo, &node.id, 10808, 10809, tun).unwrap();
-                vpn_service::validate(&core, &serde_json::to_vec(&config).unwrap())
+                crate::core::xray::validate(&core, &serde_json::to_vec(&config).unwrap())
                     .await
                     .unwrap();
             }

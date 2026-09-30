@@ -453,6 +453,36 @@
 				<span class="section-title">{t('settings.networkSection')}</span>
 			</div>
 			<div class="settings-group">
+				<SettingRow
+					label={t('settings.coreEngine')}
+					description={t('settings.coreEngineDesc')}
+				>
+					<Dropdown
+						label={t('settings.coreEngine')}
+						options={[
+							{
+								value: 'lumen',
+								label: 'Lumen Core',
+							},
+							{ value: 'xray', label: 'Xray Core' },
+						]}
+						value={$nativeSettings.coreEngine}
+						disabled={!runtime.isTauri}
+						onChange={(value) =>
+							updateNativeSettings({ coreEngine: value as 'lumen' | 'xray' })}
+						compact
+					/>
+				</SettingRow>
+				{#if $nativeSettings.coreEngine === 'lumen'}
+					<SettingRow
+						label={$nativeSettings.coreEngines.find(
+							(engine) => engine.engine === 'lumen',
+						)?.experimental
+							? t('settings.experimental')
+							: 'Lumen Core'}
+						description={t('settings.lumenCoreSupport')}
+					/>
+				{/if}
 				<!-- Routing Mode -->
 				<SettingRow label={t('settings.routingMode')}>
 					<Dropdown

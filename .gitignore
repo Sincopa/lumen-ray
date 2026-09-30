@@ -22,6 +22,7 @@ dist-ssr/
 test-results/
 playwright-report/
 artifacts/
+diagnostics/
 src-tauri/resources/core/*.exe
 src-tauri/resources/core/*.dll
 **/runtime-config*.json

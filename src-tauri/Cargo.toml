@@ -39,6 +39,7 @@ argon2 = "0.5"
 tauri-plugin-deep-link = "2"
 tauri-plugin-single-instance = "2"
 zeroize = { version = "1", features = ["alloc"] }
+hickory-proto = { version = "0.25", default-features = false, features = ["std"] }
 
 [target.'cfg(windows)'.dependencies]
 png = "0.17"

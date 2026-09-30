@@ -8,6 +8,8 @@ pub fn parse(v: &Value, subscription: &str) -> Result<VpnNode> {
     let s_ref = |k: &str| v[k].as_str().unwrap_or_default();
     let s = |k: &str| s_ref(k).to_owned();
     let protocol = match s_ref("type") {
+        "socks5" => Protocol::Socks,
+        "http" => Protocol::Http,
         "vless" => Protocol::Vless,
         "vmess" => Protocol::Vmess,
         "trojan" => Protocol::Trojan,
@@ -22,6 +24,7 @@ pub fn parse(v: &Value, subscription: &str) -> Result<VpnNode> {
         "port",
         "uuid",
         "password",
+        "username",
         "cipher",
         "alterId",
         "tls",
@@ -83,7 +86,11 @@ pub fn parse(v: &Value, subscription: &str) -> Result<VpnNode> {
             s("password")
         },
         protocol,
-        method: s("cipher"),
+        method: if matches!(protocol, Protocol::Socks | Protocol::Http) {
+            s("username")
+        } else {
+            s("cipher")
+        },
         flow: s("flow"),
         transport: Transport {
             network,

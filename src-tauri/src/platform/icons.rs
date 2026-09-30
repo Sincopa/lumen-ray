@@ -5,8 +5,6 @@ use std::{
     path::{Path, PathBuf},
     sync::{Mutex, OnceLock},
 };
-use winreg::enums::*;
-use winreg::RegKey;
 use windows_sys::Win32::{
     Foundation::{CloseHandle, INVALID_HANDLE_VALUE},
     Graphics::Gdi::*,
@@ -17,6 +15,8 @@ use windows_sys::Win32::{
     },
     UI::{Shell::*, WindowsAndMessaging::*},
 };
+use winreg::enums::*;
+use winreg::RegKey;
 
 static ICON_CACHE: OnceLock<Mutex<HashMap<String, String>>> = OnceLock::new();
 static SHGFI_MUTEX: OnceLock<Mutex<()>> = OnceLock::new();
@@ -60,11 +60,7 @@ fn encode_rgba_to_base64_png(width: u32, height: u32, pixels: &[u8]) -> Option<S
         let mut encoder = png::Encoder::new(&mut bytes, width, height);
         encoder.set_color(png::ColorType::Rgba);
         encoder.set_depth(png::BitDepth::Eight);
-        encoder
-            .write_header()
-            .ok()?
-            .write_image_data(pixels)
-            .ok()?;
+        encoder.write_header().ok()?.write_image_data(pixels).ok()?;
     }
     const PREFIX: &str = "data:image/png;base64,";
     let b64_len = bytes.len().div_ceil(3) * 4;
@@ -402,7 +398,10 @@ fn find_in_common_dirs(file_name: &str, exe_name: &str) -> Option<PathBuf> {
 }
 
 fn find_in_start_menu(file_name: &str) -> Option<PathBuf> {
-    let clean_stem = file_name.strip_suffix(".exe").unwrap_or(file_name).to_lowercase();
+    let clean_stem = file_name
+        .strip_suffix(".exe")
+        .unwrap_or(file_name)
+        .to_lowercase();
     let mut folders = Vec::new();
     if let Ok(appdata) = std::env::var("APPDATA") {
         folders.push(Path::new(&appdata).join(r"Microsoft\Windows\Start Menu\Programs"));
@@ -424,7 +423,11 @@ fn find_in_start_menu(file_name: &str) -> Option<PathBuf> {
                         stack.push(path);
                     } else if let Some(ext) = path.extension() {
                         if ext.eq_ignore_ascii_case("lnk") {
-                            let stem = path.file_stem().unwrap_or_default().to_string_lossy().to_lowercase();
+                            let stem = path
+                                .file_stem()
+                                .unwrap_or_default()
+                                .to_string_lossy()
+                                .to_lowercase();
                             if stem == clean_stem || stem.contains(&clean_stem) {
                                 return Some(path);
                             }

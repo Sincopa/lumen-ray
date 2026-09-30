@@ -62,18 +62,9 @@ pub async fn restore_backup(
             .await
             .map_err(|_| BackendError::new("BACKUP_FAILED", "Backup operation failed"))??;
     if let Some(id) = &repo.selected_server_id {
-        let config = crate::xray::config::build(
-            &repo,
-            id,
-            10808,
-            10809,
-            repo.settings.network_mode == "tun",
-        )?;
-        crate::services::vpn_service::validate(
-            &state.core.read().await,
-            &serde_json::to_vec(&config).map_err(|_| BackendError::invalid())?,
-        )
-        .await?;
+        crate::core::backend(repo.settings.core_engine)
+            .validate_runtime(&state, &repo, id)
+            .await?;
     }
     crate::services::vpn_service::disconnect(&state, &app).await?;
     let _mutation = state.mutations.lock().await;
@@ -195,7 +186,7 @@ pub async fn inspect_destination(
     }
     let port = {
         let session = state.session.lock().await;
-        session.started.map(|_| session.proxy_port)
+        session.started().map(|_| session.proxy_port())
     };
     async fn check(host: &str, port: Option<u16>) -> Option<u16> {
         crate::services::health::client(port)

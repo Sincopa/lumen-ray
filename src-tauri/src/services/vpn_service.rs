@@ -1,20 +1,20 @@
+pub use crate::core::Session;
+use crate::core::{backend, BackendSession};
 use crate::{
     app::state::AppState,
     domain::errors::{BackendError, Result},
 };
 use serde::Serialize;
-use sha2::{Digest, Sha256};
 use std::{
-    process::Stdio,
     sync::{atomic::Ordering, Arc},
     time::{Duration, Instant},
 };
 use tauri::Emitter;
-use tokio::{io::AsyncWriteExt, process::Command};
 
 #[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ConnectionInfo {
+    pub engine: crate::core::CoreEngine,
     pub server_id: String,
     pub ip: String,
     pub protocol: String,
@@ -37,134 +37,6 @@ impl Default for Snapshot {
         }
     }
 }
-#[derive(Default)]
-pub struct Session {
-    pub generation: u64,
-    #[cfg(windows)]
-    pub child: Option<crate::platform::process::CoreProcess>,
-    #[cfg(not(windows))]
-    pub child: Option<tokio::process::Child>,
-    #[cfg(windows)]
-    pub helper: Option<crate::platform::helper::Helper>,
-    #[cfg(windows)]
-    pub system_proxy: Option<crate::platform::proxy::SystemProxy>,
-    pub proxy_port: u16,
-    pub metrics_port: u16,
-    pub started: Option<Instant>,
-    #[cfg(windows)]
-    pub prepared_server_id: Option<String>,
-    #[cfg(windows)]
-    pub prepared_config_hash: Option<[u8; 32]>,
-    #[cfg(windows)]
-    pub prepared_core_version: Option<String>,
-    #[cfg(windows)]
-    pub prepared_geo_hash: Option<[u8; 32]>,
-}
-pub fn command(core: &std::path::Path) -> Command {
-    let mut command = Command::new(core);
-    if let Some(parent) = core.parent() {
-        command.current_dir(parent);
-        command.env(
-            "XRAY_LOCATION_ASSET",
-            crate::xray::geo::assets_for_core(core),
-        );
-    } else {
-        command.current_dir(core);
-    }
-    command.env("GOMEMLIMIT", "100MiB");
-    command.env("GODEBUG", "madvdontneed=1");
-    command.kill_on_drop(true);
-    #[cfg(windows)]
-    command.creation_flags(0x08000000);
-    command
-}
-pub async fn validate(core: &std::path::Path, config: &[u8]) -> Result<()> {
-    let mut child = command(core)
-        .args(["run", "-test", "-config", "stdin:"])
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .map_err(|_| {
-            BackendError::new("CORE_START_FAILED", "Could not run Xray config validation")
-        })?;
-    if let Some(mut stdin) = child.stdin.take() {
-        stdin.write_all(config).await.map_err(|_| {
-            BackendError::new("INVALID_CONFIG", "Could not pass configuration to Xray")
-        })?;
-    }
-    let output = tokio::time::timeout(Duration::from_secs(10), child.wait_with_output())
-        .await
-        .map_err(|_| BackendError::new("INVALID_CONFIG", "Xray validation timed out"))?
-        .map_err(|_| BackendError::new("INVALID_CONFIG", "Xray validation failed"))?;
-    if !output.status.success() {
-        let output = format!(
-            "{} {}",
-            String::from_utf8_lossy(&output.stdout),
-            String::from_utf8_lossy(&output.stderr)
-        );
-        let failure = output
-            .lines()
-            .find(|line| line.contains("Failed to start"))
-            .unwrap_or(&output);
-        if failure.contains("failed to open geoip.dat")
-            || failure.contains("failed to open geosite.dat")
-            || failure.contains("failed to check code")
-            || failure.contains("illegal ip rule: geoip:")
-            || failure.contains("illegal domain rule: geosite:")
-        {
-            return Err(BackendError::new(
-                "GEO_DATA_MISSING",
-                "GeoIP/GeoSite database files are missing or corrupted. Please update databases in Settings.",
-            ));
-        }
-        let category = [
-            "fingerprint",
-            "password",
-            "shortId",
-            "serverName",
-            "flow",
-            "ALPN",
-            "alpn",
-            "encryption",
-            "security",
-            "Vision",
-            "REALITY",
-            "routing",
-            "Host",
-            "headers",
-            "removed",
-            "WebSocket",
-            "XHTTP",
-        ]
-        .into_iter()
-        .find(|s| failure.contains(s))
-        .unwrap_or("configuration");
-        return Err(BackendError::new(
-            "INVALID_CONFIG",
-            format!("Xray rejected {category} parameters"),
-        ));
-    }
-    Ok(())
-}
-pub(crate) fn ports() -> Result<(u16, u16)> {
-    let error = || BackendError::new("CORE_START_FAILED", "No local ports available");
-    // Hold reservations together: Windows may reuse a just-released ephemeral port.
-    let proxy = std::net::TcpListener::bind("127.0.0.1:0").map_err(|_| error())?;
-    for _ in 0..32 {
-        let metrics = std::net::TcpListener::bind("127.0.0.1:0").map_err(|_| error())?;
-        let port = metrics.local_addr().map_err(|_| error())?.port();
-        if let (Some(http), Some(api)) = (port.checked_add(1), port.checked_add(2)) {
-            if let (Ok(_http), Ok(_api)) = (
-                std::net::TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, http)),
-                std::net::TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, api)),
-            ) {
-                return Ok((proxy.local_addr().map_err(|_| error())?.port(), port));
-            }
-        }
-    }
-    Err(error())
-}
 pub async fn publish(state: &AppState, app: &tauri::AppHandle, snapshot: Snapshot) {
     *state.snapshot.write().await = snapshot.clone();
     if app.emit("vpn://state", snapshot).is_err() {
@@ -178,7 +50,7 @@ pub async fn connect(state: &Arc<AppState>, app: &tauri::AppHandle, id: String) 
         .try_lock()
         .map_err(|_| BackendError::new("BUSY", "Maintenance is in progress"))?;
     state.recovery_attempts.lock().await.clear();
-    connect_with_selection(state, app, id, true, None).await
+    connect_with_selection(state, app, id, true, None, true).await
 }
 pub async fn connect_exact(
     state: &Arc<AppState>,
@@ -190,7 +62,7 @@ pub async fn connect_exact(
         .try_lock()
         .map_err(|_| BackendError::new("BUSY", "Maintenance is in progress"))?;
     state.recovery_attempts.lock().await.clear();
-    connect_with_selection(state, app, id, false, None).await
+    connect_with_selection(state, app, id, false, None, true).await
 }
 
 pub async fn connect_if_current(
@@ -199,136 +71,44 @@ pub async fn connect_if_current(
     id: String,
     expected: u64,
 ) -> Result<()> {
-    connect_with_selection(state, app, id, false, Some(expected)).await
+    connect_with_selection(state, app, id, false, Some(expected), false).await
 }
 
-/// Prepare the selected TUN without installing system routes. Failure leaves the
-/// normal on-demand connection path available.
 pub async fn prewarm(state: &Arc<AppState>) {
-    #[cfg(windows)]
+    let Ok(_operation) = state.connection_operation.acquire().await else {
+        return;
+    };
+    if *state.shutdown.borrow() {
+        return;
+    }
+    let repo = state.repository.read().await.clone();
+    let mut session = state.session.lock().await;
+    if session.started().is_some() {
+        return;
+    }
+    if session.engine() != repo.settings.core_engine {
+        if let Err(error) = stop(&mut session).await {
+            log::warn!("Core preparation cleanup: {}", error.code);
+            return;
+        }
+        session.backend = BackendSession::empty(repo.settings.core_engine);
+    }
+    let selected = match repo.selected_server_id.as_ref() {
+        Some(id) => connection_candidates(state, id).await.into_iter().next(),
+        None => None,
+    };
+    if let Err(error) = backend(repo.settings.core_engine)
+        .prewarm(state, &repo, selected.as_deref(), &mut session.backend)
+        .await
     {
-        let Ok(_operation) = state.connection_operation.acquire().await else {
-            return;
-        };
-        if *state.shutdown.borrow() {
-            return;
-        }
-        let repo = state.repository.read().await.clone();
-        if repo.settings.network_mode != "tun"
-            || repo.settings.auto_connect
-            || repo.selected_server_id.is_none()
-        {
-            let mut session = state.session.lock().await;
-            if session.started.is_none() && session.helper.is_some() {
-                if let Err(error) = stop(&mut session).await {
-                    log::warn!("VPN TUN preparation cleanup failed: {}", error.code);
-                }
-            }
-            return;
-        }
-        let Some(selected) = repo.selected_server_id.clone() else {
-            return;
-        };
-        let selected = connection_candidates(state, &selected)
-            .await
-            .into_iter()
-            .next()
-            .unwrap_or(selected);
-        let Ok(config_hash) = configuration_fingerprint(&repo, &selected) else {
-            return;
-        };
-        let geo_hash = geo_fingerprint(&state.data);
-        let Ok((proxy_port, metrics_port)) = ports() else {
-            return;
-        };
-        let core = state.core.read().await.clone();
-        let version = core
-            .parent()
-            .and_then(|p| p.file_name())
-            .and_then(|s| s.to_str())
-            .unwrap_or(crate::xray::core::VERSION)
-            .to_owned();
-        let mut session = state.session.lock().await;
-        if session.started.is_some() {
-            return;
-        }
-        if session.helper.is_some() {
-            if session.prepared_server_id.as_deref() == Some(&selected)
-                && session.prepared_config_hash == Some(config_hash)
-                && session.prepared_geo_hash == geo_hash
-                && session
-                    .helper
-                    .as_ref()
-                    .is_some_and(|helper| !helper.exited())
-            {
-                return;
-            }
-            if let Err(error) = stop(&mut session).await {
-                log::warn!("VPN TUN preparation cleanup failed: {}", error.code);
-                return;
-            }
-        }
-        let mut repository = repo;
-        repository.sources.clear();
-        let request = crate::platform::helper::StartTunnel {
-            core_version: version,
-            repository,
-            selected: selected.clone(),
-            proxy_port,
-            metrics_port,
-        };
-        let mut prepared =
-            crate::platform::helper::start_standby(request.clone(), &state.data).await;
-        if prepared.as_ref().err().is_some_and(|error| {
-            ["TUN_ADAPTER_TIMEOUT", "CORE_START_FAILED", "TUN_FAILED"].contains(&error.code)
-        }) {
-            log::warn!("VPN TUN preparation retry after a transient adapter failure");
-            tokio::time::sleep(Duration::from_millis(200)).await;
-            prepared = crate::platform::helper::start_standby(request, &state.data).await;
-        }
-        match prepared {
-            Ok(helper) => {
-                session.helper = Some(helper);
-                session.prepared_server_id = Some(selected);
-                session.prepared_config_hash = Some(config_hash);
-                session.prepared_core_version = Some(
-                    core.parent()
-                        .and_then(|p| p.file_name())
-                        .and_then(|s| s.to_str())
-                        .unwrap_or(crate::xray::core::VERSION)
-                        .to_owned(),
-                );
-                session.prepared_geo_hash = geo_hash;
-                session.proxy_port = proxy_port;
-                session.metrics_port = metrics_port;
-                log::info!("VPN TUN prepared without installing routes");
-            }
-            Err(error) => log::warn!("VPN TUN preparation failed: {}", error.code),
-        }
+        log::warn!(
+            "engine={:?} preparation failed: {}",
+            repo.settings.core_engine,
+            error.code
+        );
     }
 }
 
-#[cfg(windows)]
-fn configuration_fingerprint(
-    repo: &crate::storage::repository::Repository,
-    selected: &str,
-) -> Result<[u8; 32]> {
-    let config = crate::xray::config::build(repo, selected, 10808, 10809, true)?;
-    let mut hasher = Sha256::new();
-    serde_json::to_writer(&mut hasher, &config)
-        .map_err(|_| BackendError::new("INVALID_CONFIG", "Could not serialize Xray config"))?;
-    Ok(hasher.finalize().into())
-}
-
-#[cfg(windows)]
-fn geo_fingerprint(data: &std::path::Path) -> Option<[u8; 32]> {
-    std::fs::read(crate::xray::geo::metadata_path(data))
-        .ok()
-        .map(|bytes| Sha256::digest(bytes).into())
-}
-
-/// Apply a routing-only catalog change without destroying the active TUN.
-/// Returns false when the change needs a full core restart.
 #[cfg(windows)]
 pub async fn apply_live_rules(
     state: &Arc<AppState>,
@@ -342,79 +122,18 @@ pub async fn apply_live_rules(
         .await
         .map_err(|_| BackendError::new("BUSY", "Connection manager is shutting down"))?;
     let mut session = state.session.lock().await;
-    let after_hash = configuration_fingerprint(after, selected)?;
-    if session.started.is_some()
-        && session.prepared_server_id.as_deref() == Some(selected)
-        && session.prepared_config_hash == Some(after_hash)
-        && session
-            .helper
-            .as_ref()
-            .is_some_and(|helper| !helper.exited())
-    {
-        return Ok(true);
-    }
-    if session.started.is_none()
-        || session.helper.as_ref().is_none_or(|helper| helper.exited())
-        || session.prepared_server_id.as_deref() != Some(selected)
-        || session.prepared_config_hash != Some(configuration_fingerprint(before, selected)?)
-    {
-        return Ok(false);
-    }
-    let Some(patch) = crate::xray::config::live_routing_patch(before, after, selected)? else {
-        return Ok(false);
-    };
-    let core = state.core.read().await.clone();
-    run_live_routing_patch(&core, session.metrics_port + 2, &patch).await?;
-    session.prepared_config_hash = Some(after_hash);
-    Ok(true)
+    backend(session.engine())
+        .update_routing(state, selected, before, after, &mut session.backend)
+        .await
 }
 
-#[cfg(windows)]
-pub(crate) async fn run_live_routing_patch(
-    core: &std::path::Path,
-    api_port: u16,
-    patch: &serde_json::Value,
-) -> Result<()> {
-    let mut command = self::command(core);
-    command.args([
-        "api",
-        "adrules",
-        &format!("--server=127.0.0.1:{api_port}"),
-        "-timeout=5",
-        "stdin:",
-    ]);
-    command
-        .stdin(Stdio::piped())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null());
-    let mut child = command.spawn().map_err(|_| {
-        BackendError::new("RULE_UPDATE_FAILED", "Could not start Xray routing update")
-    })?;
-    let bytes = serde_json::to_vec(&patch)
-        .map_err(|_| BackendError::new("RULE_UPDATE_FAILED", "Could not encode routing update"))?;
-    if let Some(mut input) = child.stdin.take() {
-        input.write_all(&bytes).await.map_err(|_| {
-            BackendError::new("RULE_UPDATE_FAILED", "Could not send routing update")
-        })?;
-    }
-    let status = tokio::time::timeout(Duration::from_secs(8), child.wait())
-        .await
-        .map_err(|_| BackendError::new("RULE_UPDATE_FAILED", "Xray routing update timed out"))?
-        .map_err(|_| BackendError::new("RULE_UPDATE_FAILED", "Xray routing update failed"))?;
-    if !status.success() {
-        return Err(BackendError::new(
-            "RULE_UPDATE_FAILED",
-            "Xray rejected the routing update",
-        ));
-    }
-    Ok(())
-}
 async fn connect_with_selection(
     state: &Arc<AppState>,
     app: &tauri::AppHandle,
     id: String,
     best: bool,
     expected_generation: Option<u64>,
+    restore_previous: bool,
 ) -> Result<()> {
     let generation = begin_generation(&state.connection_generation, expected_generation)?;
     let requested_at = Instant::now();
@@ -426,47 +145,81 @@ async fn connect_with_selection(
     if state.connection_generation.load(Ordering::Acquire) != generation {
         return Err(cancelled());
     }
-    publish(
-        state,
-        app,
-        Snapshot {
-            status: "connecting".into(),
-            info: None,
-            error: None,
-        },
-    )
-    .await;
-    let mut session = std::mem::take(&mut *state.session.lock().await);
+    let previous_snapshot = if restore_previous {
+        Some(state.snapshot.read().await.clone())
+    } else {
+        None
+    };
+    let previous_server = previous_snapshot
+        .as_ref()
+        .and_then(|snapshot| snapshot.info.as_ref())
+        .map(|info| info.server_id.clone());
+    let previous_repository = if previous_server.is_some() {
+        let repo = state.repository.read().await;
+        Some(state.session.lock().await.rollback_repository(&repo))
+    } else {
+        None
+    };
+    let requested_engine = state.repository.read().await.settings.core_engine;
+    if requested_engine == crate::core::CoreEngine::Xray {
+        publish(
+            state,
+            app,
+            Snapshot {
+                status: "connecting".into(),
+                info: None,
+                error: None,
+            },
+        )
+        .await;
+    }
     let candidates = if best {
-        let candidates = connection_candidates(state, &id).await;
-        let mut probes = tokio::task::JoinSet::new();
-        for candidate in &candidates {
-            if !state
-                .server_quality
-                .read()
-                .await
-                .get(candidate)
-                .is_some_and(|q| q.fresh())
-                && candidates.len() > 1
-            {
-                let state = state.clone();
-                let id = candidate.clone();
-                probes.spawn(async move {
-                    let _ = super::latency_service::ping(&state, id).await;
-                });
-            }
-        }
-        while !probes.is_empty() {
-            tokio::select! { _ = probes.join_next() => {}, _ = tokio::time::sleep(Duration::from_millis(100)) => {} }
-            if state.connection_generation.load(Ordering::Acquire) != generation {
-                probes.abort_all();
-                break;
-            }
-        }
-        super::server_quality::rank(candidates, &id, &*state.server_quality.read().await)
+        // Isolated probe cores can take seconds and can compete with the TUN
+        // helper for Windows ports and CPU. Use cached quality and try the
+        // selected server first when there is no fresh measurement.
+        let mut candidates = connection_candidates(state, &id).await;
+        candidates.truncate(3);
+        candidates
     } else {
         vec![id]
     };
+    // Reject unsupported Lumen profiles before changing the visible connection or
+    // taking down the current backend. Best-server selection may contain mixed protocols.
+    let candidates = if requested_engine == crate::core::CoreEngine::Lumen {
+        let repo = state.repository.read().await;
+        let mut supported = Vec::new();
+        let mut first_error = None;
+        for candidate in candidates {
+            match backend(crate::core::CoreEngine::Lumen).validate(&repo, &candidate) {
+                Ok(()) => supported.push(candidate),
+                Err(error) => {
+                    first_error.get_or_insert(error);
+                }
+            }
+        }
+        if supported.is_empty() {
+            return Err(first_error.unwrap_or_else(BackendError::invalid));
+        }
+        supported
+    } else {
+        candidates
+    };
+    if state.connection_generation.load(Ordering::Acquire) != generation {
+        return Err(cancelled());
+    }
+    if requested_engine == crate::core::CoreEngine::Lumen {
+        publish(
+            state,
+            app,
+            Snapshot {
+                status: "connecting".into(),
+                info: None,
+                error: None,
+            },
+        )
+        .await;
+    }
+    let mut session = std::mem::take(&mut *state.session.lock().await);
     log::info!(
         "VPN timing: candidate selection {} ms",
         requested_at.elapsed().as_millis()
@@ -478,16 +231,12 @@ async fn connect_with_selection(
             break;
         }
         result = connect_session(state, app, candidate.clone(), &mut session, generation).await;
-        if result.as_ref().err().is_some_and(|error| {
-            error.code == "TUN_ADAPTER_TIMEOUT"
-                || (error.code == "CORE_START_FAILED"
-                    && [
-                        "Wintun adapter startup failed",
-                        "Windows tunnel interface is not ready",
-                    ]
-                    .contains(&error.message.as_str()))
-        }) {
-            log::warn!("Windows TUN adapter startup was transient; retrying once");
+        if session.is_tun()
+            && result.as_ref().err().is_some_and(|error| {
+                error.code == "TUN_ADAPTER_TIMEOUT" || error.code == "CORE_START_FAILED"
+            })
+        {
+            log::warn!("Windows TUN startup failed; retrying once");
             result = connect_session(state, app, candidate.clone(), &mut session, generation).await;
         }
         if result.is_ok() {
@@ -513,6 +262,8 @@ async fn connect_with_selection(
         }
         if ![
             "CORE_START_FAILED",
+            "INVALID_CONFIG",
+            "UNSUPPORTED_PROTOCOL",
             "SERVER_UNREACHABLE",
             "TUN_NETWORK_UNREACHABLE",
             "CORE_CRASHED",
@@ -522,9 +273,53 @@ async fn connect_with_selection(
             break;
         }
     }
+    let mut restored = false;
+    if result.is_err() && state.connection_generation.load(Ordering::Acquire) == generation {
+        if let (Some(previous), Some(snapshot)) =
+            (previous_server.as_deref(), previous_snapshot.as_ref())
+        {
+            if session.started().is_some()
+                && matches!(&session.backend, BackendSession::Xray(active)
+                    if active.prepared_server_id.as_deref() == Some(previous))
+            {
+                publish(state, app, snapshot.clone()).await;
+                restored = true;
+            }
+        }
+    }
+    if result.is_err()
+        && !restored
+        && state.connection_generation.load(Ordering::Acquire) == generation
+    {
+        if let (Some(previous), Some(repo)) = (previous_server, previous_repository) {
+            if connect_session_with_repository(
+                state,
+                app,
+                previous,
+                &mut session,
+                generation,
+                &repo,
+            )
+            .await
+            .is_ok()
+            {
+                restored = true;
+                log::warn!("Connection change failed; previous server restored");
+            }
+        }
+    }
+    if result.is_err() && !restored {
+        if let Err(cleanup) = stop(&mut session).await {
+            result = Err(cleanup);
+        }
+    }
     *state.session.lock().await = session;
     if let Err(error) = &result {
-        if state.connection_generation.load(Ordering::Acquire) == generation {
+        log::warn!(
+            "engine={requested_engine:?} connection failed code={}",
+            error.code
+        );
+        if !restored && state.connection_generation.load(Ordering::Acquire) == generation {
             publish(
                 state,
                 app,
@@ -572,102 +367,32 @@ async fn connect_session(
     session: &mut Session,
     generation: u64,
 ) -> Result<()> {
-    let session_at = Instant::now();
     let repo = state.repository.read().await.clone();
-    let uses_geo = repo.routing_mode == "rules"
-        && repo.rules.iter().any(|rule| {
-            rule.enabled
-                && matches!(
-                    rule.matcher,
-                    crate::storage::repository::RuleMatcher::Geosite
-                        | crate::storage::repository::RuleMatcher::Geoip
-                )
-        });
-    if uses_geo && !crate::xray::geo::info(&state.data).valid {
-        return Err(BackendError::new(
-            "GEO_DATA_CORRUPTED",
-            "Geo databases must pass validation before connecting",
-        ));
-    }
+    connect_session_with_repository(state, app, id, session, generation, &repo).await
+}
+
+async fn connect_session_with_repository(
+    state: &Arc<AppState>,
+    app: &tauri::AppHandle,
+    id: String,
+    session: &mut Session,
+    generation: u64,
+    repo: &crate::storage::repository::Repository,
+) -> Result<()> {
+    let session_at = Instant::now();
+    let engine = repo.settings.core_engine;
+    let mut result = crate::core::connect(state, repo, &id, session).await;
+    let proxy_port = session.proxy_port();
+    let is_tun = session.is_tun();
     #[cfg(windows)]
-    let config_hash = configuration_fingerprint(&repo, &id)?;
-    let core = state.core.read().await.clone();
-    #[cfg(windows)]
-    let core_version = core
-        .parent()
-        .and_then(|p| p.file_name())
-        .and_then(|s| s.to_str())
-        .unwrap_or(crate::xray::core::VERSION);
-    #[cfg(windows)]
-    let reuse_prepared = session.started.is_none()
-        && session.prepared_server_id.as_deref() == Some(&id)
-        && session.prepared_config_hash == Some(config_hash)
-        && session.prepared_core_version.as_deref() == Some(core_version)
-        && session.prepared_geo_hash == geo_fingerprint(&state.data)
-        && session
-            .helper
-            .as_ref()
-            .is_some_and(|h| !h.exited() && h.is_standby());
-    #[cfg(not(windows))]
-    let reuse_prepared = false;
-    let (proxy_port, metrics_port) = if reuse_prepared {
-        (session.proxy_port, session.metrics_port)
-    } else {
-        ports()?
-    };
-    let is_tun = repo.settings.network_mode == "tun";
-    let bytes = if is_tun {
-        #[cfg(not(windows))]
-        let _ = crate::xray::config::build(&repo, &id, proxy_port, metrics_port, true)?;
-        Vec::new()
-    } else {
-        let config = crate::xray::config::build(&repo, &id, proxy_port, metrics_port, false)?;
-        serde_json::to_vec(&config)
-            .map_err(|_| BackendError::new("INVALID_CONFIG", "Could not serialize Xray config"))?
-    };
-    log::info!(
-        "VPN timing: config prepared {} ms",
-        session_at.elapsed().as_millis()
-    );
-    if !reuse_prepared {
-        stop(session).await?;
-    }
-    log::info!(
-        "VPN timing: previous session stopped {} ms",
-        session_at.elapsed().as_millis()
-    );
-    let mut result = if is_tun {
-        start_tunnel(
-            session,
-            &state.data,
-            repo.clone(),
-            id.clone(),
-            (proxy_port, metrics_port),
-            core.parent()
-                .and_then(|p| p.file_name())
-                .and_then(|s| s.to_str())
-                .unwrap_or(crate::xray::core::VERSION)
-                .into(),
-            #[cfg(windows)]
-            config_hash,
-        )
-        .await
-    } else {
-        start(&core, session, &bytes, proxy_port, metrics_port).await
-    };
-    log::info!(
-        "VPN timing: local route startup completed {} ms",
-        session_at.elapsed().as_millis()
-    );
-    #[cfg(windows)]
-    if result.is_ok() && repo.settings.network_mode == "proxy" {
-        match crate::platform::proxy::SystemProxy::enable(&state.data, metrics_port + 1) {
+    if result.is_ok() && !is_tun {
+        match crate::platform::proxy::SystemProxy::enable(&state.data, session.http_port()) {
             Ok(proxy) => session.system_proxy = Some(proxy),
             Err(error) => result = Err(error),
         }
     }
     log::info!(
-        "VPN timing: system proxy stage completed {} ms",
+        "engine={engine:?} local startup completed {} ms",
         session_at.elapsed().as_millis()
     );
     let mut verified_ip = None;
@@ -691,6 +416,19 @@ async fn connect_session(
     }
     if state.connection_generation.load(Ordering::Acquire) != generation {
         result = Err(cancelled());
+    }
+    #[cfg(windows)]
+    if let BackendSession::Xray(active) = &mut session.backend {
+        if active.pending_live_switch.is_some() {
+            if result.is_ok() {
+                active.pending_live_switch = None;
+            } else if crate::core::xray::rollback_live_server_switch(state, active)
+                .await
+                .is_ok()
+            {
+                return result;
+            }
+        }
     }
     match result {
         Ok(()) => {
@@ -724,6 +462,8 @@ async fn connect_session(
                 .find(|n| n.id == id)
                 .ok_or_else(BackendError::invalid)?;
             let protocol = match node.protocol {
+                crate::domain::node::Protocol::Socks => "SOCKS5",
+                crate::domain::node::Protocol::Http => "HTTP",
                 crate::domain::node::Protocol::Vless => "Vless",
                 crate::domain::node::Protocol::Vmess => "VMess",
                 crate::domain::node::Protocol::Trojan => "Trojan",
@@ -737,6 +477,7 @@ async fn connect_session(
                 Snapshot {
                     status: "connected".into(),
                     info: Some(ConnectionInfo {
+                        engine,
                         server_id: id.clone(),
                         ip: verified_ip.unwrap_or_default(),
                         protocol: protocol.into(),
@@ -760,174 +501,19 @@ async fn connect_session(
         }
     }
 }
-async fn start_tunnel(
-    session: &mut Session,
-    data: &std::path::Path,
-    mut repository: crate::storage::repository::Repository,
-    selected: String,
-    (proxy_port, metrics_port): (u16, u16),
-    core_version: String,
-    #[cfg(windows)] config_hash: [u8; 32],
-) -> Result<()> {
-    repository.sources.clear();
-    let tunnel_at = Instant::now();
-    #[cfg(windows)]
-    {
-        if session.helper.is_none() {
-            session.helper = Some(
-                crate::platform::helper::start_standby(
-                    crate::platform::helper::StartTunnel {
-                        core_version: core_version.clone(),
-                        repository,
-                        selected: selected.clone(),
-                        proxy_port,
-                        metrics_port,
-                    },
-                    data,
-                )
-                .await?,
-            );
-        }
-        session
-            .helper
-            .as_mut()
-            .ok_or_else(BackendError::invalid)?
-            .activate()
-            .await?;
-        session.prepared_server_id = Some(selected);
-        session.prepared_config_hash = Some(config_hash);
-        session.prepared_core_version = Some(core_version);
-        session.prepared_geo_hash = geo_fingerprint(data);
-        session.proxy_port = proxy_port;
-        session.metrics_port = metrics_port;
-        session.started = Some(Instant::now());
-        log::info!(
-            "VPN timing: TUN helper ready {} ms",
-            tunnel_at.elapsed().as_millis()
-        );
-        let mut port_ready = false;
-        for _ in 0..100 {
-            if session.helper.as_ref().is_some_and(|h| h.exited()) {
-                return Err(BackendError::new("TUN_FAILED", "Tunnel helper exited"));
-            }
-            if tokio::net::TcpStream::connect((std::net::Ipv4Addr::LOCALHOST, proxy_port))
-                .await
-                .is_ok()
-            {
-                port_ready = true;
-                if crate::platform::network::verify_tunnel_routes().is_ok() {
-                    log::info!(
-                        "VPN timing: TUN local port and routes ready {} ms",
-                        tunnel_at.elapsed().as_millis()
-                    );
-                    return Ok(());
-                }
-            }
-            tokio::time::sleep(Duration::from_millis(25)).await;
-        }
-        if port_ready {
-            crate::platform::network::verify_tunnel_routes()?;
-        }
-    }
-    Err(BackendError::new("TUN_FAILED", "Tunnel was not ready"))
-}
-pub(crate) async fn start(
-    core: &std::path::Path,
-    session: &mut Session,
-    bytes: &[u8],
-    proxy_port: u16,
-    metrics_port: u16,
-) -> Result<()> {
-    let core_at = Instant::now();
-    #[cfg(windows)]
-    {
-        session.child = Some(crate::platform::process::CoreProcess::spawn(core, bytes).await?);
-        log::info!(
-            "VPN timing: Xray spawned {} ms",
-            core_at.elapsed().as_millis()
-        );
-    }
-    #[cfg(not(windows))]
-    return Err(BackendError::new(
-        "PLATFORM_UNSUPPORTED",
-        "This build supports Windows networking only",
-    ));
-    session.proxy_port = proxy_port;
-    session.metrics_port = metrics_port;
-    session.started = Some(Instant::now());
-    for _ in 0..100 {
-        if session
-            .child
-            .as_mut()
-            .ok_or_else(BackendError::invalid)?
-            .try_wait()
-            .map_err(|_| BackendError::new("CORE_CRASHED", "Could not inspect Xray process"))?
-            .is_some()
-        {
-            return Err(BackendError::new(
-                "CORE_START_FAILED",
-                "Xray exited during startup; TUN requires administrator privileges",
-            ));
-        }
-        if tokio::net::TcpStream::connect((std::net::Ipv4Addr::LOCALHOST, proxy_port))
-            .await
-            .is_ok()
-        {
-            log::info!(
-                "VPN timing: Xray local port ready {} ms",
-                core_at.elapsed().as_millis()
-            );
-            return Ok(());
-        }
-        tokio::time::sleep(Duration::from_millis(25)).await;
-    }
-    Err(BackendError::new(
-        "CORE_START_FAILED",
-        "Xray did not become ready",
-    ))
-}
-
 pub async fn public_ip(proxy_port: u16) -> Result<String> {
     super::health::resolve_ip(proxy_port).await
 }
 pub async fn stop(session: &mut Session) -> Result<()> {
-    let mut failures = Vec::new();
+    // Keep the listener alive if restoring proxy ownership fails.
     #[cfg(windows)]
     if let Some(proxy) = session.system_proxy.as_ref() {
-        match proxy.restore() {
-            Ok(()) => session.system_proxy = None,
-            Err(error) => failures.push(error),
-        }
+        proxy.restore()?;
+        session.system_proxy = None;
     }
-    #[cfg(windows)]
-    if let Some(mut helper) = session.helper.take() {
-        if !helper.exited() {
-            if let Err(error) = helper.stop().await {
-                failures.push(error);
-            }
-        }
-    }
-    #[cfg(windows)]
-    {
-        session.prepared_server_id = None;
-        session.prepared_config_hash = None;
-        session.prepared_core_version = None;
-        session.prepared_geo_hash = None;
-    }
-    if let Some(mut child) = session.child.take() {
-        if !matches!(child.try_wait(), Ok(Some(_))) && child.kill().await.is_err() {
-            failures.push(BackendError::new(
-                "CORE_STOP_FAILED",
-                "Cannot stop Xray process",
-            ));
-            session.child = Some(child);
-        }
-    }
-    session.started = None;
-    for failure in &failures {
-        log::warn!("VPN cleanup incomplete: {}", failure.code);
-    }
-    failures.into_iter().next().map_or(Ok(()), Err)
+    backend(session.engine())
+        .disconnect(&mut session.backend, false)
+        .await
 }
 fn cancelled() -> BackendError {
     BackendError::new(
@@ -973,22 +559,12 @@ async fn disconnect_session(
         },
     )
     .await;
-    let shutdown = if let Some(helper) = session
-        .helper
-        .as_mut()
-        .filter(|h| h.is_standby() && !h.exited())
-    {
-        let result = if session.started.is_some() {
-            helper.deactivate().await
-        } else {
-            Ok(())
-        };
-        if result.is_ok() {
-            session.started = None;
-        }
-        result
-    } else {
+    let shutdown = if session.has_system_proxy() {
         stop(session).await
+    } else {
+        backend(session.engine())
+            .disconnect(&mut session.backend, true)
+            .await
     };
     if let Err(error) = shutdown {
         let _ = stop(session).await;
@@ -1054,8 +630,15 @@ pub(super) fn schedule_recovery(state: Arc<AppState>, app: tauri::AppHandle, ser
                     break;
                 }
             }
-            match connect_with_selection(&state, &app, server_id.clone(), true, Some(generation))
-                .await
+            match connect_with_selection(
+                &state,
+                &app,
+                server_id.clone(),
+                true,
+                Some(generation),
+                false,
+            )
+            .await
             {
                 Ok(()) => break,
                 Err(error) if super::health::retryable(error.code) => {}
@@ -1074,6 +657,43 @@ pub fn monitor(state: Arc<AppState>, app: tauri::AppHandle) {
 #[cfg(test)]
 mod generation_tests {
     use super::*;
+
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn best_candidates_keep_fresh_quality_order_and_default_to_selected() {
+        let directory = tempfile::tempdir().unwrap();
+        let runtime = crate::runtime::RuntimePaths::new(
+            std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("runtime"),
+        );
+        let state = AppState::open(directory.path().into(), runtime).unwrap();
+        let selected = crate::subscription::uri::parse("socks5://a.example:1080", "sub").unwrap();
+        let faster = crate::subscription::uri::parse("socks5://b.example:1080", "sub").unwrap();
+        {
+            let mut repo = state.repository.write().await;
+            repo.nodes = vec![selected.clone(), faster.clone()];
+            repo.settings.server_selection = "best".into();
+        }
+        assert_eq!(
+            connection_candidates(&state, &selected.id).await[0],
+            selected.id
+        );
+        {
+            let mut quality = state.server_quality.write().await;
+            quality
+                .entry(selected.id.clone())
+                .or_default()
+                .record(Some(500));
+            quality
+                .entry(faster.id.clone())
+                .or_default()
+                .record(Some(20));
+        }
+        assert_eq!(
+            connection_candidates(&state, &selected.id).await[0],
+            faster.id
+        );
+    }
+
     #[test]
     fn disconnect_cancels_pending_recovery_and_old_transaction_rollback() {
         let generation = std::sync::atomic::AtomicU64::new(0);

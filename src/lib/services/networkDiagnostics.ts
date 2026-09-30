@@ -1,4 +1,6 @@
 export interface NetworkDiagnostics {
+	coreEngine?: 'xray' | 'lumen';
+	selectedCoreEngine?: 'xray' | 'lumen';
 	status: string;
 	networkMode: string;
 	coreVersion: string;
@@ -18,6 +20,8 @@ export function formatNetworkDiagnostics(
 ): string {
 	return [
 		`Lumen / Xray ${diagnostics.coreVersion}`,
+		`Active engine: ${diagnostics.coreEngine ?? 'xray'}`,
+		`Selected engine: ${diagnostics.selectedCoreEngine ?? 'xray'}`,
 		`Status: ${diagnostics.status}`,
 		`Mode: ${diagnostics.networkMode}`,
 		`IPv4: ${diagnostics.publicIpv4 ?? 'unavailable'}`,

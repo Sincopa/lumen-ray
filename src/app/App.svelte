@@ -236,12 +236,26 @@
 	};
 
 	async function chooseServer(server: { id: string }) {
+		if ($connectionStore.busy) return;
+		const wasActive =
+			connectionState === 'connected' || connectionState === 'connecting';
 		try {
-			await catalog.selectServer(server.id);
-			goToTab('home');
-			if (connectionState === 'connected' || connectionState === 'connecting') {
-				void connection.switchServer(server.id);
+			if (wasActive) {
+				if ($connectionStore.info?.serverId !== server.id) {
+					await connection.switchServer(server.id);
+				}
+				if (
+					!runtime.isTauri &&
+					$connectionStore.status === 'connected' &&
+					$connectionStore.info?.serverId === server.id
+				) {
+					// The native backend persists successful switches; the demo uses local storage.
+					await catalog.selectServer(server.id);
+				}
+			} else {
+				await catalog.selectServer(server.id);
 			}
+			goToTab('home');
 		} catch (e) {
 			actionError = t('errors.' + errorCode(e));
 		}
