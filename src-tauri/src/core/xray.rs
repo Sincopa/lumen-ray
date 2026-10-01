@@ -42,6 +42,12 @@ pub struct XraySession {
     pub live_outbound_tags: Vec<(String, String, [u8; 32])>,
     #[cfg(windows)]
     pub pending_live_switch: Option<LiveSwitchRollback>,
+    /// Repository the running core's routing currently reflects (sources removed).
+    #[cfg(windows)]
+    prepared_repository: Option<Arc<Repository>>,
+    /// Repository the running core was started with; it owns the loaded outbounds.
+    #[cfg(windows)]
+    base_repository: Option<Arc<Repository>>,
 }
 
 #[cfg(windows)]
@@ -49,7 +55,33 @@ pub struct LiveSwitchRollback {
     previous_server_id: String,
     previous_config_hash: [u8; 32],
     previous_proxy_tag: String,
+    previous_repository: Arc<Repository>,
     routing_patch: serde_json::Value,
+}
+
+#[cfg(windows)]
+fn stripped(repo: &Repository) -> Arc<Repository> {
+    let mut repo = repo.clone();
+    repo.sources.clear();
+    Arc::new(repo)
+}
+
+/// The control API is reachable while the core process runs: an active or
+/// prepared TUN helper, or the system-proxy core of a connected session.
+#[cfg(windows)]
+fn api_available(session: &XraySession) -> bool {
+    if session.is_tun {
+        session
+            .helper
+            .as_ref()
+            .is_some_and(|helper| !helper.exited())
+    } else {
+        session.started.is_some()
+            && session
+                .child
+                .as_ref()
+                .is_some_and(|child| matches!(child.try_wait(), Ok(None)))
+    }
 }
 pub fn command(core: &std::path::Path) -> Command {
     let mut command = Command::new(core);
@@ -160,8 +192,9 @@ pub(crate) fn ports() -> Result<(u16, u16)> {
 fn configuration_fingerprint(
     repo: &crate::storage::repository::Repository,
     selected: &str,
+    tun: bool,
 ) -> Result<[u8; 32]> {
-    let config = crate::xray::config::build(repo, selected, 10808, 10809, true)?;
+    let config = crate::xray::config::build(repo, selected, 10808, 10809, tun)?;
     let mut config = serde_json::to_value(config)
         .map_err(|_| BackendError::new("INVALID_CONFIG", "Could not serialize Xray config"))?;
     // The live physical resolver can change while TUN is active. It is not a
@@ -221,51 +254,62 @@ fn cached_outbound_matches(session: &XraySession, selected: &str, hash: [u8; 32]
         .is_none_or(|(_, _, cached)| *cached == hash)
 }
 
-/// Apply a routing-only catalog change without destroying the active TUN.
+/// Apply a routing-only catalog change to the running core (active or prepared
+/// TUN, or a connected system proxy) without restarting it.
 /// Returns false when the change needs a full core restart.
 #[cfg(windows)]
 pub async fn apply_live_rules(
     state: &Arc<AppState>,
     selected: &str,
-    before: &crate::storage::repository::Repository,
-    after: &crate::storage::repository::Repository,
+    before: Option<&Repository>,
+    after: &Repository,
     session: &mut XraySession,
 ) -> Result<bool> {
-    let after_hash = configuration_fingerprint(after, selected)?;
-    if session.started.is_some()
-        && session.prepared_server_id.as_deref() == Some(selected)
-        && session.prepared_config_hash == Some(after_hash)
-        && session
-            .helper
-            .as_ref()
-            .is_some_and(|helper| !helper.exited())
-    {
-        return Ok(true);
-    }
-    if session.started.is_none() {
-        log::warn!("engine=xray routing update skipped: inactive session");
+    let tun = session.is_tun;
+    if (after.settings.network_mode == "tun") != tun {
+        log::info!("engine=xray routing update needs restart: network mode changed");
         return Ok(false);
     }
-    if session.helper.as_ref().is_none_or(|helper| helper.exited()) {
-        log::warn!("engine=xray routing update skipped: helper unavailable");
+    if !api_available(session) {
+        log::info!("engine=xray routing update skipped: core is not running");
         return Ok(false);
     }
     if session.prepared_server_id.as_deref() != Some(selected) {
         log::warn!("engine=xray routing update skipped: active server changed");
         return Ok(false);
     }
-    if session.prepared_config_hash != Some(configuration_fingerprint(before, selected)?) {
-        log::warn!("engine=xray routing update skipped: configuration changed");
+    if session.pending_live_switch.is_some() {
         return Ok(false);
     }
-    let Some(mut patch) = crate::xray::config::live_routing_patch(before, after, selected)? else {
-        log::warn!("engine=xray routing update skipped: restart required");
+    let after_hash = configuration_fingerprint(after, selected, tun)?;
+    if session.prepared_config_hash == Some(after_hash) {
+        return Ok(true);
+    }
+    // Patch from what the core actually runs; a caller snapshot may be stale
+    // after an earlier failed update.
+    let current = match (session.prepared_repository.clone(), before) {
+        (Some(current), _) => current,
+        (None, Some(before))
+            if session.prepared_config_hash
+                == Some(configuration_fingerprint(before, selected, tun)?) =>
+        {
+            stripped(before)
+        }
+        _ => {
+            log::warn!("engine=xray routing update skipped: configuration changed");
+            return Ok(false);
+        }
+    };
+    let Some(mut patch) = crate::xray::config::live_routing_patch(&current, after, selected, tun)?
+    else {
+        log::info!("engine=xray routing update needs restart");
         return Ok(false);
     };
     if let Some(tag) = session.active_proxy_tag.as_deref() {
         replace_primary_proxy_tag(&mut patch, tag);
     }
     let core = state.core.read().await.clone();
+    let applied_at = Instant::now();
     if let Err(error) = run_live_routing_patch(&core, session.metrics_port + 2, &patch).await {
         log::warn!(
             "engine=xray routing update failed: {} ({})",
@@ -275,8 +319,36 @@ pub async fn apply_live_rules(
         return Err(error);
     }
     session.prepared_config_hash = Some(after_hash);
-    log::info!("engine=xray routing update applied");
+    session.prepared_repository = Some(stripped(after));
+    log::info!(
+        "engine=xray routing update applied {} ms",
+        applied_at.elapsed().as_millis()
+    );
     Ok(true)
+}
+
+/// Bring a running core to the requested server and routing through its API.
+/// Errors are reported as `false`: a restart remains the supported fallback.
+#[cfg(windows)]
+async fn update_running_core(
+    state: &Arc<AppState>,
+    repo: &Repository,
+    selected: &str,
+    config_hash: [u8; 32],
+    session: &mut XraySession,
+) -> bool {
+    let result = if session.prepared_server_id.as_deref() == Some(selected) {
+        if session.prepared_config_hash == Some(config_hash) {
+            return true;
+        }
+        apply_live_rules(state, selected, None, repo, session).await
+    } else {
+        switch_server_live(state, repo, selected, config_hash, session).await
+    };
+    result.unwrap_or_else(|error| {
+        log::warn!("engine=xray live update needs restart: {}", error.code);
+        false
+    })
 }
 
 #[cfg(windows)]
@@ -311,39 +383,45 @@ struct LiveSwitchPlan {
 }
 
 #[cfg(windows)]
+#[allow(clippy::too_many_arguments)]
 fn live_switch_plan(
+    base_repo: &Repository,
+    previous_repo: &Repository,
     repo: &Repository,
-    base_server: &str,
-    previous_server: &str,
-    next_server: &str,
+    (base_server, previous_server, next_server): (&str, &str, &str),
     previous_tag: &str,
     next_tag: &str,
     ports: (u16, u16),
+    tun: bool,
 ) -> Result<Option<LiveSwitchPlan>> {
-    if [base_server, previous_server, next_server]
-        .into_iter()
-        .any(|id| {
-            repo.nodes
-                .iter()
-                .find(|node| node.id == id)
-                .is_none_or(|node| node.balancer.is_some())
-        })
-    {
+    if [
+        (base_repo, base_server),
+        (previous_repo, previous_server),
+        (repo, next_server),
+    ]
+    .into_iter()
+    .any(|(repo, id)| {
+        repo.nodes
+            .iter()
+            .find(|node| node.id == id)
+            .is_none_or(|node| node.balancer.is_some())
+    }) {
         return Ok(None);
     }
-    let config = |selected| {
-        crate::xray::config::build(repo, selected, ports.0, ports.1, true)
+    let config = |repo, selected| {
+        crate::xray::config::build(repo, selected, ports.0, ports.1, tun)
             .and_then(|config| serde_json::to_value(config).map_err(|_| BackendError::invalid()))
     };
-    let base = config(base_server)?;
-    let before = config(previous_server)?;
-    let after = config(next_server)?;
+    // `base` is what the core loaded at start; `before` is its current routing.
+    let base = config(base_repo, base_server)?;
+    let before = config(previous_repo, previous_server)?;
+    let after = config(repo, next_server)?;
     if ["inbounds", "dns", "observatory"]
         .into_iter()
-        .any(|key| before[key] != after[key])
+        .any(|key| base[key] != after[key])
         || ["domainStrategy", "balancers"]
             .into_iter()
-            .any(|key| before["routing"][key] != after["routing"][key])
+            .any(|key| base["routing"][key] != after["routing"][key])
     {
         return Ok(None);
     }
@@ -395,7 +473,7 @@ mod live_switch_tests {
             ..Default::default()
         };
         repo.settings.dns_server = "1.1.1.1".into();
-        let hash = configuration_fingerprint(&repo, &node.id).unwrap();
+        let hash = configuration_fingerprint(&repo, &node.id, true).unwrap();
         let session = XraySession {
             prepared_config_hash: Some(hash),
             prepared_core_version: Some("test-version".into()),
@@ -411,7 +489,7 @@ mod live_switch_tests {
         // Updating files cannot invalidate the repository/configuration hash.
         assert_eq!(
             session.prepared_config_hash,
-            Some(configuration_fingerprint(&repo, &node.id).unwrap())
+            Some(configuration_fingerprint(&repo, &node.id, true).unwrap())
         );
         assert!(!assets_match(
             &session,
@@ -472,12 +550,13 @@ mod live_switch_tests {
         repo.settings.dns_server = "1.1.1.1".into();
         let plan = live_switch_plan(
             &repo,
-            &first.id,
-            &first.id,
-            &second.id,
+            &repo,
+            &repo,
+            (&first.id, &first.id, &second.id),
             "lumen-live-old",
             "lumen-live-next",
             (10808, 10809),
+            true,
         )
         .unwrap()
         .unwrap();
@@ -550,6 +629,79 @@ mod live_switch_tests {
         stop(&mut session).await.unwrap();
         result.unwrap();
     }
+
+    #[tokio::test]
+    async fn system_proxy_core_takes_rules_modes_and_servers_without_restart() {
+        use crate::storage::repository::{Rule, RuleMatcher};
+        let directory = tempfile::tempdir().unwrap();
+        let runtime = crate::runtime::RuntimePaths::new(
+            std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("runtime"),
+        );
+        let state = AppState::open(directory.path().into(), runtime).unwrap();
+        let first = crate::subscription::uri::parse(
+            "vless://00000000-0000-4000-8000-000000000001@a.example:443?security=tls#A",
+            "sub",
+        )
+        .unwrap();
+        let second = crate::subscription::uri::parse(
+            "vless://00000000-0000-4000-8000-000000000002@b.example:443?security=tls#B",
+            "sub",
+        )
+        .unwrap();
+        let mut global = Repository {
+            nodes: vec![first.clone(), second.clone()],
+            routing_mode: "global".into(),
+            ..Default::default()
+        };
+        global.settings.network_mode = "proxy".into();
+        global.settings.dns_server = "1.1.1.1".into();
+        let mut rules = global.clone();
+        rules.routing_mode = "rules".into();
+        rules.rules.push(Rule {
+            id: "site".into(),
+            name: "example.org".into(),
+            matcher: RuleMatcher::Domain,
+            server_id: "subscription".into(),
+            enabled: true,
+            preset_id: None,
+            is_domain: true,
+        });
+        let mut session = BackendSession::empty(CoreEngine::Xray);
+        let result = async {
+            XrayBackend
+                .connect(&state, &global, &first.id, &mut session)
+                .await?;
+            let started = xray(&mut session)?.started;
+            assert!(started.is_some());
+            // All -> Rules with a new rule, then a server switch, then back to All.
+            assert!(
+                XrayBackend
+                    .update_routing(&state, &first.id, &global, &rules, &mut session)
+                    .await?
+            );
+            XrayBackend
+                .connect(&state, &rules, &second.id, &mut session)
+                .await?;
+            let s = xray(&mut session)?;
+            assert_eq!(s.prepared_server_id.as_deref(), Some(second.id.as_str()));
+            assert!(s.pending_live_switch.take().is_some());
+            let mut toggled = rules.clone();
+            toggled.rules[0].enabled = false;
+            assert!(
+                XrayBackend
+                    .update_routing(&state, &second.id, &rules, &toggled, &mut session)
+                    .await?
+            );
+            let s = xray(&mut session)?;
+            assert!(apply_live_rules(&state, &second.id, None, &global, s).await?);
+            // The process that served the first connection is still the same one.
+            assert_eq!(s.started, started);
+            Ok::<_, BackendError>(())
+        }
+        .await;
+        stop(xray(&mut session).unwrap()).await.unwrap();
+        result.unwrap();
+    }
 }
 
 #[cfg(windows)]
@@ -560,24 +712,33 @@ async fn switch_server_live(
     config_hash: [u8; 32],
     session: &mut XraySession,
 ) -> Result<bool> {
-    if repo.settings.network_mode != "tun"
-        || session.started.is_none()
-        || session.helper.as_ref().is_none_or(|helper| helper.exited())
+    let tun = session.is_tun;
+    if (repo.settings.network_mode == "tun") != tun
+        || !api_available(session)
         || session.pending_live_switch.is_some()
         || session.live_outbound_tags.len() >= 64
     {
         return Ok(false);
     }
     let (Some(base), Some(previous)) = (
-        session.base_server_id.as_deref(),
-        session.prepared_server_id.as_deref(),
+        session.base_server_id.clone(),
+        session.prepared_server_id.clone(),
+    ) else {
+        return Ok(false);
+    };
+    let (Some(base_repo), Some(previous_repo)) = (
+        session.base_repository.clone(),
+        session.prepared_repository.clone(),
     ) else {
         return Ok(false);
     };
     if previous == selected {
         return Ok(false);
     }
-    let previous_tag = session.active_proxy_tag.as_deref().unwrap_or("proxy");
+    let previous_tag = session
+        .active_proxy_tag
+        .clone()
+        .unwrap_or_else(|| "proxy".into());
     let Some(previous_config_hash) = session.prepared_config_hash else {
         return Ok(false);
     };
@@ -601,18 +762,20 @@ async fn switch_server_live(
     };
     let add_outbound = selected != base && existing_tag.is_none();
     let Some(plan) = live_switch_plan(
+        &base_repo,
+        &previous_repo,
         repo,
-        base,
-        previous,
-        selected,
-        previous_tag,
+        (&base, &previous, selected),
+        &previous_tag,
         &next_tag,
         (session.proxy_port, session.metrics_port),
+        tun,
     )?
     else {
         return Ok(false);
     };
     let core = state.core.read().await.clone();
+    let switched_at = Instant::now();
     if add_outbound {
         if let Err(error) =
             run_live_outbound_add(&core, session.metrics_port + 2, &plan.outbound).await
@@ -637,15 +800,20 @@ async fn switch_server_live(
         return Ok(false);
     }
     session.pending_live_switch = Some(LiveSwitchRollback {
-        previous_server_id: previous.into(),
+        previous_server_id: previous,
         previous_config_hash,
-        previous_proxy_tag: previous_tag.into(),
+        previous_proxy_tag: previous_tag,
+        previous_repository: previous_repo,
         routing_patch: plan.rollback_patch,
     });
     session.prepared_server_id = Some(selected.into());
     session.prepared_config_hash = Some(config_hash);
+    session.prepared_repository = Some(stripped(repo));
     session.active_proxy_tag = Some(next_tag);
-    log::info!("engine=xray live server routing applied without restarting TUN");
+    log::info!(
+        "engine=xray live server routing applied without restarting the core {} ms",
+        switched_at.elapsed().as_millis()
+    );
     Ok(true)
 }
 
@@ -661,6 +829,7 @@ pub async fn rollback_live_server_switch(
     run_live_routing_patch(&core, session.metrics_port + 2, &rollback.routing_patch).await?;
     session.prepared_server_id = Some(rollback.previous_server_id);
     session.prepared_config_hash = Some(rollback.previous_config_hash);
+    session.prepared_repository = Some(rollback.previous_repository);
     session.active_proxy_tag = Some(rollback.previous_proxy_tag);
     log::warn!("engine=xray live server switch rolled back after verification failed");
     Ok(true)
@@ -782,15 +951,16 @@ async fn run_live_routing_patch_once(
 async fn start_tunnel(
     session: &mut XraySession,
     data: &std::path::Path,
-    mut repository: crate::storage::repository::Repository,
+    repository: &crate::storage::repository::Repository,
     selected: String,
     (proxy_port, metrics_port): (u16, u16),
     core_version: String,
     #[cfg(windows)] config_hash: [u8; 32],
 ) -> Result<()> {
     #[cfg(windows)]
-    let outbound_hash = outbound_fingerprint(&repository, &selected)?;
-    repository.sources.clear();
+    let outbound_hash = outbound_fingerprint(repository, &selected)?;
+    #[cfg(windows)]
+    let repository = stripped(repository);
     let tunnel_at = Instant::now();
     #[cfg(windows)]
     {
@@ -799,7 +969,7 @@ async fn start_tunnel(
                 crate::platform::helper::start_standby(
                     crate::platform::helper::StartTunnel {
                         core_version: core_version.clone(),
-                        repository,
+                        repository: (*repository).clone(),
                         selected: selected.clone(),
                         proxy_port,
                         metrics_port,
@@ -810,6 +980,7 @@ async fn start_tunnel(
             );
             session.base_server_id = Some(selected.clone());
             session.base_outbound_hash = Some(outbound_hash);
+            session.base_repository = Some(repository.clone());
             session.active_proxy_tag = Some("proxy".into());
             session.live_outbound_tags.clear();
             session.pending_live_switch = None;
@@ -822,6 +993,7 @@ async fn start_tunnel(
             .await?;
         session.prepared_server_id = Some(selected);
         session.prepared_config_hash = Some(config_hash);
+        session.prepared_repository = Some(repository);
         session.prepared_core_version = Some(core_version);
         session.prepared_geo_hash = geo_fingerprint(data);
         session.proxy_port = proxy_port;
@@ -934,6 +1106,8 @@ pub async fn stop(session: &mut XraySession) -> Result<()> {
         session.active_proxy_tag = None;
         session.live_outbound_tags.clear();
         session.pending_live_switch = None;
+        session.prepared_repository = None;
+        session.base_repository = None;
     }
     if let Some(mut child) = session.child.take() {
         if !matches!(child.try_wait(), Ok(Some(_))) && child.kill().await.is_err() {
@@ -1053,23 +1227,9 @@ impl CoreBackend for XrayBackend {
     ) -> BackendFuture<'a, ()> {
         Box::pin(async move {
             let s = xray(session)?;
-            let uses_geo = repo.routing_mode == "rules"
-                && repo.rules.iter().any(|r| {
-                    r.enabled
-                        && matches!(
-                            r.matcher,
-                            crate::storage::repository::RuleMatcher::Geosite
-                                | crate::storage::repository::RuleMatcher::Geoip
-                        )
-                });
-            if uses_geo && !crate::xray::geo::info(&state.data).valid {
-                return Err(BackendError::new(
-                    "GEO_DATA_CORRUPTED",
-                    "Geo databases must pass validation before connecting",
-                ));
-            }
+            let tun = repo.settings.network_mode == "tun";
             #[cfg(windows)]
-            let hash = configuration_fingerprint(repo, selected)?;
+            let hash = configuration_fingerprint(repo, selected, tun)?;
             let core = state.core.read().await.clone();
             let version = core
                 .parent()
@@ -1078,23 +1238,19 @@ impl CoreBackend for XrayBackend {
                 .unwrap_or(crate::xray::core::VERSION);
             #[cfg(windows)]
             let current_geo = geo_fingerprint(&state.data);
+            // A running core (active or prepared TUN, connected proxy) takes server
+            // and routing changes through its API. Its geo data is already loaded.
             #[cfg(windows)]
-            if repo.settings.network_mode == "tun"
-                && s.started.is_some()
+            if s.is_tun == tun
+                && api_available(s)
                 && assets_match(s, version, current_geo)
+                && update_running_core(state, repo, selected, hash, s).await
+                && s.started.is_some()
             {
-                if s.prepared_server_id.as_deref() == Some(selected)
-                    && s.prepared_config_hash == Some(hash)
-                    && s.helper.as_ref().is_some_and(|helper| !helper.exited())
-                {
-                    return Ok(());
-                }
-                if switch_server_live(state, repo, selected, hash, s).await? {
-                    return Ok(());
-                }
+                return Ok(());
             }
             #[cfg(windows)]
-            let reuse = repo.settings.network_mode == "tun"
+            let reuse = tun
                 && s.started.is_none()
                 && s.prepared_server_id.as_deref() == Some(selected)
                 && s.prepared_config_hash == Some(hash)
@@ -1104,23 +1260,43 @@ impl CoreBackend for XrayBackend {
                     .is_some_and(|h| !h.exited() && h.is_standby());
             #[cfg(not(windows))]
             let reuse = false;
+            let uses_geo = repo.routing_mode == "rules"
+                && repo.rules.iter().any(|r| {
+                    r.enabled
+                        && matches!(
+                            r.matcher,
+                            crate::storage::repository::RuleMatcher::Geosite
+                                | crate::storage::repository::RuleMatcher::Geoip
+                        )
+                });
+            if uses_geo && !reuse {
+                // Hashing both databases is disk-bound; keep it off the async workers.
+                let data = state.data.clone();
+                let valid =
+                    tokio::task::spawn_blocking(move || crate::xray::geo::info(&data).valid)
+                        .await
+                        .unwrap_or(false);
+                if !valid {
+                    return Err(BackendError::new(
+                        "GEO_DATA_CORRUPTED",
+                        "Geo databases must pass validation before connecting",
+                    ));
+                }
+            }
             let (proxy_port, metrics_port) = if reuse {
                 (s.proxy_port, s.metrics_port)
             } else {
                 ports()?
             };
-            let tun = repo.settings.network_mode == "tun";
             let bytes = if tun {
                 Vec::new()
             } else {
-                serde_json::to_vec(&crate::xray::config::build(
-                    repo,
-                    selected,
-                    proxy_port,
-                    metrics_port,
-                    false,
-                )?)
-                .map_err(|_| {
+                #[allow(unused_mut)]
+                let mut config =
+                    crate::xray::config::build(repo, selected, proxy_port, metrics_port, false)?;
+                #[cfg(windows)]
+                crate::xray::config::enable_api(&mut config, metrics_port)?;
+                serde_json::to_vec(&config).map_err(|_| {
                     BackendError::new("INVALID_CONFIG", "Could not serialize Xray config")
                 })?
             };
@@ -1129,20 +1305,35 @@ impl CoreBackend for XrayBackend {
             }
             s.is_tun = tun;
             if tun {
-                start_tunnel(
+                return start_tunnel(
                     s,
                     &state.data,
-                    repo.clone(),
+                    repo,
                     selected.into(),
                     (proxy_port, metrics_port),
                     version.into(),
                     #[cfg(windows)]
                     hash,
                 )
-                .await
-            } else {
-                start(&core, s, &bytes, proxy_port, metrics_port).await
+                .await;
             }
+            start(&core, s, &bytes, proxy_port, metrics_port).await?;
+            #[cfg(windows)]
+            {
+                let repository = stripped(repo);
+                s.base_server_id = Some(selected.into());
+                s.base_outbound_hash = Some(outbound_fingerprint(repo, selected)?);
+                s.base_repository = Some(repository.clone());
+                s.prepared_repository = Some(repository);
+                s.prepared_server_id = Some(selected.into());
+                s.prepared_config_hash = Some(hash);
+                s.prepared_core_version = Some(version.into());
+                s.prepared_geo_hash = current_geo;
+                s.active_proxy_tag = Some("proxy".into());
+                s.live_outbound_tags.clear();
+                s.pending_live_switch = None;
+            }
+            Ok(())
         })
     }
     fn prewarm<'a>(
@@ -1157,16 +1348,13 @@ impl CoreBackend for XrayBackend {
             if s.started.is_some() {
                 return Ok(());
             }
-            if repo.settings.network_mode != "tun"
-                || repo.settings.auto_connect
-                || selected.is_none()
-            {
+            if repo.settings.network_mode != "tun" || selected.is_none() {
                 return stop(s).await;
             }
             #[cfg(windows)]
             {
                 let selected = selected.ok_or_else(BackendError::invalid)?;
-                let hash = configuration_fingerprint(repo, selected)?;
+                let hash = configuration_fingerprint(repo, selected, true)?;
                 let outbound_hash = outbound_fingerprint(repo, selected)?;
                 let geo = geo_fingerprint(&state.data);
                 let core = state.core.read().await.clone();
@@ -1176,21 +1364,29 @@ impl CoreBackend for XrayBackend {
                     .and_then(|s| s.to_str())
                     .unwrap_or(crate::xray::core::VERSION)
                     .to_owned();
-                if s.prepared_server_id.as_deref() == Some(selected)
-                    && s.prepared_config_hash == Some(hash)
-                    && s.prepared_geo_hash == geo
-                    && s.prepared_core_version.as_deref() == Some(&version)
-                    && s.helper.as_ref().is_some_and(|h| !h.exited())
+                if s.is_tun
+                    && s.helper
+                        .as_ref()
+                        .is_some_and(|h| !h.exited() && h.is_standby())
+                    && assets_match(s, &version, geo)
                 {
-                    return Ok(());
+                    // Rules, routing mode and server selection change through the
+                    // prepared core's API: no new elevated helper while disconnected.
+                    if update_running_core(state, repo, selected, hash, s).await {
+                        // Nothing to verify while disconnected; keep the new routing.
+                        s.pending_live_switch = None;
+                        return Ok(());
+                    }
+                }
+                if repo.settings.auto_connect {
+                    return stop(s).await;
                 }
                 stop(s).await?;
                 let (proxy_port, metrics_port) = ports()?;
-                let mut repository = repo.clone();
-                repository.sources.clear();
+                let repository = stripped(repo);
                 let request = crate::platform::helper::StartTunnel {
                     core_version: version.clone(),
-                    repository,
+                    repository: (*repository).clone(),
                     selected: selected.into(),
                     proxy_port,
                     metrics_port,
@@ -1210,6 +1406,8 @@ impl CoreBackend for XrayBackend {
                 s.prepared_geo_hash = geo;
                 s.base_server_id = Some(selected.into());
                 s.base_outbound_hash = Some(outbound_hash);
+                s.base_repository = Some(repository.clone());
+                s.prepared_repository = Some(repository);
                 s.active_proxy_tag = Some("proxy".into());
                 s.live_outbound_tags.clear();
                 s.pending_live_switch = None;
@@ -1232,7 +1430,11 @@ impl CoreBackend for XrayBackend {
             if keep_warm {
                 if let Some(helper) = s.helper.as_mut().filter(|h| h.is_standby() && !h.exited()) {
                     if s.started.is_some() {
-                        helper.deactivate().await?;
+                        if let Err(error) = helper.deactivate().await {
+                            // Never leave routes behind: drop the helper instead.
+                            log::warn!("engine=xray TUN standby release failed: {}", error.code);
+                            return stop(s).await;
+                        }
                     }
                     s.started = None;
                     return Ok(());
@@ -1252,7 +1454,7 @@ impl CoreBackend for XrayBackend {
         Box::pin(async move {
             #[cfg(windows)]
             {
-                apply_live_rules(state, selected, before, after, xray(session)?).await
+                apply_live_rules(state, selected, Some(before), after, xray(session)?).await
             }
             #[cfg(not(windows))]
             {

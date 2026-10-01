@@ -128,7 +128,8 @@ test('large catalogs remain searchable without losing rule associations', async 
 	}, catalog);
 	await page.goto('/');
 	const start = performance.now();
-	await page.getByRole('button', { name: ru.nav.servers, exact: true }).click();
+	await page.getByRole('button', { name: ru.nav.home, exact: true }).click();
+	await page.locator('.server-selector').click();
 	await expect(page.locator('.server-row')).toHaveCount(2000);
 	const serversReadyMs = performance.now() - start;
 	await page

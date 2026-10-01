@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { tick } from 'svelte';
-	import addIcon from '../../../assets/add.svg';
+	import addIcon from '../../../assets/plus.svg';
 	import { catalog } from '../../services';
 	import { errorCode } from '../../services/errors';
 	import { t } from '../../i18n';
@@ -58,10 +58,11 @@
 			onclick={open}
 			type="button"
 			aria-hidden={editing}
+			aria-label={t('subscriptions.addProfile')}
 			tabindex={editing ? -1 : 0}
 		>
 			<img src={addIcon} alt="" class="plus-icon" />
-			<span class="btn-label">{t('subscriptions.addProfile')}</span>
+			<span class="btn-label">{t('subscriptions.addLink')}</span>
 		</button>
 
 		<div class="source-editor" aria-hidden={!editing}>
@@ -106,16 +107,16 @@
 		height: 100%;
 		flex: 1;
 		min-height: 0;
-		transform: translateY(-36px);
+		transform: translateY(-41.5px);
 		user-select: none;
 	}
 
 	.profile-control {
 		position: relative;
-		width: 250px;
-		height: 56px;
+		width: min(100%, 300px);
+		height: 63px;
 		border-radius: 32px;
-		background: rgba(0, 0, 0, 0.22);
+		background: var(--design-glass);
 		-webkit-backdrop-filter: blur(16px);
 		backdrop-filter: blur(16px);
 		overflow: hidden;
@@ -126,7 +127,7 @@
 	}
 
 	.profile-control:not(.editing) {
-		width: 280px;
+		width: min(100%, 229px);
 	}
 
 	.profile-control.editing {
@@ -146,8 +147,8 @@
 		display: flex;
 		align-items: center;
 		justify-content: center;
-		gap: 12px;
-		padding: 0 28px;
+		gap: 22px;
+		padding: 0 26px;
 		border: 0;
 		background: transparent;
 		color: #fff;
@@ -172,16 +173,18 @@
 	}
 
 	.plus-icon {
-		width: 24px;
-		height: 24px;
+		width: 21px;
+		height: 21px;
 		object-fit: contain;
 		filter: brightness(0) invert(1);
 	}
 
 	.btn-label {
+		font-family: 'Satoshi', var(--font-family-base);
 		font-size: 18px;
-		font-weight: 500;
-		letter-spacing: -0.2px;
+		font-weight: 400;
+		color: rgba(255, 255, 255, 0.25);
+		letter-spacing: -0.36px;
 		white-space: nowrap;
 	}
 

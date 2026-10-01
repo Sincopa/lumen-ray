@@ -3,6 +3,7 @@
 	import { fade } from 'svelte/transition';
 	import NumberFlow from '@number-flow/svelte';
 	import CountryFlag from '../../components/CountryFlag.svelte';
+	import LumenFace from '../../components/LumenFace.svelte';
 	import { t } from '../../i18n';
 	import { serverDisplayName } from '../../utils/serverDisplayName';
 	import { tooltip } from '../../actions/tooltip';
@@ -12,8 +13,7 @@
 	} from '../../types/models';
 	import type { Server } from '../../services/catalog';
 	import type { ErrorCode } from '../../services/errors';
-	import logoIcon from '../../../assets/logo.svg';
-	import chevronIcon from '../../../assets/chevron.svg';
+	import chevronIcon from '../../../assets/chevron-up.svg';
 
 	interface Props {
 		server?: Server;
@@ -50,6 +50,7 @@
 	let seconds = $derived(elapsed % 60);
 
 	let visible = $state(true);
+	let hovered = $state(false);
 	onMount(() => {
 		const updateVisibility = () => {
 			visible = !document.hidden;
@@ -75,7 +76,14 @@
 			class="central-logo-btn"
 			class:connected={isConnected}
 			class:connecting={isConnecting}
-			onclick={onToggle}
+			onclick={() => {
+				hovered = false;
+				onToggle();
+			}}
+			onpointerenter={(event) => {
+				if (event.pointerType === 'mouse') hovered = true;
+			}}
+			onpointerleave={() => (hovered = false)}
 			disabled={busy || (!server && !isConnected)}
 			aria-busy={busy}
 			aria-label={isConnected
@@ -85,7 +93,7 @@
 				? t('home.clickToDisconnect')
 				: t('home.clickToConnect')}
 		>
-			<img src={logoIcon} alt="Lumen" class="giant-logo-img" />
+			<LumenFace status={connectionState} {hovered} error={!!error} />
 		</button>
 
 		<!-- Accessible live status for assistive tech -->
@@ -170,145 +178,78 @@
 </div>
 
 <style>
+	.connection-view {
+		position: relative;
+		width: 100%;
+		height: 100%;
+		min-height: 0;
+	}
+
+	.center-container {
+		position: absolute;
+		top: calc(39.9421% - 87.5px);
+		left: 0;
+		right: 0;
+		display: flex;
+		justify-content: center;
+		height: 175px;
+	}
+
+	.central-logo-btn {
+		width: 256px;
+		height: 175px;
+		flex: 0 0 256px;
+		padding: 0;
+		border: 0;
+		border-radius: 48px;
+		background: transparent;
+		transition: transform 0.16s var(--ease-spring);
+	}
+
+	.central-logo-btn:disabled {
+		opacity: 1;
+	}
+
+	.central-logo-btn:active:not(:disabled) {
+		transform: scale(0.97);
+	}
+
 	.status-slot {
 		position: absolute;
-		top: calc(50% + 94px);
+		top: 197px;
 		left: 0;
 		right: 0;
 		display: flex;
 		justify-content: center;
 		align-items: center;
-		pointer-events: none;
 		height: 32px;
+		pointer-events: none;
 	}
+
 	.connection-status {
-		position: absolute;
-		color: rgba(24, 22, 21, 0.72);
-		font-size: 16px;
 		margin: 0;
-		min-height: 22px;
+		color: rgba(0, 0, 0, 0.66);
+		font-size: 14px;
 		text-align: center;
-		white-space: nowrap;
 	}
+
 	.connection-error {
-		position: absolute;
-		color: #ffb9b9;
-		text-align: center;
+		max-width: 100%;
+		padding: 0 16px;
+		color: #601919;
 		font-size: 13px;
-		white-space: nowrap;
-	}
-	.connection-view {
-		display: flex;
-		flex-direction: column;
-		width: 100%;
-		flex: 1;
-		position: relative;
-		justify-content: space-between;
-		align-items: center;
-		padding-top: 0;
-	}
-
-	.center-container {
-		flex: 1;
-		display: flex;
-		flex-direction: column;
-		align-items: center;
-		justify-content: center;
-		position: relative;
-		width: 100%;
-		transform: translateY(7px);
-	}
-
-	.central-logo-btn {
-		width: 164px;
-		height: 164px;
-		flex: 0 0 164px;
-		background: transparent;
-		border: none;
-		cursor: pointer;
-		padding: 0;
-		display: flex;
-		align-items: center;
-		justify-content: center;
-		transition: filter 0.24s ease;
-		border-radius: 50%;
-	}
-
-	.giant-logo-img {
-		width: 164px;
-		height: 164px;
-		object-fit: contain;
-		filter: brightness(0.15);
-		transform: scale(0.7561);
-		will-change: transform, filter, opacity;
-		transition:
-			filter 0.35s ease,
-			transform 420ms var(--ease-spring),
-			opacity 240ms ease;
-	}
-
-	.central-logo-btn:hover .giant-logo-img {
-		filter: brightness(0.1);
-		transform: scale(0.79);
-	}
-
-	.central-logo-btn:active .giant-logo-img {
-		transform: scale(0.73);
-		transition-duration: 120ms;
-	}
-
-	.central-logo-btn.connected .giant-logo-img {
-		transform: scale(1);
-		filter: brightness(0.12);
-		animation: logoPulse 3s infinite ease-in-out;
-	}
-
-	.central-logo-btn.connecting .giant-logo-img {
-		transform: scale(1);
-		animation: connectingPulse 1.6s infinite ease-in-out;
-	}
-
-	.central-logo-btn:is(.connected, .connecting):hover .giant-logo-img {
-		transform: scale(1.02);
-	}
-
-	.central-logo-btn:is(.connected, .connecting):active .giant-logo-img {
-		transform: scale(0.98);
-	}
-
-	@keyframes connectingPulse {
-		0%,
-		100% {
-			opacity: 0.7;
-		}
-		50% {
-			opacity: 1;
-		}
-	}
-
-	@keyframes logoPulse {
-		0%,
-		100% {
-			filter: brightness(0.16);
-		}
-		50% {
-			filter: brightness(0.08);
-		}
+		text-align: center;
 	}
 
 	/* Timer with NumberFlow */
 	.timer {
-		position: absolute;
-		margin-top: 0;
 		display: flex;
 		justify-content: center;
 		align-items: baseline;
 		gap: 2px;
-		font-family: var(--font-family-base);
+		color: rgba(24, 22, 21, 0.84);
 		font-size: 18px;
 		font-weight: 500;
-		color: rgba(24, 22, 21, 0.84);
-		letter-spacing: -0.2px;
 		white-space: nowrap;
 	}
 
@@ -319,96 +260,83 @@
 	}
 
 	.time-label {
+		margin-left: 1px;
 		font-size: 14px;
 		opacity: 0.8;
-		margin-left: 1px;
 	}
 
 	.time-separator {
 		width: 6px;
-		display: inline-block;
 	}
 
 	/* Server Selector Card */
 	.server-selector {
-		width: 100%;
-		max-width: 326px;
-		height: 64px;
-		background: rgba(0, 0, 0, 0.2);
-		border: none;
-		outline: none;
-		box-shadow: none;
-		border-radius: 124px;
-		padding: 0 20px 0 12px;
+		position: absolute;
+		left: 16px;
+		right: 16px;
+		bottom: 114px;
 		display: flex;
 		justify-content: space-between;
 		align-items: center;
-		box-sizing: border-box;
-		backdrop-filter: blur(14px);
-		cursor: pointer;
+		width: calc(100% - 32px);
+		height: 64px;
+		padding: 16px;
+		border: 0;
+		border-radius: 124px;
+		background: var(--design-glass);
+		-webkit-backdrop-filter: blur(25px);
+		backdrop-filter: blur(25px);
 		transition:
-			background 0.22s ease,
-			border-color 0.22s ease,
-			transform 0.25s cubic-bezier(0.34, 1.56, 0.64, 1);
-		margin-top: auto;
-		margin-bottom: 124px;
-	}
-
-	.server-selector:hover {
-		background: rgba(255, 255, 255, 0.09);
-		transform: scale(1.005);
+			background-color 0.16s ease,
+			transform 0.16s var(--ease-spring);
 	}
 
 	.server-selector:active {
 		transform: scale(0.98);
-		transition-duration: 0.1s;
 	}
 
 	.server-info {
 		display: flex;
 		align-items: center;
-		gap: 12px;
+		gap: 6px;
+		min-width: 0;
 	}
 
 	.flag-circle {
-		width: 36px;
-		height: 36px;
+		flex: 0 0 32px;
+		width: 32px;
+		height: 32px;
 		border-radius: 50%;
 		overflow: hidden;
-		display: flex;
-		align-items: center;
-		justify-content: center;
-		flex-shrink: 0;
 	}
 
 	.server-details {
 		display: flex;
 		flex-direction: column;
 		align-items: flex-start;
-		gap: 1px;
+		gap: 0;
 	}
 
 	.protocol {
-		font-family: var(--font-family-base);
-		font-size: 11px;
-		font-weight: 700;
-		color: rgba(255, 255, 255, 0.65);
-		letter-spacing: 0.5px;
+		color: rgba(255, 255, 255, 0.75);
+		font-size: 10px;
+		font-weight: 400;
+		line-height: 12px;
 		text-transform: uppercase;
 	}
 
 	.latency {
-		font-family: var(--font-family-base);
-		font-size: 16px;
-		font-weight: 500;
-		color: #ffffff;
 		display: inline-flex;
 		align-items: baseline;
+		gap: 3px;
+		color: #fff;
+		font-size: 16px;
+		font-weight: 500;
+		line-height: 18px;
 	}
 
 	.latency-unit {
-		font-size: 14px;
-		opacity: 0.85;
+		font-size: 16px;
 	}
 
 	.server-arrow {
@@ -417,37 +345,45 @@
 	}
 
 	.chevron-icon {
-		font-size: 20px !important;
-		color: rgba(255, 255, 255, 0.6);
-		transition:
-			color 0.2s ease,
-			transform 0.2s ease;
-		font-variation-settings:
-			'FILL' 0,
-			'wght' 300,
-			'GRAD' 0,
-			'opsz' 24;
-		opacity: 0.6;
-		transform: rotate(-90deg);
-		filter: brightness(0) invert(1);
-		transition:
-			opacity 0.2s ease,
-			transform 0.2s ease;
+		width: 28px;
+		height: 28px;
+		transform: rotate(90deg);
 	}
 
-	.server-selector:hover .chevron-icon {
-		color: rgba(255, 255, 255, 1);
-		transform: translateX(2px);
-		opacity: 1;
-		transform: rotate(-90deg) translateX(-2px);
+	@media (hover: hover) and (pointer: fine) {
+		.server-selector:hover {
+			background: rgba(0, 0, 0, 0.25);
+		}
 	}
 
-	@media (prefers-reduced-motion: reduce) {
-		.central-logo-btn,
-		.server-selector,
-		.giant-logo-img {
-			animation: none;
-			transition-duration: 0ms;
+	@media (max-height: 580px) {
+		.center-container {
+			top: 0;
+			transform: scale(0.72);
+			transform-origin: top;
+		}
+
+		.status-slot {
+			top: 175px;
+		}
+
+		.server-selector {
+			bottom: 100px;
+		}
+	}
+
+	@media (max-height: 430px) {
+		.center-container {
+			transform: scale(0.55);
+		}
+
+		.status-slot {
+			top: 145px;
+		}
+
+		.server-selector {
+			height: 52px;
+			bottom: 92px;
 		}
 	}
 </style>

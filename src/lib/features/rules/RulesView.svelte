@@ -16,6 +16,10 @@
 	import CountryFlag from '../../components/CountryFlag.svelte';
 	import MaterialIcon from '../../components/MaterialIcon.svelte';
 	import IconButton from '../../components/IconButton.svelte';
+	import PopupMenu from '../../components/PopupMenu.svelte';
+	import MenuItem from '../../components/MenuItem.svelte';
+	import menuIcon from '../../../assets/menu.svg';
+	import tunIcon from '../../../assets/mode-rules.svg';
 	import StatusDot from '../../components/StatusDot.svelte';
 	import RoundCheckbox from '../../components/RoundCheckbox.svelte';
 	import ToggleSwitch from '../../components/ToggleSwitch.svelte';
@@ -25,17 +29,12 @@
 	import PresetsModal from './PresetsModal.svelte';
 	import searchIcon from '../../../assets/search.svg';
 	import reloadIcon from '../../../assets/reload.svg';
-	import addIcon from '../../../assets/add.svg';
+	import addIcon from '../../../assets/plus.svg';
 	import pencilIcon from '../../../assets/pencil.svg';
 	import trashIcon from '../../../assets/trash.svg';
 	import checkIcon from '../../../assets/check.svg';
-	import crossIcon from '../../../assets/cross.svg';
-	import chevronIcon from '../../../assets/chevron.svg';
-	import discordIcon from '../../../assets/discord.png';
+	import crossIcon from '../../../assets/close.svg';
 	import yandexIcon from '../../../assets/yandex.png';
-	import chromeIcon from '../../../assets/chrome.svg';
-	import telegramIcon from '../../../assets/telegram.svg';
-	import steamIcon from '../../../assets/steam.svg';
 
 	interface Props {
 		onChromeChange?: (mode: 'default' | 'selection' | 'picker') => void;
@@ -74,6 +73,7 @@
 	let selectMode = $state(false);
 	let selectingRule = $state<Rule | null>(null);
 	let pendingServerId = $state('');
+	let pickerSearchSignal = $state(0);
 	let editing = $state<Rule | null>(null);
 	let choosingProcess = $state(false);
 	let choosingServer = $state(false);
@@ -81,11 +81,20 @@
 	let selected = $state<string[]>([]);
 	let error = $state('');
 	let showPresetsModal = $state(false);
+	let menu = $state(false);
 	let confirmSwitchToRules = $state(false);
 
 	// Derived state
 	const serversById = $derived(
 		new Map($catalogStore.servers.map((server) => [server.id, server])),
+	);
+	const subscriptionsById = $derived(
+		new Map(
+			$catalogStore.subscriptions.map((subscription) => [
+				subscription.id,
+				subscription,
+			]),
+		),
 	);
 	const selectedNames = $derived(new Set(selected));
 	const activeSubscriptionId = $derived(
@@ -218,11 +227,7 @@
 		if (persistentRuleIconCache[fullName])
 			return persistentRuleIconCache[fullName];
 
-		if (baseName.includes('chrome')) return chromeIcon;
-		if (baseName.includes('discord')) return discordIcon;
 		if (baseName.includes('yandex')) return yandexIcon;
-		if (baseName.includes('telegram')) return telegramIcon;
-		if (baseName.includes('steam')) return steamIcon;
 		return null;
 	}
 
@@ -320,6 +325,19 @@
 	}
 </script>
 
+<svelte:window
+	onclick={(event) => {
+		const target = event.target as HTMLElement | null;
+		if (!target?.closest('.popup-menu, .icon-btn')) menu = false;
+	}}
+	onkeydown={(event) => {
+		if (event.key === 'Escape') {
+			menu = false;
+			if (searching) handleCloseSearch();
+		}
+	}}
+/>
+
 {#if editing}
 	{#if choosingProcess}
 		<ProcessPickerView
@@ -339,6 +357,7 @@
 	{:else if choosingServer}
 		<div class="server-picker-view">
 			<ServersView
+				searchSignal={pickerSearchSignal}
 				selectedId={editing.serverId}
 				onSelect={(server) => {
 					if (editing) editing.serverId = server.id;
@@ -348,16 +367,15 @@
 			/>
 			<div class="picker-bar">
 				<IconButton
-					icon={chevronIcon}
-					ariaLabel={t('common.close')}
+					design
+					icon={searchIcon}
+					ariaLabel={t('common.search')}
 					size="lg"
 					variant="surface"
-					class="back-round"
-					onclick={() => {
-						choosingServer = false;
-					}}
+					onclick={() => pickerSearchSignal++}
 				/>
 				<IconButton
+					design
 					icon={checkIcon}
 					ariaLabel={t('common.save')}
 					size="lg"
@@ -398,6 +416,7 @@
 				choosingProcess = true;
 			}}
 			onSelectServer={() => {
+				pickerSearchSignal = 0;
 				choosingServer = true;
 			}}
 			onMatcherChange={(matcher) => {
@@ -410,20 +429,23 @@
 	{/if}
 {:else if selectingRule}
 	<div class="server-picker-view">
-		<ServersView selectedId={pendingServerId} onSelect={pickServer} compact />
+		<ServersView
+			selectedId={pendingServerId}
+			searchSignal={pickerSearchSignal}
+			onSelect={pickServer}
+			compact
+		/>
 		<div class="picker-bar">
 			<IconButton
-				icon={chevronIcon}
-				ariaLabel={t('common.close')}
+				design
+				icon={searchIcon}
+				ariaLabel={t('common.search')}
 				size="lg"
 				variant="surface"
-				class="back-round"
-				onclick={() => {
-					selectingRule = null;
-					pendingServerId = '';
-				}}
+				onclick={() => pickerSearchSignal++}
 			/>
 			<IconButton
+				design
 				icon={checkIcon}
 				ariaLabel={t('common.save')}
 				size="lg"
@@ -433,97 +455,87 @@
 		</div>
 	</div>
 {:else}
-	<section class="rules-view" aria-label={t('rules.title')}>
-		{#if selectMode}
-			<div class="selection-header">
-				<div class="sub-info">
-					<span class="sub-title">{activeSub?.name ?? t('rules.title')}</span>
-					<StatusDot />
-				</div>
-				<button
-					class="select-all"
-					role="checkbox"
-					aria-checked={selected.length === filtered.length &&
-						filtered.length > 0}
-					onclick={() =>
-						(selected =
-							selected.length === filtered.length
-								? []
-								: filtered.map((rule) => rule.id))}
-				>
-					<span>{t('rules.selectAll')}</span>
-					<RoundCheckbox
-						checked={selected.length === filtered.length && filtered.length > 0}
-						asSpan
-					/>
-				</button>
-			</div>
-		{:else}
-			<div class="header-card-wrapper">
-				<div class="header-row">
-					<div class="header-pill">
-						<!-- Normal header content -->
-						<div class="header-normal" class:header-hidden={searching}>
-							<div class="header-card-title">
-								<span class="title-text">
-									{activeSub?.name ?? t('rules.title')}
-								</span>
-								<StatusDot variant="active" />
-							</div>
-							<div class="header-card-actions">
+	<section
+		class="rules-view"
+		class:empty={!$catalogStore.rules.length}
+		aria-label={t('rules.title')}
+	>
+		<div class="header-card-wrapper" class:selection={selectMode}>
+			<div class="header-row">
+				<div class="header-pill">
+					<!-- Normal header content -->
+					<div class="header-normal" class:header-hidden={searching}>
+						<div class="header-card-title">
+							<span class="title-text">
+								{activeSub?.name ?? t('rules.title')}
+							</span>
+							<StatusDot variant="active" />
+						</div>
+						<div class="header-card-actions">
+							<IconButton
+								design
+								icon={searchIcon}
+								ariaLabel={t('common.search')}
+								onclick={handleOpenSearch}
+							/>
+							<IconButton
+								design
+								icon={reloadIcon}
+								ariaLabel={t('common.reload')}
+								onclick={refresh}
+							/>
+
+							{#if !selectMode}
 								<IconButton
-									icon={searchIcon}
-									ariaLabel={t('common.search')}
-									onclick={handleOpenSearch}
-								/>
-								<IconButton
-									icon={reloadIcon}
-									ariaLabel={t('common.reload')}
-									onclick={refresh}
-								/>
-								<IconButton
-									ariaLabel={t('rules.presets') || 'Пресеты'}
-									title={t('rules.presets') || 'Пресеты'}
-									onclick={() => (showPresetsModal = true)}
-								>
-									<MaterialIcon name="tune" size={18} />
-								</IconButton>
-								<IconButton
+									design
 									icon={pencilIcon}
 									ariaLabel={t('rules.selectMode')}
-									onclick={() => (selectMode = true)}
+									onclick={() => {
+										menu = false;
+										selectMode = true;
+									}}
 								/>
-							</div>
-						</div>
-
-						<!-- Search bar inside header pill (identical to ServersView) -->
-						<div
-							class="header-search"
-							class:search-open={searching && !searchClosing}
-							class:search-closing={searchClosing}
-						>
-							<img src={searchIcon} alt="" class="search-header-icon" />
-							<input
-								bind:this={searchInputEl}
-								type="text"
-								class="search-header-input"
-								placeholder={t('rules.searchPlaceholder') || 'Поиск правил...'}
-								bind:value={query}
-								autocomplete="off"
-								spellcheck="false"
-							/>
-							<button
-								type="button"
-								class="close-search-btn"
-								onclick={handleCloseSearch}
-								aria-label={t('common.close')}
-							>
-								<img src={crossIcon} alt="" class="close-icon" />
-							</button>
+								<IconButton
+									design
+									icon={menuIcon}
+									ariaLabel={t('common.menu')}
+									expanded={menu}
+									onclick={() => (menu = !menu)}
+								/>
+							{/if}
 						</div>
 					</div>
 
+					<!-- Search bar inside header pill (identical to ServersView) -->
+					<div
+						class="header-search"
+						class:search-open={searching && !searchClosing}
+						class:search-closing={searchClosing}
+					>
+						<img src={searchIcon} alt="" class="search-header-icon" />
+						<input
+							bind:this={searchInputEl}
+							type="text"
+							class="search-header-input"
+							placeholder={t('rules.searchPlaceholder') || 'Поиск правил...'}
+							bind:value={query}
+							autocomplete="off"
+							spellcheck="false"
+						/>
+						<button
+							type="button"
+							class="close-search-btn"
+							onclick={handleCloseSearch}
+							aria-label={t('common.close')}
+						>
+							<img src={crossIcon} alt="" class="close-icon" />
+						</button>
+					</div>
+				</div>
+
+				{#if !selectMode}
 					<IconButton
+						design
 						icon={addIcon}
 						ariaLabel={t('common.add')}
 						size="lg"
@@ -532,24 +544,26 @@
 						disabled={!$catalogStore.servers.length}
 						onclick={add}
 					/>
-				</div>
+				{/if}
 			</div>
-		{/if}
+		</div>
 		{#if error}<p role="alert">{error}</p>{/if}
 		<div class="rules-list">
 			{#each filtered as rule (rule.id)}
 				{@const server = serversById.get(rule.serverId)}
 				{@const isDirect = rule.serverId === 'direct'}
 				{@const isBlock = rule.serverId === 'block'}
+				{@const ruleSubscription = subscriptionsById.get(rule.serverId)}
 				{@const isSub =
-					rule.serverId === 'subscription' ||
-					(activeSub && rule.serverId === activeSub.id)}
+					rule.serverId === 'subscription' || Boolean(ruleSubscription)}
 				{@const serverName = isDirect
 					? t('rules.direct')
 					: isBlock
 						? t('rules.block') || 'Блокировать'
 						: isSub
-							? (activeSub?.name ?? t('rules.subscriptionServer'))
+							? (ruleSubscription?.name ??
+								activeSub?.name ??
+								t('rules.subscriptionServer'))
 							: server
 								? serverDisplayName(server)
 								: '—'}
@@ -557,14 +571,17 @@
 					rule.matcher ?? (rule.isDomain ? 'domain' : 'application')}
 				{@const isGeo = matcher === 'geosite' || matcher === 'geoip'}
 				{@const ruleIcon = getRuleIcon(rule)}
-				<article class="rule-row">
+				<article
+					class="rule-row"
+					class:application-rule={matcher === 'application'}
+				>
 					<div class="rule-left">
 						<div class="app-icon-wrapper" class:domain-icon={!ruleIcon}>
 							{#if ruleIcon}
 								<img class="app-icon" src={ruleIcon} alt="" />
 							{:else if matcher === 'geosite'}
 								<span class="globe-text" aria-hidden="true">
-									<MaterialIcon name="travel_explore" size={20} />
+									<MaterialIcon name="travel_explore" size={24} />
 								</span>
 							{:else if matcher === 'geoip'}
 								<span class="globe-text" aria-hidden="true">
@@ -572,12 +589,7 @@
 								</span>
 							{:else}
 								<span class="globe-text" aria-hidden="true">
-									<MaterialIcon
-										name={rule.isDomain || matcher === 'domain'
-											? 'public'
-											: 'description'}
-										size={20}
-									/>
+									<MaterialIcon name="description" size={20} />
 								</span>
 							{/if}
 						</div>
@@ -589,8 +601,13 @@
 							}}
 							aria-label={t('rules.edit', { name: rule.name })}
 						>
-							<span class="rule-name">{formatRuleDisplayName(rule.name)}</span>
-							<span class="rule-details">
+							<span class="rule-name" title={formatRuleDisplayName(rule.name)}>
+								{formatRuleDisplayName(rule.name)}
+							</span>
+							<span
+								class="rule-details"
+								class:domain-details={matcher === 'domain'}
+							>
 								{isGeo
 									? matcher === 'geosite'
 										? 'GeoSite'
@@ -602,11 +619,17 @@
 					<div class="rule-right">
 						<button
 							class="server-pill"
+							title={serverName}
 							onclick={() => {
+								pickerSearchSignal = 0;
 								selectingRule = rule;
 								pendingServerId = rule.serverId;
 							}}
-							aria-label={rule.name + ': ' + t('servers.title')}
+							aria-label={rule.name +
+								': ' +
+								t('servers.title') +
+								' — ' +
+								serverName}
 						>
 							{#if isDirect}
 								<span class="flag-sm">
@@ -618,14 +641,16 @@
 								</span>
 							{:else if isSub}
 								<span class="flag-sm">
-									<MaterialIcon name="sync_alt" size={16} />
+									<img src={tunIcon} alt="" width="24" height="24" />
 								</span>
 							{:else if server}
 								<span class="flag-sm">
-									<CountryFlag countryCode={server.countryCode} size={20} />
+									<CountryFlag countryCode={server.countryCode} size={24} />
 								</span>
 							{/if}
-							<span class="server-pill-name">{serverName}</span>
+							<span class="server-pill-name">
+								{isSub && matcher !== 'application' ? 'Tun' : serverName}
+							</span>
 						</button>
 						{#if selectMode}
 							<RoundCheckbox
@@ -640,6 +665,7 @@
 							<ToggleSwitch
 								checked={rule.enabled}
 								mode="switch"
+								appearance={matcher === 'application' ? 'pill' : 'dot'}
 								ariaLabel={t('rules.toggle', { name: rule.name })}
 								onchange={() => toggle(rule)}
 							/>
@@ -649,28 +675,26 @@
 			{:else}
 				<div class="empty-rules-container">
 					<p class="rules-empty">{t('rules.empty')}</p>
-					<button
-						type="button"
-						class="btn-choose-preset"
-						onclick={() => (showPresetsModal = true)}
-					>
-						<MaterialIcon name="tune" size={16} />
-						<span>{t('rules.presets') || 'Пресеты'}</span>
-					</button>
 				</div>
 			{/each}
 		</div>
 		{#if selectMode}
 			<div class="select-bar">
 				<IconButton
-					icon={trashIcon}
-					ariaLabel={t('rules.deleteSelected')}
+					design
+					icon={selected.length ? trashIcon : searchIcon}
+					ariaLabel={selected.length
+						? t('rules.deleteSelected')
+						: t('common.search')}
 					size="lg"
-					variant="danger"
-					disabled={!selected.length}
-					onclick={() => (deleting = true)}
+					variant="surface"
+					onclick={() => {
+						if (selected.length) deleting = true;
+						else handleOpenSearch();
+					}}
 				/>
 				<IconButton
+					design
 					icon={checkIcon}
 					ariaLabel={t('common.close')}
 					size="lg"
@@ -681,6 +705,29 @@
 					}}
 				/>
 			</div>
+		{/if}
+		{#if menu}
+			<PopupMenu top="70px" right="58px">
+				<button
+					class="rules-menu-item"
+					type="button"
+					onclick={() => {
+						menu = false;
+						showPresetsModal = true;
+					}}
+				>
+					<MaterialIcon name="tune" size={18} />{t('rules.presets')}
+				</button>
+				<MenuItem
+					icon={checkIcon}
+					label={t('rules.selectAll')}
+					onclick={() => {
+						menu = false;
+						selectMode = true;
+						selected = filtered.map((rule) => rule.id);
+					}}
+				/>
+			</PopupMenu>
 		{/if}
 	</section>
 {/if}
@@ -728,29 +775,7 @@
 		align-items: center;
 		justify-content: center;
 		gap: 12px;
-		padding: 40px 16px;
-	}
-
-	.btn-choose-preset {
-		display: inline-flex;
-		align-items: center;
-		gap: 8px;
-		background: rgba(255, 255, 255, 0.08);
-		border: 1px solid rgba(255, 255, 255, 0.14);
-		border-radius: 16px;
-		padding: 8px 16px;
-		color: #ffffff;
-		font-size: 13px;
-		font-weight: 500;
-		cursor: pointer;
-		transition:
-			background 180ms ease,
-			border-color 180ms ease;
-	}
-
-	.btn-choose-preset:hover {
-		background: rgba(255, 255, 255, 0.16);
-		border-color: rgba(255, 255, 255, 0.25);
+		padding: 6px 16px 0;
 	}
 
 	.rules-view {
@@ -758,13 +783,15 @@
 		flex-direction: column;
 		width: 100%;
 		flex: 1;
-		gap: 10px;
+		gap: 12px;
 		padding-top: 0;
 		position: relative;
 		min-height: 0;
 		height: 100%;
 	}
 	.server-picker-view {
+		position: relative;
+		height: 100%;
 		display: flex;
 		flex-direction: column;
 		width: 100%;
@@ -773,16 +800,17 @@
 		overflow: hidden;
 	}
 	.picker-bar {
+		position: absolute;
+		bottom: var(--nav-bottom);
+		left: 16px;
+		right: 16px;
 		display: flex;
-		width: 100%;
+		width: auto;
 		justify-content: space-between;
 		align-items: center;
 		flex-shrink: 0;
-		padding: 0 4px;
-		margin-bottom: 33px;
-	}
-	:global(.back-round .btn-icon) {
-		transform: rotate(90deg) !important;
+		padding: 0;
+		margin: 0;
 	}
 	.header-card-wrapper {
 		position: relative;
@@ -795,12 +823,12 @@
 		gap: 8px;
 		width: 100%;
 		box-sizing: border-box;
-		padding: 2px 2px 0 0;
+		padding: 0;
 	}
 	.header-pill {
 		position: relative;
-		height: 62px;
-		background: #00000038;
+		height: var(--design-header-height);
+		background: var(--design-panel);
 		border-radius: 124px;
 		-webkit-backdrop-filter: blur(14px);
 		backdrop-filter: blur(14px);
@@ -808,7 +836,7 @@
 		flex: 1;
 		min-width: 0;
 		overflow: hidden;
-		border: 1px solid transparent;
+		border: 0;
 		transition: border-color 180ms ease;
 	}
 
@@ -819,7 +847,7 @@
 	.header-normal {
 		width: 100%;
 		height: 100%;
-		padding: 0 12px 0 24px;
+		padding: 0 20px 0 23px;
 		display: flex;
 		justify-content: space-between;
 		align-items: center;
@@ -837,11 +865,12 @@
 	}
 
 	.header-card-title {
+		font-family: 'Satoshi', var(--font-family-base);
 		display: flex;
 		align-items: center;
 		gap: 10px;
 		min-width: 0;
-		font-size: 15px;
+		font-size: 16px;
 		font-weight: 500;
 		letter-spacing: -0.2px;
 	}
@@ -855,7 +884,7 @@
 	.header-card-actions {
 		display: flex;
 		align-items: center;
-		gap: 4px;
+		gap: 6px;
 		flex-shrink: 0;
 	}
 
@@ -922,8 +951,8 @@
 	}
 
 	.close-search-btn {
-		width: 36px;
-		height: 36px;
+		width: 32px;
+		height: 32px;
 		border-radius: 50%;
 		background: #ffffff;
 		border: none;
@@ -955,41 +984,6 @@
 		flex-shrink: 0;
 		transform-origin: 80% 50% !important;
 	}
-	.selection-header {
-		height: 40px;
-		min-height: 40px;
-		padding: 0 4px 0 12px;
-		display: flex;
-		align-items: center;
-		justify-content: space-between;
-	}
-	.selection-header + .rules-list {
-		margin-top: 6px;
-	}
-	.select-all {
-		min-height: 44px;
-		display: flex;
-		align-items: center;
-		gap: 12px;
-		padding: 0;
-		border: 0;
-		background: transparent;
-		font-size: 12px;
-	}
-	.sub-info {
-		display: flex;
-		align-items: center;
-		gap: 10px;
-		min-width: 0;
-	}
-	.sub-title {
-		font-size: 15px;
-		font-weight: 500;
-		letter-spacing: -0.2px;
-		white-space: nowrap;
-		overflow: hidden;
-		text-overflow: ellipsis;
-	}
 	.rules-list {
 		display: flex;
 		flex-direction: column;
@@ -1006,7 +1000,7 @@
 		display: none;
 	}
 	.rules-empty {
-		margin: 14px auto 0;
+		margin: 0 auto;
 		color: rgba(255, 255, 255, 0.25);
 		font-family: var(--font-family-base);
 		font-size: 14px;
@@ -1016,9 +1010,11 @@
 		text-align: center;
 	}
 	.rule-row {
-		min-height: 60px;
+		min-height: var(--design-row-height);
+		height: var(--design-row-height);
+		flex-shrink: 0;
 		border-radius: 124px;
-		padding: 0 14px 0 10px;
+		padding: 10px 12px;
 		display: flex;
 		justify-content: space-between;
 		align-items: center;
@@ -1031,12 +1027,12 @@
 	.rule-left {
 		display: flex;
 		align-items: center;
-		gap: 12px;
+		gap: 6px;
 		min-width: 0;
 	}
 	.app-icon-wrapper {
-		width: 36px;
-		height: 36px;
+		width: 32px;
+		height: 32px;
 		border-radius: 10px;
 		overflow: hidden;
 		flex-shrink: 0;
@@ -1045,12 +1041,12 @@
 		justify-content: center;
 	}
 	.domain-icon {
-		background: #ffffff1a;
+		background: #767676;
 		border-radius: 50%;
 	}
 	.app-icon {
-		width: 36px;
-		height: 36px;
+		width: 32px;
+		height: 32px;
 		object-fit: cover;
 		border-radius: 10px;
 	}
@@ -1067,23 +1063,30 @@
 		padding: 0;
 		text-align: left;
 		justify-content: center;
+		line-height: 14px;
 	}
 	.rule-name {
 		font-size: 14px;
-		font-weight: 500;
+		line-height: 20px;
+		font-weight: 400;
 		max-width: 100%;
 		overflow: hidden;
 		text-overflow: ellipsis;
 		white-space: nowrap;
 	}
 	.rule-details {
-		font-size: 12px;
+		font-size: 10px;
+		line-height: 14px;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+		letter-spacing: 0.5px;
 		color: #ffffff80;
 	}
 	.rule-right {
 		display: flex;
 		align-items: center;
-		gap: 10px;
+		gap: 16px;
 		flex-shrink: 0;
 	}
 	.server-pill {
@@ -1097,14 +1100,14 @@
 		outline: none;
 		box-shadow: none;
 		border-radius: 124px;
-		padding: 4px 12px 4px 6px;
+		padding: 4px 12px 4px 4px;
 	}
 	.server-pill:hover {
 		background: #00000073;
 	}
 	.flag-sm {
-		width: 20px;
-		height: 20px;
+		width: 24px;
+		height: 24px;
 		border-radius: 50%;
 		overflow: hidden;
 		display: flex;
@@ -1112,8 +1115,14 @@
 		justify-content: center;
 		flex-shrink: 0;
 	}
+	.flag-sm img {
+		display: block;
+		filter: brightness(0) invert(1);
+		opacity: 0.75;
+	}
 	.server-pill-name {
 		font-size: 12px;
+		line-height: 20px;
 		font-weight: 500;
 		color: #ffffffe6;
 		white-space: nowrap;
@@ -1122,12 +1131,60 @@
 		text-overflow: ellipsis;
 	}
 	.select-bar {
+		position: absolute;
+		bottom: var(--nav-bottom);
+		left: 16px;
+		right: 16px;
+		z-index: 20;
 		display: flex;
 		justify-content: space-between;
 		align-items: center;
-		width: 100%;
-		padding: 4px 0 0;
-		margin-bottom: 33px;
+		width: auto;
+		padding: 0;
+		margin: 0;
 		flex-shrink: 0;
+	}
+
+	.domain-details {
+		display: none;
+	}
+	.rule-left {
+		flex: 1;
+	}
+	.rules-menu-item {
+		display: flex;
+		align-items: center;
+		gap: 12px;
+		width: 100%;
+		min-height: 40px;
+		border: 0;
+		border-radius: 14px;
+		background: #ffffff0a;
+		padding: 0 12px;
+		font-size: 13px;
+	}
+	.rules-menu-item:hover {
+		background: #ffffff20;
+	}
+	.selection .header-pill {
+		width: 100%;
+	}
+	.empty .title-text {
+		font-family: 'Satoshi', var(--font-family-base);
+	}
+	@media (max-width: 350px) {
+		.header-normal {
+			padding-left: 16px;
+			padding-right: 12px;
+		}
+		.header-card-actions {
+			gap: 2px;
+		}
+		.rule-right {
+			gap: 6px;
+		}
+		.server-pill-name {
+			max-width: 58px;
+		}
 	}
 </style>

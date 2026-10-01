@@ -6,6 +6,7 @@ mod domain;
 mod platform;
 mod runtime;
 mod services;
+mod startup;
 mod storage;
 mod subscription;
 #[cfg(test)]
@@ -13,6 +14,32 @@ mod tests;
 mod xray;
 use commands::vpn;
 use tauri::{Emitter, Manager};
+pub fn run_startup_check_if_requested() -> bool {
+    if std::env::args().nth(1).as_deref() != Some("--lumen-startup-check") {
+        return false;
+    }
+    let context = tauri::generate_context!();
+    let result = startup::verify_embedded_frontend(&context)
+        .and_then(|_| startup::preflight())
+        .and_then(|_| {
+            runtime::resolve()
+                .map(|_| ())
+                .map_err(|error| startup::classify(&error.to_string()))
+        });
+    match result {
+        Ok(()) => {
+            startup::record("STARTUP_CHECK_OK");
+            println!("STARTUP_CHECK_OK (embedded frontend, WebView2 and runtime discovery)");
+        }
+        Err(failure) => {
+            startup::record(failure.code);
+            eprintln!("{}: {}", failure.code, failure.advice);
+            std::process::exit(1);
+        }
+    }
+    true
+}
+
 pub fn run_helper_if_requested() -> bool {
     let args: Vec<_> = std::env::args().collect();
     #[cfg(windows)]
@@ -78,7 +105,42 @@ pub fn run_smoke_if_requested() -> bool {
 }
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    startup::install_panic_handler();
+    let mut context = tauri::generate_context!();
+    if !cfg!(dev) {
+        if let Err(failure) = startup::verify_embedded_frontend(&context) {
+            startup::report(failure);
+            std::process::exit(1);
+        }
+    }
+    if let Err(failure) = startup::preflight() {
+        startup::report(failure);
+        std::process::exit(1);
+    }
+    // Exercise the shipped UI with a fresh repository, without auto-connect or prewarm.
+    // This is an explicit developer check; ordinary Lumen.exe launches are unchanged.
+    let smoke_data = if std::env::args().any(|arg| arg == "--lumen-ui-smoke") {
+        match tempfile::tempdir() {
+            Ok(directory) => Some(directory),
+            Err(_) => {
+                startup::report(startup::classify("STORAGE_FAILED"));
+                std::process::exit(1);
+            }
+        }
+    } else {
+        None
+    };
+    let smoke_path = smoke_data.as_ref().map(|dir| dir.path().to_path_buf());
+    let ui_smoke = smoke_path.is_some();
+    if ui_smoke {
+        context.config_mut().identifier = "app.lumen.desktop.ui-smoke".into();
+        for window in &mut context.config_mut().app.windows {
+            window.title = "Lumen — проверка запуска".into();
+        }
+        startup::record("ISOLATED_UI_SMOKE");
+    }
     let application = tauri::Builder::default()
+        .manage(startup::FrontendReadiness::default())
         .plugin(tauri_plugin_single_instance::init(|app, args, _| {
             for arg in args {
                 commands::tools::queue_import_link(app, &arg);
@@ -101,6 +163,7 @@ pub fn run() {
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_notification::init())
         .invoke_handler(tauri::generate_handler![
+            startup::frontend_ready,
             commands::tools::export_backup,
             commands::tools::take_import_link,
             commands::tools::preview_backup,
@@ -138,18 +201,25 @@ pub fn run() {
             commands::geo::get_geo_database_info,
             commands::geo::update_geo_databases
         ])
-        .setup(|app| {
-            let resources = if cfg!(debug_assertions) {
-                std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("resources/core")
-            } else {
-                app.path().resource_dir()?.join("resources/core")
-            };
+        .setup(move |app| {
+            let resources = runtime::resolve_from(Some(&app.path().resource_dir()?))?;
+            startup::record("RUNTIME_RESOLVED");
             let data = app.path().app_local_data_dir()?;
+            let data = smoke_path.clone().unwrap_or(data);
             #[cfg(debug_assertions)]
             let data = std::env::var_os("LUMEN_TEST_DATA_DIR")
                 .map(std::path::PathBuf::from)
                 .unwrap_or(data);
             let state = app::state::AppState::open(data, resources)?;
+            if ui_smoke {
+                state
+                    .repository
+                    .try_write()
+                    .expect("fresh smoke repository")
+                    .settings
+                    .close_to_tray = false;
+            }
+            startup::record("APPLICATION_DATA_READY");
             let active = crate::xray::updater::current(&state.data.join("core"));
             if active != crate::xray::core::VERSION {
                 let resolved = tauri::async_runtime::block_on(async {
@@ -167,29 +237,31 @@ pub fn run() {
                     log::warn!("Updated core unavailable; using verified bundled fallback");
                 }
             }
-            services::vpn_service::monitor(state.clone(), app.handle().clone());
-            let startup = state.clone();
-            let handle = app.handle().clone();
-            tauri::async_runtime::spawn(async move {
-                let id = {
-                    let repo = startup.repository.read().await;
-                    if repo.settings.auto_connect {
-                        repo.selected_server_id.clone()
+            if !ui_smoke {
+                services::vpn_service::monitor(state.clone(), app.handle().clone());
+                let startup = state.clone();
+                let handle = app.handle().clone();
+                tauri::async_runtime::spawn(async move {
+                    let id = {
+                        let repo = startup.repository.read().await;
+                        if repo.settings.auto_connect {
+                            repo.selected_server_id.clone()
+                        } else {
+                            None
+                        }
+                    };
+                    if let Some(id) = id {
+                        if services::vpn_service::connect(&startup, &handle, id)
+                            .await
+                            .is_err()
+                        {
+                            log::warn!("Automatic connection failed");
+                        }
                     } else {
-                        None
+                        services::vpn_service::prewarm(&startup).await;
                     }
-                };
-                if let Some(id) = id {
-                    if services::vpn_service::connect(&startup, &handle, id)
-                        .await
-                        .is_err()
-                    {
-                        log::warn!("Automatic connection failed");
-                    }
-                } else {
-                    services::vpn_service::prewarm(&startup).await;
-                }
-            });
+                });
+            }
             let initial_menu = create_tray_menu(app.handle(), &state)?;
             let mut tray_builder = tauri::tray::TrayIconBuilder::with_id("main-tray")
                 .menu(&initial_menu)
@@ -277,14 +349,20 @@ pub fn run() {
                 }
             }
         })
-        .build(tauri::generate_context!());
+        .build(context);
     let application = match application {
         Ok(app) => app,
         Err(error) => {
-            eprintln!("Application initialization failed: {error}");
+            let failure = match &error {
+                tauri::Error::Runtime(_) => startup::classify("WEBVIEW_INIT_FAILED"),
+                _ => startup::classify(&error.to_string()),
+            };
+            startup::report(failure);
             std::process::exit(1);
         }
     };
+    startup::record("APPLICATION_INITIALIZED");
+    startup::watch_frontend(application.handle().clone());
     // 0 = idle, 1 = cleanup in progress, 2 = safe to exit.
     let exiting = std::sync::Arc::new(std::sync::atomic::AtomicU8::new(0));
     application.run(move |app, event| {
@@ -465,6 +543,23 @@ pub fn update_tray_menu(app: &tauri::AppHandle, state: &app::state::AppState) {
     }
 }
 
+/// Tray actions have no command result; publish the catalog the window would get.
+async fn emit_catalog(
+    app: &tauri::AppHandle,
+    state: &app::state::AppState,
+    result: domain::errors::Result<serde_json::Value>,
+) {
+    let catalog = match result {
+        Ok(catalog) => catalog,
+        // A failed change may have been rolled back: show what is persisted.
+        Err(_) => services::catalog_service::snapshot(
+            &*state.repository.read().await,
+            &*state.latencies.read().await,
+        ),
+    };
+    let _ = tauri::Emitter::emit(app, "catalog://changed", catalog);
+}
+
 async fn handle_tray_menu_event(
     app: &tauri::AppHandle,
     state: &std::sync::Arc<app::state::AppState>,
@@ -499,24 +594,16 @@ async fn handle_tray_menu_event(
             }
             update_tray_menu(app, state);
         }
-        "mode:global" => {
-            let _ = services::catalog_service::mutate(
+        "mode:global" | "mode:rules" => {
+            // Same path as the window: apply to the live connection and notify the UI.
+            let mode = id.trim_start_matches("mode:").to_owned();
+            let result = commands::catalog::apply_mutation(
                 state,
-                services::catalog_service::Mutation::SetRoutingMode {
-                    mode: "global".into(),
-                },
+                app,
+                services::catalog_service::Mutation::SetRoutingMode { mode },
             )
             .await;
-            update_tray_menu(app, state);
-        }
-        "mode:rules" => {
-            let _ = services::catalog_service::mutate(
-                state,
-                services::catalog_service::Mutation::SetRoutingMode {
-                    mode: "rules".into(),
-                },
-            )
-            .await;
+            emit_catalog(app, state, result).await;
             update_tray_menu(app, state);
         }
         "quit" => {
@@ -524,16 +611,20 @@ async fn handle_tray_menu_event(
         }
         srv if srv.starts_with("srv:") => {
             let srv_id = &srv[4..];
-            let _ = services::catalog_service::mutate(
-                state,
-                services::catalog_service::Mutation::SelectServer {
-                    id: srv_id.to_string(),
-                },
-            )
-            .await;
             let status = state.snapshot.read().await.status.clone();
             if status == "connected" {
+                // A successful switch persists the selection and notifies the UI.
                 let _ = services::vpn_service::connect_exact(state, app, srv_id.to_string()).await;
+            } else {
+                let result = commands::catalog::apply_mutation(
+                    state,
+                    app,
+                    services::catalog_service::Mutation::SelectServer {
+                        id: srv_id.to_string(),
+                    },
+                )
+                .await;
+                emit_catalog(app, state, result).await;
             }
             update_tray_menu(app, state);
         }

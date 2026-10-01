@@ -24,6 +24,7 @@ struct Journal {
 }
 pub struct SystemProxy {
     journal: PathBuf,
+    port: u16,
 }
 fn error() -> BackendError {
     BackendError::new(
@@ -155,7 +156,7 @@ impl SystemProxy {
         .map_err(|_| error())?;
         crate::xray::updater::atomic_write(&journal, &OsSecretStore.protect(&data)?)
             .map_err(|_| error())?;
-        let this = Self { journal };
+        let this = Self { journal, port };
         let apply = (|| {
             let journal = this.read()?;
             for (name, value) in &journal.installed {
@@ -168,6 +169,10 @@ impl SystemProxy {
             return Err(e);
         }
         Ok(this)
+    }
+    /// Local HTTP listener the installed Windows proxy points to.
+    pub fn port(&self) -> u16 {
+        self.port
     }
     fn read(&self) -> Result<Journal> {
         use crate::storage::secure::{OsSecretStore, SecretStore};
@@ -197,6 +202,7 @@ impl SystemProxy {
     pub fn recover(directory: &Path) -> Result<()> {
         let this = Self {
             journal: directory.join("network-state.json"),
+            port: 0,
         };
         if this.journal.exists() {
             this.restore()?;

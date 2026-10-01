@@ -3,6 +3,18 @@ import type { VpnService } from '../services/contracts';
 import type { VpnConnectionState, VpnConnectionInfo } from '../types/models';
 import { errorCode, withTimeout, type ErrorCode } from '../services/errors';
 
+const pending = ['connecting', 'disconnecting', 'reconnecting'];
+
+/** A superseded request (for example, cancelled by Disconnect) is not a failure. */
+function cancelled(cause: unknown) {
+	return (
+		typeof cause === 'object' &&
+		cause !== null &&
+		'code' in cause &&
+		cause.code === 'CANCELLED'
+	);
+}
+
 export interface ConnectionSnapshot {
 	status: VpnConnectionState;
 	info: VpnConnectionInfo | null;
@@ -57,7 +69,7 @@ export class ConnectionController {
 
 	private async reconcileAfterError(cause: unknown) {
 		// An IPC timeout is an unknown outcome: reconcile before enabling another connect.
-		const error = errorCode(cause);
+		const error = cancelled(cause) ? null : errorCode(cause);
 		try {
 			const { status, info } = await this.readConnection();
 			this.update({ status, info, error });
@@ -77,9 +89,7 @@ export class ConnectionController {
 					this.update({
 						status: snapshot.status,
 						info: snapshot.info,
-						busy: ['connecting', 'disconnecting', 'reconnecting'].includes(
-							snapshot.status,
-						),
+						busy: pending.includes(snapshot.status),
 						error: snapshot.error ? errorCode(snapshot.error) : null,
 					});
 				});
@@ -92,9 +102,7 @@ export class ConnectionController {
 			this.update({ status: 'error', error: errorCode(e) });
 		} finally {
 			this.update({
-				busy: ['connecting', 'disconnecting', 'reconnecting'].includes(
-					this.current.status,
-				),
+				busy: pending.includes(this.current.status),
 			});
 		}
 	}
@@ -129,9 +137,7 @@ export class ConnectionController {
 			await this.reconcileAfterError(e);
 		} finally {
 			this.update({
-				busy: ['connecting', 'disconnecting', 'reconnecting'].includes(
-					this.current.status,
-				),
+				busy: pending.includes(this.current.status),
 			});
 		}
 	}
@@ -176,9 +182,7 @@ export class ConnectionController {
 			await this.reconcileAfterError(e);
 		} finally {
 			this.update({
-				busy: ['connecting', 'disconnecting', 'reconnecting'].includes(
-					this.current.status,
-				),
+				busy: pending.includes(this.current.status),
 			});
 		}
 	}

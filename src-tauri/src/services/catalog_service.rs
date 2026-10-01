@@ -353,12 +353,33 @@ pub struct ImportResult {
     pub catalog: Value,
     pub diagnostics: Vec<crate::subscription::parser::ImportDiagnostic>,
 }
+/// A downloaded and parsed subscription that has not been applied yet.
+pub struct PreparedImport {
+    input: String,
+    id: String,
+    refresh: bool,
+    resolved_name: String,
+    user_info: Option<crate::subscription::fetcher::SubscriptionUserInfo>,
+    parsed: crate::subscription::parser::ParsedSubscription,
+}
+#[cfg(test)]
 pub async fn import(
     state: &AppState,
     input: String,
     name: Option<String>,
     refresh_id: Option<String>,
 ) -> Result<ImportResult> {
+    let prepared = prepare_import(state, input, name, refresh_id).await?;
+    apply_import(state, prepared).await
+}
+/// Network and parsing only: callers do not hold the maintenance transaction
+/// while a subscription downloads, so connecting is never blocked by it.
+pub async fn prepare_import(
+    state: &AppState,
+    input: String,
+    name: Option<String>,
+    refresh_id: Option<String>,
+) -> Result<PreparedImport> {
     if name.as_ref().is_some_and(|name| name.len() > 320) {
         return Err(BackendError::invalid());
     }
@@ -410,10 +431,9 @@ pub async fn import(
     let id = refresh_id
         .clone()
         .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
-    let mut parsed =
-        crate::subscription::parser::parse(&fetched.body, &id).inspect_err(|error| {
-            log::warn!("Subscription {operation} parsing failed: {}", error.code);
-        })?;
+    let parsed = crate::subscription::parser::parse(&fetched.body, &id).inspect_err(|error| {
+        log::warn!("Subscription {operation} parsing failed: {}", error.code);
+    })?;
     let mut skipped = std::collections::BTreeMap::new();
     for diagnostic in &parsed.diagnostics {
         *skipped.entry(diagnostic.code).or_insert(0usize) += 1;
@@ -423,9 +443,27 @@ pub async fn import(
         parsed.nodes.len(),
         parsed.diagnostics.len()
     );
+    Ok(PreparedImport {
+        input,
+        id,
+        refresh: refresh_id.is_some(),
+        resolved_name,
+        user_info: fetched.user_info,
+        parsed,
+    })
+}
+pub async fn apply_import(state: &AppState, prepared: PreparedImport) -> Result<ImportResult> {
+    let PreparedImport {
+        input,
+        id,
+        refresh,
+        resolved_name,
+        user_info,
+        mut parsed,
+    } = prepared;
     let _guard = state.mutations.lock().await;
     let mut next = state.repository.read().await.clone();
-    if refresh_id.is_some() && !next.sources.contains_key(&id) {
+    if refresh && !next.sources.contains_key(&id) {
         return Err(BackendError::invalid());
     }
     let change = reconcile_nodes(
@@ -440,14 +478,14 @@ pub async fn import(
     next.nodes.extend(parsed.nodes);
     if let Some(sub) = next.subscriptions.iter_mut().find(|s| s.id == id) {
         sub.updated_at = now();
-        if let Some(info) = fetched.user_info {
+        if let Some(info) = user_info {
             sub.upload = info.upload;
             sub.download = info.download;
             sub.total = info.total;
             sub.expire = info.expire;
         }
     } else {
-        let info = fetched.user_info.unwrap_or_default();
+        let info = user_info.unwrap_or_default();
         next.subscriptions.push(Subscription {
             id: id.clone(),
             name: resolved_name,
@@ -459,7 +497,7 @@ pub async fn import(
         });
     }
     next.sources.insert(id.clone(), input);
-    if refresh_id.is_none() {
+    if !refresh {
         next.selected_server_id = next
             .nodes
             .iter()

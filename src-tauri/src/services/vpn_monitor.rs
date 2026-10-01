@@ -65,7 +65,10 @@ pub fn monitor(state: Arc<AppState>, app: tauri::AppHandle) {
                             generation = active_generation; unhealthy = 0; network_dirty = false; physical_changed = false; last_health = Instant::now();
                             #[cfg(windows)] { physical = crate::platform::network_watch::physical_fingerprint(); }
                         }
-                        if network_dirty || last_health.elapsed() >= Duration::from_secs(30) {
+                        // Recheck sooner after a failure; one failed probe right after a
+                        // network event or resume is not an outage.
+                        let interval = Duration::from_secs(if unhealthy > 0 { 5 } else { 30 });
+                        if network_dirty || last_health.elapsed() >= interval {
                             last_health = Instant::now();
                             {
                                 let settings = state.repository.read().await.settings.clone();
@@ -77,7 +80,7 @@ pub fn monitor(state: Arc<AppState>, app: tauri::AppHandle) {
                                 let outcome = super::health::verify(proxy_port, is_tun).await;
                                 if outcome.is_ok() { unhealthy = 0; }
                                 else { unhealthy = unhealthy.saturating_add(1); }
-                                let failed = unhealthy >= 3 || (network_dirty && outcome.is_err()) || (physical_changed && settings.auto_reconnect);
+                                let failed = unhealthy >= 3 || (physical_changed && settings.auto_reconnect);
                                 network_dirty = false;
                                 if failed {
                                     let Ok(operation) = state.connection_operation.try_acquire() else { continue };

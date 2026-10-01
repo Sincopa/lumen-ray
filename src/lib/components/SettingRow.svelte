@@ -1,6 +1,6 @@
 <script lang="ts">
 	import type { Snippet } from 'svelte';
-	import chevronIcon from '../../assets/chevron.svg';
+	import chevronIcon from '../../assets/chevron-down.svg';
 
 	interface Props {
 		label: string;

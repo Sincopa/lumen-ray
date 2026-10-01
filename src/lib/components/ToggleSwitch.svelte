@@ -2,6 +2,7 @@
 	interface Props {
 		checked: boolean;
 		mode?: 'switch' | 'checkbox';
+		appearance?: 'default' | 'pill' | 'dot';
 		disabled?: boolean;
 		ariaLabel?: string;
 		class?: string;
@@ -11,6 +12,7 @@
 	let {
 		checked = $bindable(false),
 		mode = 'switch',
+		appearance = 'default',
 		disabled = false,
 		ariaLabel,
 		class: className = '',
@@ -28,6 +30,8 @@
 	<button
 		type="button"
 		class="switch-btn {className}"
+		class:design-pill={appearance === 'pill'}
+		class:design-dot={appearance === 'dot'}
 		class:enabled={checked}
 		role="switch"
 		aria-checked={checked}
@@ -123,5 +127,43 @@
 	input:disabled + .slider {
 		opacity: 0.6;
 		cursor: not-allowed;
+	}
+	.design-pill {
+		width: 60px;
+		height: 28px;
+	}
+	.design-pill .slider {
+		background: var(--design-panel);
+	}
+	.design-pill .slider::before {
+		width: 24px;
+		height: 24px;
+		left: 2px;
+		bottom: 2px;
+		background: #ffffff73;
+		box-shadow: none;
+	}
+	.design-pill .slider.checked::before {
+		transform: translateX(32px);
+		background: #fff;
+	}
+	.design-dot {
+		width: 28px;
+		height: 28px;
+	}
+	.design-dot .slider {
+		background: var(--design-glass);
+	}
+	.design-dot .slider::before {
+		width: 24px;
+		height: 24px;
+		left: 2px;
+		bottom: 2px;
+		background: transparent;
+		box-shadow: none;
+	}
+	.design-dot .slider.checked::before {
+		transform: none;
+		background: #fff;
 	}
 </style>

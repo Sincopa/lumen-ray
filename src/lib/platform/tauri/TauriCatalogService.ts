@@ -7,9 +7,12 @@ import {
 	type Rule,
 } from '../../services/catalog';
 
+type Optimistic = (catalog: Catalog) => Catalog;
+
 export class TauriCatalogService {
 	private readonly probes = new LatencyProbeTracker();
-	private current: Catalog = {
+	/** Last catalog confirmed by the backend. */
+	private confirmed: Catalog = {
 		version: 1,
 		servers: [],
 		subscriptions: [],
@@ -18,6 +21,9 @@ export class TauriCatalogService {
 		selectedSubscriptionId: null,
 		routingMode: 'global',
 	};
+	/** Changes sent to the backend and not answered yet, in request order. */
+	private pending: { apply: Optimistic }[] = [];
+	private current: Catalog = this.confirmed;
 	readonly state = writable(this.current);
 	readonly pinging = this.probes.state;
 	readonly persistenceError = writable(false);
@@ -33,7 +39,7 @@ export class TauriCatalogService {
 	}
 	private publish(value: Catalog) {
 		const existingLatencies = new Map(
-			this.current.servers.map((s) => [s.id, s.latency]),
+			this.confirmed.servers.map((s) => [s.id, s.latency]),
 		);
 		const mergedServers = value.servers.map((s) => ({
 			...s,
@@ -42,19 +48,43 @@ export class TauriCatalogService {
 					? s.latency
 					: (existingLatencies.get(s.id) ?? s.latency ?? 'timeout'),
 		}));
-		this.current = { ...value, servers: mergedServers };
-		this.state.set(this.current);
+		this.confirmed = { ...value, servers: mergedServers };
+		this.render();
 		this.persistenceError.set(false);
 	}
-	private async mutate(mutation: object) {
+	/** Show the confirmed catalog with every unanswered change applied on top. */
+	private render() {
+		this.current = this.pending.reduce(
+			(catalog, change) => change.apply(catalog),
+			this.confirmed,
+		);
+		this.state.set(this.current);
+	}
+	private async mutate(mutation: object, optimistic?: Optimistic) {
 		await this.ready;
+		// Switches and the mode button respond at once; the backend answer (or the
+		// persisted state after a failure) replaces the guess when it arrives.
+		const change = optimistic ? { apply: optimistic } : null;
+		if (change) {
+			this.pending.push(change);
+			this.render();
+		}
+		const settle = () => {
+			if (change) this.pending = this.pending.filter((item) => item !== change);
+		};
 		try {
-			this.publish(await invoke<Catalog>('mutate_catalog', { mutation }));
+			const value = await invoke<Catalog>('mutate_catalog', { mutation });
+			settle();
+			this.publish(value);
 		} catch (error) {
+			settle();
 			// Persistence may have succeeded even when applying new network rules failed.
 			await invoke<Catalog>('get_catalog')
 				.then((value) => this.publish(value))
-				.catch(() => this.persistenceError.set(true));
+				.catch(() => {
+					this.render();
+					this.persistenceError.set(true);
+				});
 			throw error;
 		}
 	}
@@ -63,7 +93,16 @@ export class TauriCatalogService {
 		return this.current.servers;
 	}
 	async selectServer(id: string) {
-		await this.mutate({ kind: 'selectServer', id });
+		await this.mutate({ kind: 'selectServer', id }, (catalog) => {
+			const server = catalog.servers.find((item) => item.id === id);
+			return server
+				? {
+						...catalog,
+						selectedServerId: id,
+						selectedSubscriptionId: server.subscriptionId,
+					}
+				: catalog;
+		});
 	}
 	async selectSubscription(id: string) {
 		await this.mutate({ kind: 'selectSubscription', id });
@@ -75,22 +114,45 @@ export class TauriCatalogService {
 		await this.mutate({ kind: 'removeSubscription', id });
 	}
 	async setRoutingMode(mode: Catalog['routingMode']) {
-		await this.mutate({ kind: 'setRoutingMode', mode });
+		await this.mutate({ kind: 'setRoutingMode', mode }, (catalog) => ({
+			...catalog,
+			routingMode: mode,
+		}));
 	}
 	async saveRule(rule: Rule) {
 		await this.saveRules([rule]);
 	}
 	async saveRules(rules: readonly Rule[]) {
-		await this.mutate({ kind: 'saveRules', rules });
+		await this.mutate({ kind: 'saveRules', rules }, (catalog) => {
+			const updated = new Map(rules.map((rule) => [rule.id, rule]));
+			const existing = catalog.rules.map(
+				(rule) => updated.get(rule.id) ?? rule,
+			);
+			const known = new Set(catalog.rules.map((rule) => rule.id));
+			return {
+				...catalog,
+				rules: [...existing, ...rules.filter((rule) => !known.has(rule.id))],
+			};
+		});
 	}
 	async removeRules(ids: Set<string>) {
-		await this.mutate({ kind: 'removeRules', ids: [...ids] });
+		const removed = new Set(ids);
+		await this.mutate(
+			{ kind: 'removeRules', ids: [...removed] },
+			(catalog) => ({
+				...catalog,
+				rules: catalog.rules.filter((rule) => !removed.has(rule.id)),
+			}),
+		);
 	}
 	async applyPreset(presetId: string) {
 		await this.mutate({ kind: 'applyPreset', presetId });
 	}
 	async removePreset(presetId: string) {
-		await this.mutate({ kind: 'removePreset', presetId });
+		await this.mutate({ kind: 'removePreset', presetId }, (catalog) => ({
+			...catalog,
+			rules: catalog.rules.filter((rule) => rule.presetId !== presetId),
+		}));
 	}
 	async importSubscription(input: string, name?: string) {
 		await this.ready;
@@ -116,8 +178,8 @@ export class TauriCatalogService {
 			await this.ready;
 			const latency = await invoke<number | 'timeout'>('ping_server', { id });
 			this.publish({
-				...this.current,
-				servers: this.current.servers.map((server) =>
+				...this.confirmed,
+				servers: this.confirmed.servers.map((server) =>
 					server.id === id ? { ...server, latency } : server,
 				),
 			});

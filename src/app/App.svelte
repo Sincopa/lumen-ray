@@ -4,6 +4,7 @@
 	let pendingImport = $state('');
 	import { fly } from 'svelte/transition';
 	import { cubicOut } from 'svelte/easing';
+	import { MediaQuery } from 'svelte/reactivity';
 	import BackgroundShader from '../lib/components/BackgroundShader.svelte';
 	import WindowHeader from '../lib/components/WindowHeader.svelte';
 	import BottomNav from '../lib/components/BottomNav.svelte';
@@ -53,6 +54,7 @@
 	let importing = $state(false);
 	let actionError = $state('');
 	let ruleChrome = $state<'default' | 'selection' | 'picker'>('default');
+	const reducedMotion = new MediaQuery('(prefers-reduced-motion: reduce)');
 
 	// Derived state
 	let connectionState = $derived($connectionStore.status);
@@ -72,7 +74,7 @@
 	 *   The CSS width/height stay at 100vw/100vh so the UI fills the window.
 	 *   CSS custom properties --app-width/--app-height are updated so
 	 *   border-radius and clamp() calculations remain correct.
-	 * - Browser dev-mode: CSS zoom on <html> as a visual approximation.
+	 * - Browser dev-mode: CSS zoom on the app viewport.
 	 */
 	async function applyScale(scale: number) {
 		const w = Math.round(APP_WIDTH * scale);
@@ -93,10 +95,6 @@
 			} catch (e) {
 				console.error('[scale] Failed to resize Tauri window:', e);
 			}
-		} else {
-			// Browser dev-mode: zoom the html element so the page shrinks/grows
-			// without needing a native window resize.
-			document.documentElement.style.zoom = scale === 1 ? '' : String(scale);
 		}
 	}
 
@@ -126,6 +124,9 @@
 	}
 
 	onMount(() => {
+		if (runtime.isTauri) {
+			void invoke('frontend_ready').catch(() => {});
+		}
 		void connection.initialize();
 		if (runtime.isTauri) {
 			void startMaintenance();
@@ -262,7 +263,8 @@
 	}
 
 	async function changeMode(mode: 'global' | 'rules') {
-		if ($connectionStore.busy) return;
+		// The backend orders this after an in-flight connection; the button
+		// reflects the new mode immediately.
 		try {
 			await catalog.setRoutingMode(mode);
 		} catch (e) {
@@ -318,11 +320,16 @@
 
 	<div
 		class="app-ui"
+		class:design-screen={currentTab !== 'settings' && !importing}
 		class:dim-backdrop={currentTab !== 'home' || !hasSubscriptions || importing}
 	>
 		<!-- Top Desktop Window Bar -->
 		<WindowHeader
-			title="lumen"
+			title="Lumen"
+			showQuickActions={(currentTab === 'home' &&
+				hasSubscriptions &&
+				!importing) ||
+				currentTab === 'settings'}
 			darkSurface={currentTab !== 'home' || !hasSubscriptions || importing}
 			isSettingsOpen={currentTab === 'settings'}
 			onOpenSettings={() => {
@@ -360,13 +367,13 @@
 						class="tab-view"
 						in:fly={{
 							x: getDir(currentTab, prevTab) * 24,
-							duration: 220,
+							duration: reducedMotion.current ? 0 : 220,
 							easing: cubicOut,
 							opacity: 0,
 						}}
 						out:fly={{
 							x: -getDir(currentTab, prevTab) * 24,
-							duration: 220,
+							duration: reducedMotion.current ? 0 : 220,
 							easing: cubicOut,
 							opacity: 0,
 						}}
@@ -412,7 +419,6 @@
 				{currentTab}
 				{routingMode}
 				{hasSubscriptions}
-				modeDisabled={$connectionStore.busy}
 				onTabChange={goToTab}
 				onModeChange={changeMode}
 				onActionClick={() => (importing = true)}
@@ -438,7 +444,7 @@
 	.app-viewport {
 		position: relative;
 		width: min(var(--app-width), 100vw);
-		height: min(var(--app-height), 100vh);
+		height: min(var(--app-height), 100dvh);
 		display: flex;
 		justify-content: center;
 		align-items: center;
@@ -468,6 +474,23 @@
 			var(--radius-window-bottom) var(--radius-window-bottom);
 		transition: background-color 0.3s ease;
 	}
+	/* Figma trims text to its cap height; Edge/WebView2 support the same geometry. */
+	.design-screen
+		:global(
+			:is(
+				.logo,
+				.title-text,
+				.sub-name,
+				.metric-label,
+				.metric-val,
+				.updated-time
+			)
+		),
+	.design-screen :global(.server-text > span),
+	.design-screen :global(.action-pill > span) {
+		text-box-trim: trim-both;
+		text-box-edge: cap alphabetic;
+	}
 
 	.app-ui::before {
 		content: '';
@@ -493,6 +516,10 @@
 	.app-ui.dim-backdrop::before {
 		opacity: 1;
 	}
+	.app-ui.design-screen::before {
+		background: rgba(15, 15, 15, 0.95);
+		backdrop-filter: none;
+	}
 
 	.view-content {
 		display: flex;
@@ -501,6 +528,7 @@
 		width: 100%;
 		overflow: hidden;
 		position: relative;
+		min-height: 0;
 	}
 
 	.tab-view {

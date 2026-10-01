@@ -31,6 +31,8 @@ Lumen supports VLESS, VMess, Trojan, Shadowsocks, Hysteria 2, and Xray WireGuard
 3. Open **Servers**, choose a node, then click the Lumen symbol on **Home** to connect.
 4. To change how traffic is routed, open **Settings → Network → Working Mode**.
 
+For the portable release, extract the entire ZIP, keep `runtime` beside `Lumen.exe`, and launch `Lumen.exe` directly. The interface and startup diagnostics are built into the EXE; no launcher script or development server is needed. Lumen shows a native error dialog when WebView2 is unavailable or initialization fails, with an option to open the [official WebView2 download page](https://developer.microsoft.com/microsoft-edge/webview2/). Startup reports are stored in `%LOCALAPPDATA%\app.lumen.desktop\logs\startup.log` (with a `%TEMP%\lumen-startup.log` fallback). These reports exclude subscription URLs and credentials.
+
 | Mode             | What it does                                                                                                                                                    |
 | ---------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **System Proxy** | Sets the current user's Windows HTTP/HTTPS proxy. Only apps that use the system proxy are affected.                                                             |

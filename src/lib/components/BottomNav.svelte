@@ -1,28 +1,25 @@
 <script lang="ts">
 	import logoIcon from '../../assets/logo.svg';
 	import subscriptionsIcon from '../../assets/subscriptions.svg';
-	import serversIcon from '../../assets/servers.svg';
-	import addIcon from '../../assets/add.svg';
+	import rulesIcon from '../../assets/rules.svg';
+	import plusIcon from '../../assets/plus.svg';
 	import globalIcon from '../../assets/mode-global.svg';
-	import rulesIcon from '../../assets/mode-rules.svg';
-	import IconButton from './IconButton.svelte';
+	import tunIcon from '../../assets/mode-rules.svg';
 	import { tooltip } from '../actions/tooltip';
 	import { t } from '../i18n';
 
+	type Tab = 'home' | 'subscriptions' | 'servers' | 'settings' | 'rules';
 	interface Props {
-		currentTab: 'home' | 'subscriptions' | 'servers' | 'settings' | 'rules';
+		currentTab: Tab;
 		routingMode?: 'global' | 'rules';
 		hasSubscriptions?: boolean;
 		modeDisabled?: boolean;
-		onTabChange: (
-			tab: 'home' | 'subscriptions' | 'servers' | 'settings' | 'rules',
-		) => void;
+		onTabChange: (tab: Tab) => void;
 		onModeChange?: (mode: 'global' | 'rules') => void;
 		onActionClick?: () => void;
 	}
-
 	let {
-		currentTab = 'home',
+		currentTab,
 		routingMode = 'global',
 		hasSubscriptions = true,
 		modeDisabled = false,
@@ -30,418 +27,152 @@
 		onModeChange,
 		onActionClick,
 	}: Props = $props();
-
-	function handleTabChange(
-		tab: 'home' | 'subscriptions' | 'servers' | 'settings' | 'rules',
-	) {
-		if (tab === currentTab) return;
-		onTabChange(tab);
-	}
-
-	function toggleMode() {
-		if (modeDisabled) return;
-		const nextMode = routingMode === 'global' ? 'rules' : 'global';
-		onModeChange?.(nextMode);
-	}
+	const tabs = [
+		{ id: 'home' as const, icon: logoIcon, label: 'nav.home' },
+		{
+			id: 'subscriptions' as const,
+			icon: subscriptionsIcon,
+			label: 'nav.subscriptions',
+		},
+		{ id: 'rules' as const, icon: rulesIcon, label: 'nav.rules' },
+	];
+	let modeLabel = $derived(
+		t(routingMode === 'rules' ? 'home.modeRules' : 'home.modeGlobal'),
+	);
 </script>
 
-<nav class="bottom-nav">
+<nav class="bottom-nav" aria-label={t('nav.home')}>
 	<div class="nav-pill">
-		<!-- Slot 1: Home (Lumen Logo) -->
-		<button
-			class="pill-btn"
-			aria-current={currentTab === 'home' ? 'page' : undefined}
-			class:active={currentTab === 'home'}
-			onclick={() => handleTabChange('home')}
-			aria-label={t('nav.home')}
-			use:tooltip={t('nav.home')}
-		>
-			<span class="btn-surface" class:active-surface={currentTab === 'home'}>
-				<img
-					src={logoIcon}
-					alt="Lumen"
-					class="tab-icon logo-icon"
-					class:active-icon={currentTab === 'home'}
-				/>
-			</span>
-		</button>
-
-		<!-- Slot 2: Subscriptions (subscriptions.svg) -->
-		<button
-			class="pill-btn"
-			aria-current={currentTab === 'subscriptions' ? 'page' : undefined}
-			class:active={currentTab === 'subscriptions'}
-			onclick={() => handleTabChange('subscriptions')}
-			aria-label={t('nav.subscriptions')}
-			use:tooltip={t('nav.subscriptions')}
-		>
-			<span
-				class="btn-surface"
-				class:active-surface={currentTab === 'subscriptions'}
+		{#each tabs as tab (tab.id)}
+			<button
+				type="button"
+				class="pill-btn"
+				class:active={currentTab === tab.id}
+				aria-current={currentTab === tab.id ? 'page' : undefined}
+				aria-label={t(tab.label)}
+				use:tooltip={t(tab.label)}
+				onclick={() => currentTab !== tab.id && onTabChange(tab.id)}
 			>
-				<img
-					src={subscriptionsIcon}
-					alt=""
-					class="tab-icon sub-icon"
-					class:active-icon={currentTab === 'subscriptions'}
-				/>
-			</span>
-		</button>
-
-		<!-- Slot 3: Servers (servers.svg) -->
-		<button
-			class="pill-btn"
-			aria-current={currentTab === 'servers' ? 'page' : undefined}
-			class:active={currentTab === 'servers'}
-			onclick={() => handleTabChange('servers')}
-			aria-label={t('nav.servers')}
-			use:tooltip={t('nav.servers')}
-		>
-			<span class="btn-surface" class:active-surface={currentTab === 'servers'}>
-				<img
-					src={serversIcon}
-					alt=""
-					class="tab-icon srv-icon"
-					class:active-icon={currentTab === 'servers'}
-				/>
-			</span>
-		</button>
-
-		<!-- Slot 4: Rules (mode-rules.svg) -->
-		<button
-			class="pill-btn"
-			aria-current={currentTab === 'rules' ? 'page' : undefined}
-			class:active={currentTab === 'rules'}
-			onclick={() => handleTabChange('rules')}
-			aria-label={t('nav.rules')}
-			use:tooltip={t('nav.rules')}
-		>
-			<span class="btn-surface" class:active-surface={currentTab === 'rules'}>
-				<img
-					src={rulesIcon}
-					alt=""
-					class="tab-icon rules-icon"
-					class:active-icon={currentTab === 'rules'}
-				/>
-			</span>
-		</button>
+				<img src={tab.icon} alt="" width="34" height="34" />
+			</button>
+		{/each}
 	</div>
-
 	{#if currentTab === 'subscriptions'}
-		<div class="right-slot">
-			<IconButton
-				icon={addIcon}
-				ariaLabel={t('subscriptions.addProfile') || t('common.add')}
-				size="lg"
-				variant="surface"
-				onclick={() => onActionClick?.()}
-			/>
-		</div>
+		<button
+			type="button"
+			class="nav-add"
+			aria-label={t('subscriptions.addProfile')}
+			use:tooltip={t('subscriptions.addProfile')}
+			onclick={() => onActionClick?.()}
+		>
+			<img src={plusIcon} alt="" width="21" height="21" />
+		</button>
 	{:else if hasSubscriptions}
-		<div class="right-slot">
-			<!-- Mode switcher pill (global/rules) — click anywhere to toggle -->
-			<div
-				class="action-pill"
-				class:disabled={modeDisabled}
-				role="button"
-				tabindex={modeDisabled ? -1 : 0}
-				aria-disabled={modeDisabled}
-				aria-label={t('home.modeGlobal') + ' / ' + t('home.modeRules')}
-				onclick={toggleMode}
-				onkeydown={(e) => {
-					if (e.key === 'Enter' || e.key === ' ') {
-						e.preventDefault();
-						toggleMode();
-					}
-				}}
-			>
-				<button
-					type="button"
-					class="action-pill-btn"
-					class:action-active={routingMode === 'global'}
-					disabled={modeDisabled}
-					aria-pressed={routingMode === 'global'}
-					aria-label={t('home.modeGlobal')}
-					use:tooltip={t('home.modeGlobal')}
-					onclick={(e) => {
-						e.stopPropagation();
-						toggleMode();
-					}}
-				>
-					<img
-						src={globalIcon}
-						alt=""
-						class="mode-icon"
-						class:mode-active={routingMode === 'global'}
-					/>
-				</button>
-				<button
-					type="button"
-					class="action-pill-btn"
-					class:action-active={routingMode === 'rules'}
-					disabled={modeDisabled}
-					aria-pressed={routingMode === 'rules'}
-					aria-label={t('home.modeRules')}
-					use:tooltip={t('home.modeRules')}
-					onclick={(e) => {
-						e.stopPropagation();
-						toggleMode();
-					}}
-				>
-					<img
-						src={rulesIcon}
-						alt=""
-						class="mode-icon"
-						class:mode-active={routingMode === 'rules'}
-					/>
-				</button>
-			</div>
-		</div>
+		<button
+			type="button"
+			class="action-pill"
+			disabled={modeDisabled}
+			aria-label={modeLabel}
+			aria-pressed={routingMode === 'rules'}
+			use:tooltip={modeLabel}
+			onclick={() =>
+				onModeChange?.(routingMode === 'global' ? 'rules' : 'global')}
+		>
+			<img
+				src={routingMode === 'rules' ? tunIcon : globalIcon}
+				alt=""
+				width="34"
+				height="34"
+			/>
+			<span>{routingMode === 'rules' ? 'Tun' : 'All'}</span>
+		</button>
 	{/if}
 </nav>
 
 <style>
 	.bottom-nav {
 		position: absolute;
-		bottom: 33px;
-		left: 16px;
-		right: 16px;
+		bottom: var(--nav-bottom);
+		left: var(--nav-inset);
+		right: var(--nav-inset);
 		display: flex;
 		justify-content: space-between;
 		align-items: center;
-		width: auto;
-		max-width: 326px;
-		gap: 8px;
-		flex-shrink: 0;
-		margin: 0 auto;
-		padding-top: 0;
+		gap: 12px;
 		z-index: 20;
-		pointer-events: auto;
 	}
-
 	.nav-pill {
-		width: 184px;
-		height: 50px;
-		border-radius: 124px;
-		background: rgba(0, 0, 0, 0.28);
-		box-shadow:
-			0 8px 32px rgba(0, 0, 0, 0.45),
-			0 2px 8px rgba(0, 0, 0, 0.3);
-		-webkit-backdrop-filter: blur(16px);
-		backdrop-filter: blur(16px);
 		display: flex;
 		align-items: center;
-		justify-content: space-between;
-		padding: 5px 6px;
-		box-sizing: border-box;
-		border: none;
+		gap: 12px;
+		height: 50px;
+		padding: 8px;
+		border-radius: 123px;
+		background: var(--design-glass);
+		backdrop-filter: blur(25px);
 	}
-
 	.pill-btn {
-		width: 38px;
-		height: 38px;
-		min-width: 38px;
-		min-height: 0;
-		max-width: 38px;
-		max-height: 38px;
-		aspect-ratio: 1 / 1;
+		display: grid;
+		place-items: center;
+		width: 34px;
+		height: 34px;
+		flex: 0 0 34px;
+		padding: 0;
+		border: 0;
 		border-radius: 50%;
 		background: transparent;
-		border: none;
-		padding: 0;
-		cursor: pointer;
-		display: flex;
-		align-items: center;
-		justify-content: center;
-		flex-shrink: 0;
-		box-sizing: border-box;
-	}
-
-	.btn-surface {
-		width: 38px;
-		height: 38px;
-		min-width: 38px;
-		min-height: 0;
-		aspect-ratio: 1 / 1;
-		border-radius: 50%;
-		background: none;
-		display: flex;
-		align-items: center;
-		justify-content: center;
-		flex-shrink: 0;
-		box-sizing: border-box;
 		transition:
-			background 0.28s cubic-bezier(0.34, 1.56, 0.64, 1),
-			transform 0.28s cubic-bezier(0.34, 1.56, 0.64, 1),
-			box-shadow 0.25s ease;
+			background-color 160ms ease,
+			transform 160ms var(--ease-spring);
 	}
-
-	.pill-btn:hover .btn-surface:not(.active-surface) {
-		background: rgba(255, 255, 255, 0.15);
-		transform: scale(1.06);
+	.pill-btn img {
+		display: block;
 	}
-
-	.pill-btn:active .btn-surface:not(.active-surface) {
-		transform: scale(0.92);
-	}
-
-	.btn-surface.active-surface {
-		background: #ffffff;
-		box-shadow: 0 2px 12px rgba(0, 0, 0, 0.35);
-		transform: scale(1);
-	}
-
-	.pill-btn:hover .btn-surface.active-surface {
-		background: #ffffff;
-		box-shadow: 0 2px 14px rgba(0, 0, 0, 0.4);
-		transform: scale(1.04);
-	}
-
-	/* Icons: dim when inactive, black when active */
-	.tab-icon {
-		object-fit: contain;
-		transition:
-			filter 0.2s ease,
-			opacity 0.2s ease;
-		filter: brightness(0) invert(1);
-		opacity: 0.7;
-	}
-
-	.tab-icon.active-icon {
-		filter: brightness(0) invert(0);
-		opacity: 1;
-	}
-
-	.pill-btn:hover .tab-icon:not(.active-icon) {
-		filter: brightness(0) invert(1);
-		opacity: 1;
-	}
-
-	.logo-icon {
-		width: 20px;
-		height: 14px;
-	}
-	.sub-icon {
-		width: 17px;
-		height: 17px;
-	}
-	.srv-icon {
-		width: 17px;
-		height: 17px;
-	}
-	.rules-icon {
-		width: 18px;
-		height: 18px;
-	}
-
-	/* Right slot */
-	.right-slot {
-		display: flex;
-		align-items: center;
-		justify-content: center;
-	}
-
-	/* Mode switcher pill (global/rules) */
+	.nav-add,
 	.action-pill {
-		width: 90px;
-		height: 50px;
-		border-radius: 124px;
-		background: rgba(0, 0, 0, 0.28);
-		box-shadow:
-			0 8px 32px rgba(0, 0, 0, 0.45),
-			0 2px 8px rgba(0, 0, 0, 0.3);
-		border: none;
-		outline: none;
-		-webkit-backdrop-filter: blur(16px);
-		backdrop-filter: blur(16px);
-		display: flex;
-		align-items: center;
-		justify-content: space-between;
-		gap: 6px;
-		padding: 5px 6px;
-		box-sizing: border-box;
-		cursor: pointer;
-	}
-
-	.action-pill.disabled {
-		cursor: not-allowed;
-		opacity: 0.62;
-	}
-
-	.action-pill.disabled .action-pill-btn {
-		cursor: not-allowed;
-	}
-
-	.action-pill-btn {
-		width: 36px;
-		height: 36px;
-		min-width: 36px;
-		min-height: 0;
-		max-width: 36px;
-		max-height: 36px;
-		aspect-ratio: 1 / 1;
-		border-radius: 50%;
-		background: none;
-		border: none;
 		display: flex;
 		align-items: center;
 		justify-content: center;
-		cursor: pointer;
-		padding: 0;
 		flex-shrink: 0;
-		box-sizing: border-box;
+		height: 50px;
+		border: 0;
+		border-radius: 123px;
+		padding: 8px;
 		transition:
-			background 0.28s cubic-bezier(0.34, 1.56, 0.64, 1),
-			transform 0.28s cubic-bezier(0.34, 1.56, 0.64, 1),
-			box-shadow 0.25s ease;
+			background-color 160ms ease,
+			transform 160ms var(--ease-spring);
 	}
-
-	.action-pill-btn:hover:not(.action-active) {
-		background: rgba(255, 255, 255, 0.15);
-		transform: scale(1.06);
+	.nav-add {
+		width: 50px;
+		background: var(--design-glass);
+		backdrop-filter: blur(25px);
 	}
-
-	.action-pill-btn:active:not(.action-active) {
-		transform: scale(0.92);
+	.action-pill {
+		min-width: 87px;
+		padding: 8px 18px 8px 8px;
+		background: #fff;
+		color: #252525;
+		font-size: 16px;
+		font-weight: 500;
 	}
-
-	.action-pill-btn.action-active {
-		background: #ffffff;
-		box-shadow: 0 2px 12px rgba(0, 0, 0, 0.35);
-		transform: scale(1);
-	}
-
-	.action-pill-btn.action-active:hover {
-		background: #ffffff;
-		box-shadow: 0 2px 14px rgba(0, 0, 0, 0.4);
-		transform: scale(1.04);
-	}
-
-	.mode-icon {
-		width: 20px;
-		height: 20px;
+	.action-pill img {
 		object-fit: contain;
-		filter: brightness(0) invert(1);
-		opacity: 0.7;
-		transition:
-			opacity 0.2s ease,
-			filter 0.2s ease;
+		filter: brightness(0);
 	}
-
-	.action-pill-btn:hover .mode-icon:not(.mode-active) {
-		filter: brightness(0) invert(1);
-		opacity: 1;
+	.pill-btn:active,
+	.nav-add:active,
+	.action-pill:active:not(:disabled) {
+		transform: scale(0.94);
 	}
-
-	.mode-icon.mode-active {
-		filter: brightness(0) invert(0);
-		opacity: 1;
-	}
-
-	@media (prefers-reduced-motion: reduce) {
-		.btn-surface,
-		.action-pill-btn {
-			transition-duration: 0ms;
+	@media (hover: hover) and (pointer: fine) {
+		.pill-btn:hover {
+			background: #ffffff12;
+		}
+		.nav-add:hover {
+			background: #ffffff12;
+		}
+		.action-pill:hover:not(:disabled) {
+			background: #f1f1f1;
 		}
 	}
 </style>

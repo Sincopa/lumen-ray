@@ -20,12 +20,10 @@
 		display: inline-block;
 		border-radius: 50%;
 		background: #3aee29;
-		box-shadow: 0 0 8px #3aee29a6;
 		flex-shrink: 0;
 	}
 
 	.status-dot.expired {
 		background: #ef3340;
-		box-shadow: 0 0 8px #ef334099;
 	}
 </style>

@@ -4,6 +4,7 @@
 
 	interface Props {
 		icon?: string;
+		design?: boolean;
 		ariaLabel?: string;
 		title?: string;
 		size?: 'sm' | 'md' | 'lg';
@@ -19,6 +20,7 @@
 
 	let {
 		icon,
+		design = false,
 		ariaLabel,
 		title,
 		size = 'sm',
@@ -40,6 +42,7 @@
 	{type}
 	class="icon-btn size-{size} variant-{variant} {className}"
 	class:active
+	class:design
 	class:expanded
 	aria-label={ariaLabel}
 	aria-expanded={expanded}
@@ -179,5 +182,29 @@
 		.icon-btn {
 			transition-duration: 0ms;
 		}
+	}
+	.design.size-sm {
+		width: 28px;
+		height: 28px;
+		min-width: 28px;
+	}
+	.design .btn-icon {
+		width: auto;
+		height: auto;
+		max-width: 100%;
+		max-height: 100%;
+		filter: none;
+		opacity: 1;
+	}
+	.design.variant-surface {
+		background: var(--design-glass);
+		box-shadow: none;
+		backdrop-filter: blur(25px);
+	}
+	.design.variant-primary {
+		box-shadow: none;
+	}
+	.design.variant-primary .btn-icon {
+		filter: brightness(0);
 	}
 </style>

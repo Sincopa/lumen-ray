@@ -4,12 +4,11 @@
 	import { getProcesses } from '../../services/processes';
 	import { catalog } from '../../services';
 	import { createDeferredTask } from '../../utils/deferredTask';
-	import discordIcon from '../../../assets/discord.png';
 	import yandexIcon from '../../../assets/yandex.png';
 	import searchIcon from '../../../assets/search.svg';
 	import checkIcon from '../../../assets/check.svg';
-	import crossIcon from '../../../assets/cross.svg';
-	import chevronIcon from '../../../assets/chevron.svg';
+	import crossIcon from '../../../assets/close.svg';
+	import chevronIcon from '../../../assets/chevron-down.svg';
 	import IconButton from '../../components/IconButton.svelte';
 	import MaterialIcon from '../../components/MaterialIcon.svelte';
 	import { t } from '../../i18n';
@@ -44,7 +43,6 @@
 						id: 'discord',
 						name: 'Discord',
 						detail: 'C:\\Users\\user\\AppData',
-						icon: discordIcon,
 					},
 					{
 						id: 'yandex',

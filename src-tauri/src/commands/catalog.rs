@@ -36,6 +36,15 @@ pub async fn mutate_catalog(
     app: tauri::AppHandle,
     mutation: service::Mutation,
 ) -> Result<Value> {
+    apply_mutation(state.inner(), &app, mutation).await
+}
+/// Persist a catalog change and apply it to the running connection. Shared by the
+/// window and the tray so both take the same live-update and rollback path.
+pub async fn apply_mutation(
+    state: &Arc<AppState>,
+    app: &tauri::AppHandle,
+    mutation: service::Mutation,
+) -> Result<Value> {
     let _transaction = state.updates.lock().await;
     let generation = state
         .connection_generation
@@ -53,9 +62,9 @@ pub async fn mutate_catalog(
     } else {
         None
     };
-    let value = service::mutate(&state, mutation).await?;
-    disconnect_removed_server(&state, &app).await?;
-    crate::update_tray_menu(&app, &state);
+    let value = service::mutate(state, mutation).await?;
+    disconnect_removed_server(state, app).await?;
+    crate::update_tray_menu(app, state);
     let id = if reconnect {
         state
             .snapshot
@@ -71,8 +80,7 @@ pub async fn mutate_catalog(
         #[cfg(windows)]
         if let Some(before) = previous.as_ref() {
             let after = state.repository.read().await.clone();
-            match crate::services::vpn_service::apply_live_rules(&state, &id, before, &after).await
-            {
+            match crate::services::vpn_service::apply_live_rules(state, &id, before, &after).await {
                 Ok(true) => return Ok(value),
                 Ok(false) => {
                     let still_connected = state
@@ -83,7 +91,7 @@ pub async fn mutate_catalog(
                         .as_ref()
                         .is_some_and(|info| info.server_id == id);
                     if !still_connected {
-                        let warm_state = state.inner().clone();
+                        let warm_state = state.clone();
                         tauri::async_runtime::spawn(async move {
                             crate::services::vpn_service::prewarm(&warm_state).await;
                         });
@@ -98,17 +106,17 @@ pub async fn mutate_catalog(
             }
         }
         if let Err(error) =
-            crate::services::vpn_service::connect_if_current(&state, &app, id.clone(), generation)
+            crate::services::vpn_service::connect_if_current(state, app, id.clone(), generation)
                 .await
         {
             if let Some(before) = previous.as_ref() {
                 let after = state.repository.read().await.clone();
-                restore_catalog_if_unchanged(&state, &app, before, &after).await?;
+                restore_catalog_if_unchanged(state, app, before, &after).await?;
             }
             if error.code != "CANCELLED" && state.snapshot.read().await.status != "connected" {
                 let _ = crate::services::vpn_service::connect_if_current(
-                    &state,
-                    &app,
+                    state,
+                    app,
                     id,
                     generation + 1,
                 )
@@ -117,7 +125,7 @@ pub async fn mutate_catalog(
             return Err(error);
         }
     } else {
-        let state = state.inner().clone();
+        let state = state.clone();
         tauri::async_runtime::spawn(async move {
             crate::services::vpn_service::prewarm(&state).await;
         });
@@ -131,8 +139,9 @@ pub async fn import_subscription(
     input: String,
     name: Option<String>,
 ) -> Result<service::ImportResult> {
+    let prepared = service::prepare_import(&state, input, name, None).await?;
     let _transaction = state.updates.lock().await;
-    let result = service::import(&state, input, name, None).await?;
+    let result = service::apply_import(&state, prepared).await?;
     crate::update_tray_menu(&app, &state);
     let warm_state = state.inner().clone();
     tauri::async_runtime::spawn(async move {
@@ -146,18 +155,6 @@ pub async fn refresh_subscription(
     app: tauri::AppHandle,
     id: String,
 ) -> Result<service::ImportResult> {
-    let _transaction = state.updates.lock().await;
-    let generation = state
-        .connection_generation
-        .load(std::sync::atomic::Ordering::Acquire);
-    let before = state.repository.read().await.clone();
-    let active = state
-        .snapshot
-        .read()
-        .await
-        .info
-        .as_ref()
-        .map(|info| info.server_id.clone());
     let (input, name) = {
         let repo = state.repository.read().await;
         (
@@ -173,7 +170,22 @@ pub async fn refresh_subscription(
                 .clone(),
         )
     };
-    let result = service::import(&state, input, Some(name), Some(id)).await?;
+    // Download without the maintenance transaction: a user connection must not
+    // wait for a slow subscription server.
+    let prepared = service::prepare_import(&state, input, Some(name), Some(id)).await?;
+    let _transaction = state.updates.lock().await;
+    let generation = state
+        .connection_generation
+        .load(std::sync::atomic::Ordering::Acquire);
+    let before = state.repository.read().await.clone();
+    let active = state
+        .snapshot
+        .read()
+        .await
+        .info
+        .as_ref()
+        .map(|info| info.server_id.clone());
+    let result = service::apply_import(&state, prepared).await?;
     let after = state.repository.read().await.clone();
     if let Some(active) = active.filter(|active| {
         let old = before.nodes.iter().find(|n| n.id == *active);

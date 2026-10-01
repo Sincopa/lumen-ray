@@ -16,6 +16,7 @@
 		"benchmark:catalog": "node scripts/benchmark-catalog.mjs",
 		"benchmark:latency": "powershell -NoProfile -File scripts/benchmark-latency.ps1",
 		"dev": "vite",
+		"generate:lottie": "node scripts/generate-lumen-lottie.mjs",
 		"build": "vite build",
 		"preview": "vite preview",
 		"check": "svelte-check --tsconfig ./tsconfig.app.json && tsc -p tsconfig.node.json",
@@ -53,6 +54,7 @@
 		"@number-flow/svelte": "^0.4.2",
 		"@tauri-apps/api": "^2.11.1",
 		"flag-icons": "^7.5.0",
-		"jsqr": "^1.4.0"
+		"jsqr": "^1.4.0",
+		"lottie-web": "^5.13.0"
 	}
 }

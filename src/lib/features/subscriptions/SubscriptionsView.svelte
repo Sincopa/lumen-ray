@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { onDestroy } from 'svelte';
+	import { MediaQuery, SvelteSet } from 'svelte/reactivity';
 	import { createDeferredTask } from '../../utils/deferredTask';
 	import { slide } from 'svelte/transition';
 	import { catalog, connection } from '../../services';
@@ -21,10 +22,10 @@
 	import menuIcon from '../../../assets/menu.svg';
 	import pencilIcon from '../../../assets/pencil.svg';
 	import trashIcon from '../../../assets/trash.svg';
-	import shareIcon from '../../../assets/share.svg';
-	import chevronIcon from '../../../assets/chevron.svg';
+	import shareIcon from '../../../assets/share-link.svg';
+	import chevronIcon from '../../../assets/chevron-up.svg';
 	import checkIcon from '../../../assets/check.svg';
-	import crossIcon from '../../../assets/cross.svg';
+	import crossIcon from '../../../assets/close.svg';
 	import { formatSubscriptionUpdatedAgo } from '../../utils/time';
 
 	const focusTask = createDeferredTask();
@@ -39,7 +40,8 @@
 	const subscriptionRefreshStatus = refreshStatus;
 
 	// Local state
-	let expanded = $state<string | null>(null);
+	const expanded = new SvelteSet<string>();
+	const reducedMotion = new MediaQuery('(prefers-reduced-motion: reduce)');
 	let editingId = $state<string | null>(null);
 	let editName = $state('');
 	let editInputEl = $state<HTMLInputElement | null>(null);
@@ -75,13 +77,24 @@
 	}
 
 	function toggleSubscription(id: string) {
-		expanded = expanded === id ? null : id;
+		if (expanded.has(id)) expanded.delete(id);
+		else expanded.add(id);
 		if (activeSubId !== id) {
 			void activateSubscription(id);
 		}
 	}
 
 	function formatUpdatedAgo(sub: Subscription): string {
+		const minutes =
+			sub.updatedMinutesAgo ??
+			Math.max(
+				1,
+				Math.floor(
+					(Date.now() - (sub.updatedAt || Date.now() - 60_000)) / 60_000,
+				),
+			);
+		if (minutes < 60)
+			return t('subscriptions.updatedMinutesAgo', { count: minutes });
 		return formatSubscriptionUpdatedAgo(
 			sub.updatedAt,
 			sub.updatedMinutesAgo,
@@ -222,7 +235,7 @@
 	<div class="cards-list" onscroll={() => (menu = null)}>
 		{#each $catalogStore.subscriptions as sub (sub.id)}
 			<div class="sub-card-wrapper" class:has-open-menu={menu === sub.id}>
-				<article class="sub-card" class:expanded={expanded === sub.id}>
+				<article class="sub-card" class:expanded={expanded.has(sub.id)}>
 					<div class="card-header" class:is-editing={editingId === sub.id}>
 						{#if editingId === sub.id}
 							<div
@@ -270,7 +283,7 @@
 						{:else}
 							<button
 								class="title-group"
-								aria-expanded={expanded === sub.id}
+								aria-expanded={expanded.has(sub.id)}
 								onclick={() => toggleSubscription(sub.id)}
 							>
 								<span class="sub-name">{sub.name}</span>
@@ -280,12 +293,14 @@
 							</button>
 							<div class="actions-group">
 								<IconButton
+									design
 									icon={reloadIcon}
 									ariaLabel={t('common.reload')}
 									disabled={busy !== null}
 									onclick={() => refresh(sub.id)}
 								/>
 								<IconButton
+									design
 									icon={menuIcon}
 									ariaLabel={t('common.menu')}
 									active={menu === sub.id}
@@ -293,9 +308,10 @@
 									onclick={(e) => toggleMenu(sub.id, e)}
 								/>
 								<IconButton
+									design
 									icon={chevronIcon}
 									ariaLabel={sub.name}
-									expanded={expanded === sub.id}
+									expanded={expanded.has(sub.id)}
 									class="card-chevron"
 									onclick={() => toggleSubscription(sub.id)}
 								/>
@@ -305,12 +321,15 @@
 					<button
 						type="button"
 						class="card-body"
-						class:expanded={expanded === sub.id}
-						aria-expanded={expanded === sub.id}
+						class:expanded={expanded.has(sub.id)}
+						aria-expanded={expanded.has(sub.id)}
 						onclick={() => toggleSubscription(sub.id)}
 					>
-						{#if expanded === sub.id}
-							<div class="card-details" transition:slide={{ duration: 220 }}>
+						{#if expanded.has(sub.id)}
+							<div
+								class="card-details"
+								transition:slide={{ duration: reducedMotion.current ? 0 : 220 }}
+							>
 								<div class="metrics-row">
 									<div class="metric-item">
 										<span class="metric-label">
@@ -448,7 +467,7 @@
 	.cards-list {
 		display: flex;
 		flex-direction: column;
-		gap: 10px;
+		gap: 6px;
 		width: 100%;
 		overflow-y: auto;
 		min-height: 0;
@@ -468,34 +487,33 @@
 		z-index: 50;
 	}
 	.sub-card {
-		background: rgba(0, 0, 0, 0.22);
+		background: var(--design-panel);
 		border: none;
 		border-radius: 32px;
-		padding: 18px 22px;
+		padding: 20px 20px 20px 23px;
 		display: flex;
 		flex-direction: column;
-		min-height: 60px;
+		min-height: 68px;
 		transition:
 			background-color 200ms ease,
-			transform 220ms var(--ease-spring),
-			min-height 220ms ease;
+			transform 220ms var(--ease-spring);
 		cursor: pointer;
 	}
 	.sub-card:hover {
-		background: rgba(0, 0, 0, 0.3);
+		background: var(--design-panel-open);
 		border: none;
 	}
 	.sub-card.expanded {
-		background: rgba(0, 0, 0, 0.3);
+		background: var(--design-panel-open);
 		border: none;
-		min-height: 108px;
+		min-height: 117px;
 	}
 	.card-header {
 		display: flex;
 		justify-content: space-between;
 		align-items: center;
 		width: 100%;
-		height: 24px;
+		height: 28px;
 		gap: 8px;
 	}
 	.card-rename-inline {
@@ -572,23 +590,27 @@
 		flex: 1;
 	}
 	.sub-name {
-		font-size: 15px;
+		font-size: 16px;
 		font-weight: 500;
-		letter-spacing: -0.2px;
+		letter-spacing: 0;
 		overflow: hidden;
 		text-overflow: ellipsis;
 		white-space: nowrap;
 	}
+	.sub-card:not(.expanded) .sub-name {
+		opacity: 0.5;
+	}
 	.actions-group {
 		display: flex;
 		align-items: center;
-		gap: 6px;
+		gap: 8px;
 	}
 	:global(.card-chevron) {
-		transition: transform 0.28s;
+		transform: rotate(180deg);
+		transition: transform 200ms var(--ease-out);
 	}
 	:global(.card-chevron.expanded) {
-		transform: rotate(180deg);
+		transform: rotate(0);
 	}
 	.card-body {
 		margin-top: 0;
@@ -607,7 +629,7 @@
 		transition: margin-top 220ms ease;
 	}
 	.card-body.expanded {
-		margin-top: 14px;
+		margin-top: 20px;
 	}
 	.card-details {
 		display: flex;
@@ -620,22 +642,30 @@
 		display: flex;
 		gap: 24px;
 	}
+	.metric-item:first-child {
+		min-width: 43px;
+	}
 	.metric-item {
 		display: flex;
 		flex-direction: column;
-		gap: 2px;
+		gap: 10px;
 	}
 	.metric-label {
-		font-size: 11px;
-		color: #ffffff80;
+		font-size: 12px;
+		line-height: 12px;
+		font-weight: 500;
+		color: #ffffff40;
 	}
 	.metric-val {
-		font-size: 13px;
-		font-weight: 600;
+		font-size: 12px;
+		line-height: 12px;
+		font-weight: 500;
+		letter-spacing: -0.24px;
 	}
 	.updated-time {
-		font-size: 11px;
-		color: #ffffff8c;
+		font-size: 12px;
+		line-height: 14px;
+		color: #ffffff40;
 		max-width: 50%;
 		text-align: right;
 	}

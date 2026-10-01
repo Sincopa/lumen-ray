@@ -2,10 +2,13 @@
 use crate::domain::errors::{BackendError, Result};
 use std::time::Duration;
 
-const ENDPOINTS: [&str; 3] = [
-    "https://api.ipify.org",
-    "https://icanhazip.com",
-    "https://cp.cloudflare.com/generate_204",
+/// (endpoint, answers with an empty 204). The plain-HTTP probe skips a TLS
+/// handshake through the tunnel; captive portals cannot fake an empty 204.
+const ENDPOINTS: [(&str, bool); 4] = [
+    ("https://api.ipify.org", false),
+    ("https://icanhazip.com", false),
+    ("https://cp.cloudflare.com/generate_204", true),
+    ("http://cp.cloudflare.com/generate_204", true),
 ];
 
 fn accepted(status: u16, body: &str, empty_expected: bool) -> bool {
@@ -28,8 +31,8 @@ pub async fn resolve_ip(proxy_port: u16) -> Result<String> {
 
 async fn check(client: &reqwest::Client, allow_empty: bool) -> Result<Option<String>> {
     let mut requests = tokio::task::JoinSet::new();
-    for (index, endpoint) in ENDPOINTS.into_iter().enumerate() {
-        if index == 2 && !allow_empty {
+    for (endpoint, empty_expected) in ENDPOINTS {
+        if empty_expected && !allow_empty {
             continue;
         }
         let client = client.clone();
@@ -48,7 +51,7 @@ async fn check(client: &reqwest::Client, allow_empty: bool) -> Result<Option<Str
                 body.extend_from_slice(&chunk);
             }
             let body = std::str::from_utf8(&body).ok()?.trim();
-            accepted(status, body, index == 2).then(|| {
+            accepted(status, body, empty_expected).then(|| {
                 body.parse::<std::net::IpAddr>()
                     .ok()
                     .map(|ip| ip.to_string())

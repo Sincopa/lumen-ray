@@ -2,9 +2,10 @@
 	import { getCurrentWindow } from '@tauri-apps/api/window';
 	import { runtime } from '../runtime';
 	import { t } from '../i18n';
-	import minimizeIcon from '../../assets/minimaze.svg';
-	import maximizeIcon from '../../assets/maximaze.svg';
-	import crossIcon from '../../assets/cross.svg';
+	import PopupMenu from './PopupMenu.svelte';
+	import minimizeIcon from '../../assets/minimize.svg';
+	import maximizeIcon from '../../assets/maximize.svg';
+	import crossIcon from '../../assets/close.svg';
 	import settingsIcon from '../../assets/settings.svg';
 	import bellIcon from '../../assets/bell-ring.svg';
 
@@ -12,6 +13,7 @@
 		title?: string;
 		showControls?: boolean;
 		darkSurface?: boolean;
+		showQuickActions?: boolean;
 		isSettingsOpen?: boolean;
 		onOpenSettings?: () => void;
 		updateVersion?: string | null;
@@ -22,6 +24,7 @@
 		title = 'Lumen',
 		showControls = true,
 		darkSurface = false,
+		showQuickActions = true,
 		isSettingsOpen = false,
 		onOpenSettings,
 		updateVersion = null,
@@ -29,6 +32,7 @@
 	}: Props = $props();
 
 	let failure = $state(false);
+	let notificationOpen = $state(false);
 
 	async function control(action: 'minimize' | 'toggleMaximize' | 'close') {
 		if (!runtime.isTauri) return;
@@ -40,6 +44,16 @@
 	}
 </script>
 
+<svelte:window
+	onclick={(event) => {
+		const target = event.target as HTMLElement | null;
+		if (!target?.closest('.update-btn, .popup-menu')) notificationOpen = false;
+	}}
+	onkeydown={(event) => {
+		if (event.key === 'Escape') notificationOpen = false;
+	}}
+/>
+
 <header
 	class="window-header"
 	class:dark-surface={darkSurface}
@@ -48,19 +62,25 @@
 	<div class="logo">{title}</div>
 
 	<div class="header-right">
-		{#if updateVersion && onOpenUpdate}
+		{#if showQuickActions && (!isSettingsOpen || updateVersion)}
 			<button
 				class="header-circle-btn update-btn"
-				onclick={onOpenUpdate}
-				aria-label={t('settings.updateAvailable', { version: updateVersion })}
-				title={t('settings.updateAvailable', { version: updateVersion })}
+				onclick={() => {
+					if (updateVersion && onOpenUpdate) onOpenUpdate();
+					else notificationOpen = !notificationOpen;
+				}}
+				aria-label={t('settings.notifications')}
+				aria-expanded={notificationOpen}
 			>
-				<img src={bellIcon} alt="" width="24" height="24" />
-				<span class="update-dot" aria-hidden="true"></span>
+				<img src={bellIcon} alt="" width="32" height="32" />
+				{#if updateVersion}<span
+						class="update-dot"
+						aria-hidden="true"
+					></span>{/if}
 			</button>
 		{/if}
 
-		{#if onOpenSettings}
+		{#if onOpenSettings && showQuickActions}
 			<button
 				class="header-circle-btn settings-btn"
 				class:active={isSettingsOpen}
@@ -70,8 +90,8 @@
 				<img
 					src={settingsIcon}
 					alt=""
-					width="24"
-					height="24"
+					width="32"
+					height="32"
 					class="settings-icon"
 				/>
 			</button>
@@ -105,6 +125,11 @@
 			</div>
 		{/if}
 	</div>
+	{#if notificationOpen}
+		<PopupMenu top="48px" right="clamp(0px, calc(100% - 197px), 124px)">
+			<p class="notification-empty">{t('settings.noNotifications')}</p>
+		</PopupMenu>
+	{/if}
 </header>
 
 {#if failure}
@@ -123,157 +148,118 @@
 		margin-bottom: 16px;
 		flex-shrink: 0;
 	}
-
 	.logo {
-		font-family: var(--font-family-base);
 		font-weight: 700;
 		font-size: 24px;
-		color: #66666a;
-		letter-spacing: -0.5px;
-		margin-left: 8px;
+		line-height: 1;
+		color: #00000080;
+		letter-spacing: -1.68px;
+		margin-left: 9px;
 		user-select: none;
 	}
-
 	.dark-surface .logo {
-		color: rgba(255, 255, 255, 0.56);
+		color: #ffffff80;
 	}
-
 	.header-right {
 		display: flex;
 		align-items: center;
-		gap: 8px;
+		gap: 12px;
 	}
-
 	.header-circle-btn {
-		width: 40px;
-		height: 40px;
-		min-width: 40px;
-		min-height: 40px;
-		border-radius: 50%;
-		background: rgba(0, 0, 0, 0.25);
-		border: none;
-		display: flex;
-		align-items: center;
-		justify-content: center;
-		cursor: pointer;
+		display: grid;
+		place-items: center;
+		width: 36px;
+		height: 36px;
+		min-height: 0;
 		padding: 0;
-		box-sizing: border-box;
-		backdrop-filter: blur(10px);
+		border: 0;
+		border-radius: 50%;
+		background: var(--design-glass);
+		backdrop-filter: blur(25px);
 		transition:
-			background 0.2s ease,
-			transform 0.2s cubic-bezier(0.34, 1.56, 0.64, 1);
+			background-color 160ms ease,
+			transform 160ms var(--ease-spring);
 	}
-
-	.header-circle-btn:hover {
-		background: rgba(255, 255, 255, 0.15);
-		transform: scale(1.08);
+	.header-circle-btn img {
+		display: block;
 	}
-
-	.header-circle-btn:active {
-		transform: scale(0.92);
-	}
-
 	.settings-btn.active {
-		background: rgba(255, 255, 255, 0.25);
+		background: #ffffff20;
 	}
-
 	.update-btn {
 		position: relative;
-		animation: bell-arrival 420ms var(--ease-spring);
+		background: #fff;
 	}
-
-	.update-btn img {
-		filter: brightness(0) invert(1);
-		opacity: 0.82;
-	}
-
 	.update-dot {
 		position: absolute;
-		top: 5px;
-		right: 5px;
-		width: 8px;
-		height: 8px;
+		top: 2px;
+		right: 2px;
+		width: 6px;
+		height: 6px;
 		border-radius: 50%;
 		background: var(--color-accent);
-		box-shadow: 0 0 0 2px rgba(20, 20, 20, 0.82);
 	}
-
-	@keyframes bell-arrival {
-		0% {
-			transform: scale(0.65) rotate(-14deg);
-			opacity: 0;
-		}
-		100% {
-			transform: scale(1) rotate(0);
-			opacity: 1;
-		}
+	.notification-empty {
+		padding: 8px;
+		margin: 0;
+		color: #ffffff80;
+		font-size: 13px;
 	}
-
-	.settings-icon {
-		filter: brightness(0) invert(1);
-		opacity: 0.8;
-		transition: opacity 0.2s ease;
-	}
-
-	.settings-btn:hover .settings-icon,
-	.settings-btn.active .settings-icon {
-		opacity: 1;
-	}
-
 	.controls-pill {
 		display: flex;
 		align-items: center;
-		background: rgba(0, 0, 0, 0.2);
-		border: none;
-		border-radius: 123px;
+		justify-content: space-between;
 		width: 112px;
 		height: 40px;
 		padding: 6px;
-		gap: 0;
-		justify-content: space-between;
-		box-sizing: border-box;
-		backdrop-filter: blur(10px);
+		border-radius: 123px;
+		background: var(--design-glass);
+		backdrop-filter: blur(25px);
 	}
-
 	.control-btn {
+		display: grid;
+		place-items: center;
 		width: 28px;
 		height: 28px;
-		min-width: 28px;
 		min-height: 0;
-		max-width: 28px;
-		max-height: 28px;
-		aspect-ratio: 1 / 1;
-		flex-shrink: 0;
+		padding: 0;
+		border: 0;
 		border-radius: 50%;
 		background: transparent;
-		border: none;
-		display: flex;
-		align-items: center;
-		justify-content: center;
-		cursor: pointer;
-		padding: 0;
-		box-sizing: border-box;
 		transition:
-			background 0.2s ease,
-			transform 0.2s cubic-bezier(0.34, 1.56, 0.64, 1);
+			background-color 160ms ease,
+			transform 160ms var(--ease-spring);
 	}
-
-	.control-btn:hover {
-		background: rgba(255, 255, 255, 0.15);
-		transform: scale(1.1);
+	.control-btn img {
+		width: 28px;
+		height: 28px;
 	}
-
+	.header-circle-btn:active,
 	.control-btn:active {
-		transform: scale(0.92);
+		transform: scale(0.94);
 	}
-
-	.control-btn.close:hover {
-		background: rgba(243, 57, 57, 0.6);
+	@media (hover: hover) and (pointer: fine) {
+		.header-circle-btn:hover,
+		.control-btn:hover {
+			background: #ffffff20;
+		}
+		.control-btn.close:hover {
+			background: #f3393980;
+		}
 	}
-
-	@media (prefers-reduced-motion: reduce) {
-		.update-btn {
-			animation: none;
+	@media (max-width: 350px) {
+		.header-right {
+			gap: 6px;
+		}
+	}
+	@media (max-width: 310px) {
+		.header-right {
+			gap: 4px;
+		}
+		.logo {
+			font-size: 22px;
+			letter-spacing: -1.54px;
+			margin-left: 4px;
 		}
 	}
 </style>

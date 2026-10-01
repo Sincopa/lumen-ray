@@ -344,7 +344,7 @@ pub async fn warm_standby_isolation() -> Result<()> {
         steam_reachable().await?;
         eprintln!("STANDBY_CHECK live rule update");
         let old_count = routing_rule_count(&core, metrics_port + 2).await?;
-        let patch = crate::xray::config::live_routing_patch(&before, &after, &selected)?
+        let patch = crate::xray::config::live_routing_patch(&before, &after, &selected, true)?
             .ok_or_else(error)?;
         crate::core::xray::run_live_routing_patch(&core, metrics_port + 2, &patch).await?;
         let updated_count = routing_rule_count(&core, metrics_port + 2).await?;
@@ -355,7 +355,7 @@ pub async fn warm_standby_isolation() -> Result<()> {
             ));
         }
         eprintln!("STANDBY_CHECK rules to global");
-        let mode_patch = crate::xray::config::live_routing_patch(&after, &global, &selected)?
+        let mode_patch = crate::xray::config::live_routing_patch(&after, &global, &selected, true)?
             .ok_or_else(error)?;
         crate::core::xray::run_live_routing_patch(&core, metrics_port + 2, &mode_patch).await?;
         let global_count = routing_rule_count(&core, metrics_port + 2).await?;
@@ -363,7 +363,7 @@ pub async fn warm_standby_isolation() -> Result<()> {
             return Err(error());
         }
         eprintln!("STANDBY_CHECK global to rules");
-        let back_patch = crate::xray::config::live_routing_patch(&global, &after, &selected)?
+        let back_patch = crate::xray::config::live_routing_patch(&global, &after, &selected, true)?
             .ok_or_else(error)?;
         crate::core::xray::run_live_routing_patch(&core, metrics_port + 2, &back_patch).await?;
         if routing_rule_count(&core, metrics_port + 2).await? + 1 != old_count {

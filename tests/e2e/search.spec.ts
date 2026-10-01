@@ -6,7 +6,7 @@ test('server search matches country, protocol and subscription after indexing', 
 	page,
 }) => {
 	await page.goto('/');
-	await page.getByRole('button', { name: 'Сервера', exact: true }).click();
+	await page.locator('.server-selector').click();
 	await page.getByRole('button', { name: 'Поиск', exact: true }).click();
 	const search = page.getByPlaceholder('Поиск по серверам...');
 	await search.fill('НИДЕРЛАНДЫ');

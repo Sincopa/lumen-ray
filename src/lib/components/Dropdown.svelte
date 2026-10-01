@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { tick } from 'svelte';
-	import chevronIcon from '../../assets/chevron.svg';
+	import chevronIcon from '../../assets/chevron-down.svg';
 
 	type Option = { value: string; label: string };
 	let {

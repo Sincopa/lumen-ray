@@ -2,6 +2,9 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 fn main() {
+    if app_lib::run_startup_check_if_requested() {
+        return;
+    }
     if app_lib::run_smoke_if_requested() {
         return;
     }

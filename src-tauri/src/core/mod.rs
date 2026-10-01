@@ -198,10 +198,14 @@ pub async fn connect(
         crate::services::vpn_service::stop(session).await?;
         session.backend = BackendSession::empty(engine);
     }
+    // An Xray system-proxy session may switch live on the same local port; the
+    // caller replaces the Windows proxy only when the listener changes.
     #[cfg(windows)]
-    if let Some(proxy) = session.system_proxy.as_ref() {
-        proxy.restore()?;
-        session.system_proxy = None;
+    if engine != CoreEngine::Xray || repo.settings.network_mode == "tun" {
+        if let Some(proxy) = session.system_proxy.as_ref() {
+            proxy.restore()?;
+            session.system_proxy = None;
+        }
     }
     selected_backend
         .connect(state, repo, selected, &mut session.backend)

@@ -5,7 +5,7 @@
 	import CountryFlag from '../../components/CountryFlag.svelte';
 	import MaterialIcon from '../../components/MaterialIcon.svelte';
 	import IconButton from '../../components/IconButton.svelte';
-	import chevronIcon from '../../../assets/chevron.svg';
+	import chevronIcon from '../../../assets/chevron-down.svg';
 	import checkIcon from '../../../assets/check.svg';
 
 	interface Props {

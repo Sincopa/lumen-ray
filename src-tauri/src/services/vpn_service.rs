@@ -44,11 +44,15 @@ pub async fn publish(state: &AppState, app: &tauri::AppHandle, snapshot: Snapsho
     }
     crate::update_tray_menu(app, state);
 }
+/// A user connection waits for a short catalog or settings transaction (a rule
+/// toggle, a subscription being applied) instead of failing with BUSY.
+async fn maintenance(state: &AppState) -> Result<tokio::sync::MutexGuard<'_, ()>> {
+    tokio::time::timeout(Duration::from_secs(20), state.updates.lock())
+        .await
+        .map_err(|_| BackendError::new("BUSY", "Maintenance is in progress"))
+}
 pub async fn connect(state: &Arc<AppState>, app: &tauri::AppHandle, id: String) -> Result<()> {
-    let _transaction = state
-        .updates
-        .try_lock()
-        .map_err(|_| BackendError::new("BUSY", "Maintenance is in progress"))?;
+    let _transaction = maintenance(state).await?;
     state.recovery_attempts.lock().await.clear();
     connect_with_selection(state, app, id, true, None, true).await
 }
@@ -57,10 +61,7 @@ pub async fn connect_exact(
     app: &tauri::AppHandle,
     id: String,
 ) -> Result<()> {
-    let _transaction = state
-        .updates
-        .try_lock()
-        .map_err(|_| BackendError::new("BUSY", "Maintenance is in progress"))?;
+    let _transaction = maintenance(state).await?;
     state.recovery_attempts.lock().await.clear();
     connect_with_selection(state, app, id, false, None, true).await
 }
@@ -102,9 +103,10 @@ pub async fn prewarm(state: &Arc<AppState>) {
         .await
     {
         log::warn!(
-            "engine={:?} preparation failed: {}",
+            "engine={:?} preparation failed: {} ({})",
             repo.settings.core_engine,
-            error.code
+            error.code,
+            error.message
         );
     }
 }
@@ -308,8 +310,8 @@ async fn connect_with_selection(
             }
         }
     }
-    if result.is_err() && !restored {
-        if let Err(cleanup) = stop(&mut session).await {
+    if let (Err(error), false) = (&result, restored) {
+        if let Err(cleanup) = release(&mut session, error).await {
             result = Err(cleanup);
         }
     }
@@ -381,20 +383,54 @@ async fn connect_session_with_repository(
 ) -> Result<()> {
     let session_at = Instant::now();
     let engine = repo.settings.core_engine;
+    let protocol = protocol_name(repo, &id)?;
     let mut result = crate::core::connect(state, repo, &id, session).await;
     let proxy_port = session.proxy_port();
     let is_tun = session.is_tun();
     #[cfg(windows)]
     if result.is_ok() && !is_tun {
-        match crate::platform::proxy::SystemProxy::enable(&state.data, session.http_port()) {
-            Ok(proxy) => session.system_proxy = Some(proxy),
-            Err(error) => result = Err(error),
+        let port = session.http_port();
+        if session
+            .system_proxy
+            .as_ref()
+            .is_none_or(|proxy| proxy.port() != port)
+        {
+            if let Some(previous) = session.system_proxy.take() {
+                if let Err(error) = previous.restore() {
+                    session.system_proxy = Some(previous);
+                    result = Err(error);
+                }
+            }
+            if result.is_ok() {
+                match crate::platform::proxy::SystemProxy::enable(&state.data, port) {
+                    Ok(proxy) => session.system_proxy = Some(proxy),
+                    Err(error) => result = Err(error),
+                }
+            }
         }
     }
     log::info!(
         "engine={engine:?} local startup completed {} ms",
         session_at.elapsed().as_millis()
     );
+    // Traffic already uses the new path. Show it now, like other clients do, and
+    // verify end to end below: a failure still restores or tears down the session.
+    let connected_at = super::catalog_service::now();
+    let connected = |ip: String| Snapshot {
+        status: "connected".into(),
+        info: Some(ConnectionInfo {
+            engine,
+            server_id: id.clone(),
+            ip,
+            protocol: protocol.into(),
+            connected_at,
+            demo: false,
+        }),
+        error: None,
+    };
+    if result.is_ok() && state.connection_generation.load(Ordering::Acquire) == generation {
+        publish(state, app, connected(String::new())).await;
+    }
     let mut verified_ip = None;
     if result.is_ok() {
         let verification = async {
@@ -456,50 +492,56 @@ async fn connect_session_with_repository(
                     }
                 });
             }
-            let node = repo
-                .nodes
-                .iter()
-                .find(|n| n.id == id)
-                .ok_or_else(BackendError::invalid)?;
-            let protocol = match node.protocol {
-                crate::domain::node::Protocol::Socks => "SOCKS5",
-                crate::domain::node::Protocol::Http => "HTTP",
-                crate::domain::node::Protocol::Vless => "Vless",
-                crate::domain::node::Protocol::Vmess => "VMess",
-                crate::domain::node::Protocol::Trojan => "Trojan",
-                crate::domain::node::Protocol::Shadowsocks => "Shadowsocks",
-                crate::domain::node::Protocol::Hysteria => "Hysteria",
-                crate::domain::node::Protocol::Wireguard => "WireGuard",
-            };
-            publish(
-                state,
-                app,
-                Snapshot {
-                    status: "connected".into(),
-                    info: Some(ConnectionInfo {
-                        engine,
-                        server_id: id.clone(),
-                        ip: verified_ip.unwrap_or_default(),
-                        protocol: protocol.into(),
-                        connected_at: super::catalog_service::now(),
-                        demo: false,
-                    }),
-                    error: None,
-                },
-            )
-            .await;
+            if let Some(ip) = verified_ip {
+                publish(state, app, connected(ip)).await;
+            }
             log::info!(
-                "VPN timing: connected published {} ms",
+                "VPN timing: connection verified {} ms",
                 session_at.elapsed().as_millis()
             );
             Ok(())
         }
         Err(error) => {
-            let cleanup = stop(session).await;
-            cleanup?;
+            release(session, &error).await?;
             Err(error)
         }
     }
+}
+fn protocol_name(repo: &crate::storage::repository::Repository, id: &str) -> Result<&'static str> {
+    let node = repo
+        .nodes
+        .iter()
+        .find(|n| n.id == id)
+        .ok_or_else(BackendError::invalid)?;
+    Ok(match node.protocol {
+        crate::domain::node::Protocol::Socks => "SOCKS5",
+        crate::domain::node::Protocol::Http => "HTTP",
+        crate::domain::node::Protocol::Vless => "Vless",
+        crate::domain::node::Protocol::Vmess => "VMess",
+        crate::domain::node::Protocol::Trojan => "Trojan",
+        crate::domain::node::Protocol::Shadowsocks => "Shadowsocks",
+        crate::domain::node::Protocol::Hysteria => "Hysteria",
+        crate::domain::node::Protocol::Wireguard => "WireGuard",
+    })
+}
+/// Tear down a failed or cancelled attempt. An unreachable server says nothing
+/// about the local tunnel, so a healthy prepared TUN helper is kept and the next
+/// attempt needs neither a new elevated helper nor a new Wintun adapter.
+async fn release(session: &mut Session, cause: &BackendError) -> Result<()> {
+    if !keeps_prepared_core(cause.code) {
+        return stop(session).await;
+    }
+    #[cfg(windows)]
+    if let Some(proxy) = session.system_proxy.as_ref() {
+        proxy.restore()?;
+        session.system_proxy = None;
+    }
+    backend(session.engine())
+        .disconnect(&mut session.backend, true)
+        .await
+}
+fn keeps_prepared_core(code: &str) -> bool {
+    matches!(code, "CANCELLED" | "SERVER_UNREACHABLE" | "IP_UNAVAILABLE")
 }
 pub async fn public_ip(proxy_port: u16) -> Result<String> {
     super::health::resolve_ip(proxy_port).await

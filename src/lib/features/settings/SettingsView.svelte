@@ -3,7 +3,7 @@
 	import AdvancedTools from './AdvancedTools.svelte';
 	let toolsOpen = $state(false);
 	import { invoke } from '@tauri-apps/api/core';
-	import chevronIcon from '../../../assets/chevron.svg';
+	import chevronIcon from '../../../assets/chevron-down.svg';
 	import reloadIcon from '../../../assets/reload.svg';
 	import Dropdown from '../../components/Dropdown.svelte';
 	import SettingRow from '../../components/SettingRow.svelte';

@@ -43,13 +43,19 @@ pub fn build_standby(
         .as_object_mut()
         .ok_or_else(BackendError::invalid)?
         .remove("autoSystemRoutingTable");
+    enable_api(&mut config, metrics_port)?;
+    Ok(config)
+}
+
+/// Local-only control API used to replace routing and add outbounds without a restart.
+pub fn enable_api(config: &mut XrayConfig, metrics_port: u16) -> Result<()> {
     let api_port = metrics_port
         .checked_add(2)
         .ok_or_else(BackendError::invalid)?;
     config.api = Some(
         json!({"tag":"lumen-api","listen":format!("127.0.0.1:{api_port}"),"services":["RoutingService","HandlerService"]}),
     );
-    Ok(config)
+    Ok(())
 }
 
 /// Xray replaces the complete rule set atomically through RoutingService.
@@ -59,9 +65,10 @@ pub fn live_routing_patch(
     repo_before: &Repository,
     repo_after: &Repository,
     selected: &str,
+    tun: bool,
 ) -> Result<Option<Value>> {
-    let before = build(repo_before, selected, 10808, 10809, true)?;
-    let after = build(repo_after, selected, 10808, 10809, true)?;
+    let before = build(repo_before, selected, 10808, 10809, tun)?;
+    let after = build(repo_after, selected, 10808, 10809, tun)?;
     if after
         .outbounds
         .iter()
@@ -199,26 +206,25 @@ pub fn build(
         json!({"type":"field","inboundTag":["probe"], target_field: target_tag}),
         json!({"type":"field","process":["self/"],"outboundTag":"direct"}),
     ];
+    // DNS, inbounds, outbounds and the router strategy must not depend on the
+    // routing mode: switching All/Rules then only replaces rules through the API
+    // in both TUN and system-proxy modes, without restarting the core.
     let dns_servers = if repo.settings.dns_policy.enabled {
         vec![repo.settings.dns_policy.bootstrap.clone()]
-    } else if tun || repo.routing_mode == "rules" {
-        if repo.settings.dns_server == "system" {
-            #[cfg(windows)]
-            {
-                crate::platform::network::system_dns()?
-            }
-            #[cfg(not(windows))]
-            {
-                return Err(BackendError::new(
-                    "PLATFORM_UNSUPPORTED",
-                    "System DNS requires Windows",
-                ));
-            }
-        } else {
-            vec![repo.settings.dns_server.clone()]
+    } else if repo.settings.dns_server == "system" {
+        #[cfg(windows)]
+        {
+            crate::platform::network::system_dns()?
+        }
+        #[cfg(not(windows))]
+        {
+            return Err(BackendError::new(
+                "PLATFORM_UNSUPPORTED",
+                "System DNS requires Windows",
+            ));
         }
     } else {
-        vec![]
+        vec![repo.settings.dns_server.clone()]
     };
     // System/private resolvers stay reachable on the physical network. Explicit public
     // resolvers use the selected VPN, including balancers. This tag precedes self/LAN.
@@ -229,7 +235,7 @@ pub fn build(
             target_tag,
             &mut rules,
         )?)
-    } else if tun || repo.routing_mode == "rules" {
+    } else {
         let local = repo.settings.dns_server == "system"
             || dns_servers.iter().any(|s| {
                 s.parse::<std::net::IpAddr>().is_ok_and(|ip| match ip {
@@ -241,16 +247,14 @@ pub fn build(
                     }
                 })
             });
-        if tun || repo.routing_mode == "rules" {
-            rules.insert(
-                0,
-                if local {
-                    json!({"type":"field","inboundTag":["dns-query"],"outboundTag":"direct"})
-                } else {
-                    json!({"type":"field","inboundTag":["dns-query"],target_field:target_tag})
-                },
-            );
-        }
+        rules.insert(
+            0,
+            if local {
+                json!({"type":"field","inboundTag":["dns-query"],"outboundTag":"direct"})
+            } else {
+                json!({"type":"field","inboundTag":["dns-query"],target_field:target_tag})
+            },
+        );
         let servers: Vec<_> = dns_servers
             .iter()
             .map(|s| {
@@ -262,13 +266,9 @@ pub fn build(
             })
             .collect();
         Some(json!({"tag":"dns-query","servers":servers}))
-    } else {
-        None
     };
     // Hijack A/AAAA before LAN bypass, including queries originally sent to a local router.
-    if tun || repo.routing_mode == "rules" {
-        outbounds.push(json!({"tag":"dns","protocol":"dns"}));
-    }
+    outbounds.push(json!({"tag":"dns","protocol":"dns"}));
     if repo.routing_mode == "rules" || (tun && repo.settings.dns_policy.enabled) {
         rules.push(json!({"type":"field","port":"53","outboundTag":"dns"}));
     }
@@ -401,9 +401,9 @@ pub fn build(
         inbounds.push(json!({"tag":"tun","protocol":"tun","settings":{"name":"LumenTun","mtu":1500,"gateway":["172.31.255.1/30","fd42:6c75:6d65::1/126"],"dns":dns_servers,"autoSystemRoutingTable":["0.0.0.0/0","::/0"],"autoOutboundsInterface":"auto"},"sniffing":{"enabled":true,"destOverride":["http","tls","quic"],"routeOnly":true}}));
     }
 
-    // TUN keeps one router strategy in both modes so its rules can change
-    // without tearing down the adapter. The global catch-all still selects VPN.
-    let mut routing = json!({"domainStrategy":if tun || repo.routing_mode == "rules" { "IPOnDemand" } else { "IPIfNonMatch" },"rules":rules});
+    // One router strategy in both routing modes lets rules change without
+    // restarting the core. The global catch-all still selects the VPN.
+    let mut routing = json!({"domainStrategy":"IPOnDemand","rules":rules});
     if let Some(balancer) = &node.balancer {
         routing["balancers"] = json!([{
             "tag": balancer.tag,

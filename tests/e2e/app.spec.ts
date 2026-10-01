@@ -34,7 +34,7 @@ test('server choice survives navigation, connecting and reload', async ({
 	page,
 }) => {
 	await page.goto('/');
-	await page.getByRole('button', { name: 'Сервера', exact: true }).click();
+	await page.locator('.server-selector').click();
 	await page.getByRole('button', { name: /Нидерланды/ }).click();
 	await expect(page.locator('.server-selector')).toHaveAttribute(
 		'aria-label',
@@ -44,7 +44,7 @@ test('server choice survives navigation, connecting and reload', async ({
 		.getByRole('button', { name: 'Нажмите для подключения', exact: true })
 		.click();
 	await expect(page.getByRole('status')).toHaveText('Подключен');
-	await page.getByRole('button', { name: 'Сервера', exact: true }).click();
+	await page.locator('.server-selector').click();
 	await page.getByRole('button', { name: /Финляндия/ }).click();
 	await expect(page.getByRole('status')).toHaveText('Подключен');
 	await expect(page.locator('.server-selector')).toHaveAttribute(
@@ -64,7 +64,7 @@ test('routing mode is locked only while the VPN state is changing', async ({
 	page,
 }) => {
 	await page.goto('/');
-	const modeButtons = page.locator('.action-pill-btn');
+	const modeButtons = page.locator('.action-pill');
 	await expect(modeButtons.first()).toBeEnabled();
 	await page.locator('.central-logo-btn').click();
 	await expect(modeButtons.first()).toBeDisabled();
@@ -80,7 +80,8 @@ test('server refresh fades every latency through a loading spinner', async ({
 	page,
 }) => {
 	await page.goto('/');
-	await page.getByRole('button', { name: ru.nav.servers, exact: true }).click();
+	await page.getByRole('button', { name: ru.nav.home, exact: true }).click();
+	await page.locator('.server-selector').click();
 	const servers = page.locator('.servers-view');
 	await servers
 		.getByRole('button', { name: ru.servers.reloadServers, exact: true })
@@ -124,13 +125,9 @@ test('empty home morphs the centered add button into a subscription field', asyn
 	]);
 	expect(appBounds).not.toBeNull();
 	expect(buttonBounds).not.toBeNull();
-	expect(
-		Math.abs(
-			buttonBounds!.y +
-				buttonBounds!.height / 2 -
-				(appBounds!.y + appBounds!.height / 2),
-		),
-	).toBeLessThan(2);
+	expect(buttonBounds!.y - appBounds!.y).toBeCloseTo(385, 1);
+	expect(buttonBounds!.width).toBe(229);
+	expect(buttonBounds!.height).toBe(63);
 	await page.screenshot({ path: 'artifacts/verification/empty-home-add.png' });
 
 	await add.click();
@@ -282,7 +279,8 @@ test('add panels and searches stay usable in the compact window', async ({
 	await form
 		.getByRole('button', { name: ru.common.close, exact: true })
 		.click();
-	await page.getByRole('button', { name: ru.nav.servers, exact: true }).click();
+	await page.getByRole('button', { name: ru.nav.home, exact: true }).click();
+	await page.locator('.server-selector').click();
 	await page
 		.getByRole('region', { name: ru.servers.title })
 		.getByRole('button', { name: ru.common.search })
@@ -347,7 +345,7 @@ test('rules persist, validate input and do not trap navigation', async ({
 		page
 			.getByRole('region', { name: ru.rules.title, exact: true })
 			.getByRole('button', { name: ru.common.menu, exact: true }),
-	).toHaveCount(0);
+	).toHaveCount(1);
 	await page
 		.getByRole('region', { name: ru.rules.title, exact: true })
 		.getByRole('button', { name: ru.common.add, exact: true })

@@ -7,6 +7,21 @@
 }
 
 @font-face {
+	font-family: 'Satoshi';
+	src: url('./fonts/Satoshi-Regular.woff2') format('woff2');
+	font-weight: 400;
+	font-style: normal;
+	font-display: swap;
+}
+@font-face {
+	font-family: 'Satoshi';
+	src: url('./fonts/Satoshi-Medium.woff2') format('woff2');
+	font-weight: 500;
+	font-style: normal;
+	font-display: swap;
+}
+
+@font-face {
 	font-family: 'Material Symbols Rounded';
 	src: url('./fonts/MaterialSymbolsRounded-subset-v375.woff2') format('woff2');
 	font-weight: 100 700;

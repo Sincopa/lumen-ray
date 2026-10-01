@@ -17,11 +17,11 @@
 	import reloadIcon from '../../../assets/reload.svg';
 	import searchIcon from '../../../assets/search.svg';
 	import checkIcon from '../../../assets/check.svg';
-	import crossIcon from '../../../assets/cross.svg';
+	import crossIcon from '../../../assets/close.svg';
 	import menuIcon from '../../../assets/menu.svg';
 	import pencilIcon from '../../../assets/pencil.svg';
 	import trashIcon from '../../../assets/trash.svg';
-	import shareIcon from '../../../assets/share.svg';
+	import shareIcon from '../../../assets/share-link.svg';
 
 	const searchTask = createDeferredTask();
 	const renameTask = createDeferredTask();
@@ -35,11 +35,13 @@
 		selectedId = '',
 		disabled = false,
 		compact = false,
+		searchSignal = 0,
 		onSelect,
 	}: {
 		selectedId?: string;
 		disabled?: boolean;
 		compact?: boolean;
+		searchSignal?: number;
 		onManageSubscription?: () => void;
 		onSelect?: (server: {
 			id: string;
@@ -135,6 +137,10 @@
 		}, 240);
 	}
 
+	$effect(() => {
+		if (searchSignal > 0) handleOpenSearch();
+	});
+
 	function handleOpenRename() {
 		menu = false;
 		editSubName = activeSubscription?.name ?? '';
@@ -203,6 +209,12 @@
 </script>
 
 <svelte:window
+	onkeydown={(event) => {
+		if (event.key === 'Escape') {
+			menu = false;
+			if (searching) handleCloseSearch();
+		}
+	}}
 	onclick={(e) => {
 		if (menu) {
 			const target = e.target as HTMLElement | null;
@@ -226,11 +238,13 @@
 				</div>
 				<div class="header-card-actions">
 					<IconButton
+						design
 						icon={searchIcon}
 						ariaLabel={t('common.search')}
 						onclick={handleOpenSearch}
 					/>
 					<IconButton
+						design
 						icon={reloadIcon}
 						ariaLabel={t('servers.reloadServers')}
 						disabled={busy || !$catalogStore.servers.length}
@@ -238,6 +252,7 @@
 					/>
 					{#if !compact}
 						<IconButton
+							design
 							icon={menuIcon}
 							ariaLabel={t('common.menu')}
 							active={menu}
@@ -456,7 +471,7 @@
 	.servers-view {
 		display: flex;
 		flex-direction: column;
-		gap: 10px;
+		gap: 12px;
 		height: 100%;
 		min-height: 0;
 		position: relative;
@@ -467,15 +482,15 @@
 	}
 	.header-pill {
 		position: relative;
-		height: 62px;
-		background: #00000038;
+		height: var(--design-header-height);
+		background: var(--design-panel);
 		border-radius: 124px;
 		-webkit-backdrop-filter: blur(14px);
 		backdrop-filter: blur(14px);
 		box-sizing: border-box;
 		width: 100%;
 		overflow: hidden;
-		border: 1px solid transparent;
+		border: 0;
 		transition: border-color 180ms ease;
 	}
 
@@ -486,7 +501,7 @@
 	.header-normal {
 		width: 100%;
 		height: 100%;
-		padding: 0 12px 0 24px;
+		padding: 0 20px 0 23px;
 		display: flex;
 		justify-content: space-between;
 		align-items: center;
@@ -508,9 +523,9 @@
 		align-items: center;
 		gap: 10px;
 		min-width: 0;
-		font-size: 15px;
+		font-size: 16px;
 		font-weight: 500;
-		letter-spacing: -0.2px;
+		letter-spacing: 0;
 	}
 
 	.title-text {
@@ -522,7 +537,7 @@
 	.header-card-actions {
 		display: flex;
 		align-items: center;
-		gap: 4px;
+		gap: 8px;
 		flex-shrink: 0;
 	}
 
@@ -559,8 +574,8 @@
 	}
 
 	.search-header-icon {
-		width: 18px;
-		height: 18px;
+		width: 28px;
+		height: 28px;
 		object-fit: contain;
 		filter: brightness(0) invert(1);
 		opacity: 0.6;
@@ -630,6 +645,8 @@
 
 	.ping-reading {
 		display: inline-flex;
+		letter-spacing: 0.28px;
+		gap: 3px;
 		align-items: center;
 		justify-content: flex-end;
 		min-width: 42px;
@@ -656,22 +673,24 @@
 	}
 	.server-row {
 		width: 100%;
-		min-height: 62px;
+		min-height: var(--design-row-height);
+		height: var(--design-row-height);
+		flex-shrink: 0;
 		display: flex;
-		gap: 12px;
+		gap: 6px;
 		align-items: center;
 		border: none;
 		border-radius: 30px;
 		background: transparent;
-		padding: 10px 12px;
+		padding: 12px 27px 12px 12px;
 		text-align: left;
 		transition:
 			background-color 180ms ease,
 			transform 180ms var(--ease-spring);
 	}
 	.server-row:hover,
-	.active-server {
-		background: #00000026;
+	.server-row.active-server {
+		background: var(--design-panel);
 		border-color: transparent;
 	}
 	.server-row:active {
@@ -680,20 +699,24 @@
 	.server-text {
 		display: flex;
 		flex-direction: column;
-		gap: 1px;
+		gap: 6px;
 		min-width: 0;
 		flex: 1;
 		overflow-wrap: anywhere;
 		font-size: 14px;
+		line-height: 14px;
 	}
 	.protocol {
-		font-size: 11px;
+		font-size: 10px;
 		line-height: 1;
+		font-weight: 500;
+		letter-spacing: 0.5px;
 		color: #ffffff70;
 		text-transform: uppercase;
 	}
 	.ping {
-		font-size: 13px;
+		font-size: 14px;
+		font-weight: 500;
 		white-space: nowrap;
 		color: #ffffffe6;
 		display: inline-flex;

@@ -297,7 +297,7 @@ fn disabling_a_rule_can_replace_live_routing_without_restarting_tun() {
     });
     let mut after = before.clone();
     after.rules[0].enabled = false;
-    let patch = config::live_routing_patch(&before, &after, &node.id)
+    let patch = config::live_routing_patch(&before, &after, &node.id, true)
         .unwrap()
         .unwrap();
     assert!(!patch["routing"]["rules"]
@@ -307,14 +307,16 @@ fn disabling_a_rule_can_replace_live_routing_without_restarting_tun() {
         .any(|rule| rule["process"]
             .as_array()
             .is_some_and(|processes| processes.iter().any(|process| process == "steam.exe"))));
-    assert!(config::live_routing_patch(&after, &before, &node.id)
+    assert!(config::live_routing_patch(&after, &before, &node.id, true)
         .unwrap()
         .is_some());
     let mut removed = before.clone();
     removed.rules.clear();
-    assert!(config::live_routing_patch(&before, &removed, &node.id)
-        .unwrap()
-        .is_some());
+    assert!(
+        config::live_routing_patch(&before, &removed, &node.id, true)
+            .unwrap()
+            .is_some()
+    );
 }
 #[cfg(windows)]
 #[test]
@@ -357,10 +359,10 @@ fn switching_routing_modes_keeps_the_active_tun_configuration() {
         global_config["routing"]["rules"][0]["inboundTag"][0],
         "dns-query"
     );
-    assert!(config::live_routing_patch(&rules, &global, &node.id)
+    assert!(config::live_routing_patch(&rules, &global, &node.id, true)
         .unwrap()
         .is_some());
-    assert!(config::live_routing_patch(&global, &rules, &node.id)
+    assert!(config::live_routing_patch(&global, &rules, &node.id, true)
         .unwrap()
         .is_some());
     assert_eq!(
@@ -379,6 +381,42 @@ fn switching_routing_modes_keeps_the_active_tun_configuration() {
             .unwrap()["outboundTag"],
         "direct"
     );
+}
+#[cfg(windows)]
+#[test]
+fn switching_routing_modes_keeps_the_system_proxy_configuration() {
+    let node = uri::parse(VLESS, "sub").unwrap();
+    let mut rules = Repository {
+        nodes: vec![node.clone()],
+        routing_mode: "rules".into(),
+        ..Default::default()
+    };
+    rules.settings.network_mode = "proxy".into();
+    rules.settings.dns_server = "1.1.1.1".into();
+    let mut global = rules.clone();
+    global.routing_mode = "global".into();
+    let rules_config =
+        serde_json::to_value(config::build(&rules, &node.id, 10808, 10809, false).unwrap())
+            .unwrap();
+    let global_config =
+        serde_json::to_value(config::build(&global, &node.id, 10808, 10809, false).unwrap())
+            .unwrap();
+    for field in ["inbounds", "outbounds", "dns"] {
+        assert_eq!(
+            rules_config[field], global_config[field],
+            "{field} changed across modes"
+        );
+    }
+    assert_eq!(
+        rules_config["routing"]["domainStrategy"],
+        global_config["routing"]["domainStrategy"]
+    );
+    assert!(config::live_routing_patch(&rules, &global, &node.id, false)
+        .unwrap()
+        .is_some());
+    assert!(config::live_routing_patch(&global, &rules, &node.id, false)
+        .unwrap()
+        .is_some());
 }
 #[test]
 fn balanced_xray_subscription_and_clean_names() {
