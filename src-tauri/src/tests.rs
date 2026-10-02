@@ -318,6 +318,44 @@ fn disabling_a_rule_can_replace_live_routing_without_restarting_tun() {
             .is_some()
     );
 }
+#[test]
+fn vpn_applications_do_not_override_russian_direct_presets() {
+    use crate::services::catalog_service::generate_preset_rules;
+    use crate::storage::repository::{Rule, RuleMatcher};
+    let node = uri::parse(VLESS, "sub").unwrap();
+    let app = |id: &str, server_id: &str| Rule {
+        id: id.into(),
+        name: format!("{id}.exe"),
+        matcher: RuleMatcher::Application,
+        server_id: server_id.into(),
+        enabled: true,
+        preset_id: None,
+        is_domain: false,
+    };
+    let mut repo = Repository {
+        nodes: vec![node.clone()],
+        routing_mode: "rules".into(),
+        ..Default::default()
+    };
+    repo.rules = vec![app("chrome", "subscription"), app("torrent", "direct")];
+    repo.rules
+        .extend(generate_preset_rules("russia-optimized", "subscription").unwrap());
+    let config =
+        serde_json::to_value(config::build(&repo, &node.id, 10808, 10809, true).unwrap()).unwrap();
+    let rules = config["routing"]["rules"].as_array().unwrap();
+    let position = |f: &dyn Fn(&serde_json::Value) -> bool| rules.iter().position(f).unwrap();
+    let process =
+        |name: &'static str| move |r: &serde_json::Value| r["process"][0].as_str() == Some(name);
+    let chrome = position(&process("chrome.exe"));
+    let torrent = position(&process("torrent.exe"));
+    let category_ru = position(&|r| r["domain"][0] == "geosite:category-ru");
+    let geoip_ru = position(&|r| r["ip"][0] == "geoip:ru");
+    let antifilter = position(&|r| r["domain"][0] == "geosite:antifilter");
+    assert!(category_ru < chrome && geoip_ru < chrome && antifilter < chrome);
+    assert!(torrent < antifilter, "direct applications stay absolute");
+    assert_eq!(rules[chrome]["outboundTag"], "proxy");
+    assert_eq!(rules[chrome + 1]["network"], "tcp,udp");
+}
 #[cfg(windows)]
 #[test]
 fn switching_routing_modes_keeps_the_active_tun_configuration() {

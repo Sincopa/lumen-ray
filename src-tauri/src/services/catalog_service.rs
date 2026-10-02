@@ -683,6 +683,11 @@ pub fn generate_preset_rules(preset_id: &str, target_proxy: &str) -> Result<Vec<
 
 /// Only built-in preset rows are sorted. Manual rows retain their relative order and priority.
 /// Compile saved rows as-is: do not recreate deleted/disabled rows when loading or connecting.
+///
+/// An application routed through a VPN matches every destination, so it is evaluated after
+/// the built-in presets: Russian services that reject foreign exits (ФНС, РЖД, Почта, ФССП)
+/// still go direct from that application, and blocked ones still use the VPN. Manual
+/// direct/block applications and manual domain/IP/geo rows keep the highest priority.
 pub fn ordered_rules(rules: &[Rule]) -> Vec<&Rule> {
     use crate::storage::repository::RuleMatcher;
     let mut rows: Vec<_> = rules.iter().collect();
@@ -692,7 +697,13 @@ pub fn ordered_rules(rules: &[Rule]) -> Vec<&Rule> {
             Some("russia-optimized" | "bypass-blocking" | "russia-direct")
         );
         let rank = if !builtin {
-            0
+            if r.matcher == RuleMatcher::Application
+                && !["direct", "block"].contains(&r.server_id.as_str())
+            {
+                7
+            } else {
+                0
+            }
         } else if r.matcher == RuleMatcher::Geoip && r.name == "private" {
             1
         } else if r.matcher == RuleMatcher::Geosite && r.name == "youtube" {
