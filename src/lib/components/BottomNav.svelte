@@ -1,7 +1,8 @@
 <script lang="ts">
 	import logoIcon from '../../assets/logo.svg';
 	import subscriptionsIcon from '../../assets/subscriptions.svg';
-	import rulesIcon from '../../assets/rules.svg';
+	import serversIcon from '../../assets/rules.svg';
+	import rulesSettingsIcon from '../../assets/rules-settings-v2.svg';
 	import plusIcon from '../../assets/plus.svg';
 	import globalIcon from '../../assets/mode-global.svg';
 	import tunIcon from '../../assets/mode-rules.svg';
@@ -34,7 +35,8 @@
 			icon: subscriptionsIcon,
 			label: 'nav.subscriptions',
 		},
-		{ id: 'rules' as const, icon: rulesIcon, label: 'nav.rules' },
+		{ id: 'servers' as const, icon: serversIcon, label: 'nav.servers' },
+		{ id: 'rules' as const, icon: rulesSettingsIcon, label: 'nav.rules' },
 	];
 	let modeLabel = $derived(
 		t(routingMode === 'rules' ? 'home.modeRules' : 'home.modeGlobal'),

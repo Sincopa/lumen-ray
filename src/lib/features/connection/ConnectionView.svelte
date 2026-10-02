@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { fade } from 'svelte/transition';
-	import NumberFlow from '@number-flow/svelte';
+	import RollingNumber from '../../components/RollingNumber.svelte';
 	import CountryFlag from '../../components/CountryFlag.svelte';
 	import LumenFace from '../../components/LumenFace.svelte';
 	import { t } from '../../i18n';
@@ -51,6 +51,11 @@
 
 	let visible = $state(true);
 	let hovered = $state(false);
+	let pressed = $state(false);
+	// A button that turns busy swallows its own pointerup, so never stay "pressed" through it.
+	$effect(() => {
+		if (busy) pressed = false;
+	});
 	onMount(() => {
 		const updateVisibility = () => {
 			visible = !document.hidden;
@@ -83,7 +88,13 @@
 			onpointerenter={(event) => {
 				if (event.pointerType === 'mouse') hovered = true;
 			}}
-			onpointerleave={() => (hovered = false)}
+			onpointerdown={() => (pressed = true)}
+			onpointerup={() => (pressed = false)}
+			onpointercancel={() => (pressed = false)}
+			onpointerleave={() => {
+				hovered = false;
+				pressed = false;
+			}}
 			disabled={busy || (!server && !isConnected)}
 			aria-busy={busy}
 			aria-label={isConnected
@@ -93,7 +104,7 @@
 				? t('home.clickToDisconnect')
 				: t('home.clickToConnect')}
 		>
-			<LumenFace status={connectionState} {hovered} error={!!error} />
+			<LumenFace status={connectionState} {hovered} {pressed} error={!!error} />
 		</button>
 
 		<!-- Accessible live status for assistive tech -->
@@ -112,17 +123,17 @@
 			{:else if isConnected}
 				<div class="timer" transition:fade={{ duration: 240 }}>
 					<span class="time-segment">
-						<NumberFlow value={hours} format={{ minimumIntegerDigits: 1 }} />
+						<RollingNumber value={hours} />
 						<span class="time-label">{t('home.hoursUnit')}</span>
 					</span>
 					<span class="time-separator"></span>
 					<span class="time-segment">
-						<NumberFlow value={minutes} format={{ minimumIntegerDigits: 2 }} />
+						<RollingNumber value={minutes} minDigits={2} />
 						<span class="time-label">{t('home.minutesUnit')}</span>
 					</span>
 					<span class="time-separator"></span>
 					<span class="time-segment">
-						<NumberFlow value={seconds} format={{ minimumIntegerDigits: 2 }} />
+						<RollingNumber value={seconds} minDigits={2} />
 						<span class="time-label">{t('home.secondsUnit')}</span>
 					</span>
 				</div>
@@ -154,7 +165,7 @@
 				<span class="protocol">{info?.protocol || 'VLESS'}</span>
 				<span class="latency">
 					{#if typeof server?.latency === 'number'}
-						<NumberFlow value={server.latency} />
+						<RollingNumber value={server.latency} />
 						<span class="latency-unit">ms</span>
 					{:else if server?.latency === 'timeout'}
 						<span>{t('servers.timeout')}</span>
@@ -241,7 +252,7 @@
 		text-align: center;
 	}
 
-	/* Timer with NumberFlow */
+	/* Connection timer */
 	.timer {
 		display: flex;
 		justify-content: center;

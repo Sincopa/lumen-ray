@@ -6,3 +6,4 @@ package-lock.json
 test-results
 playwright-report
 task.md
+src/assets/lumen-expressions.json

@@ -7,7 +7,7 @@
 	import PopupMenu from '../../components/PopupMenu.svelte';
 	import MenuItem from '../../components/MenuItem.svelte';
 	import StatusDot from '../../components/StatusDot.svelte';
-	import NumberFlow from '@number-flow/svelte';
+	import RollingNumber from '../../components/RollingNumber.svelte';
 	import { catalog } from '../../services';
 	import { errorCode } from '../../services/errors';
 	import { t } from '../../i18n';
@@ -451,7 +451,7 @@
 							{#if $pingingServers.has(server.id)}
 								<span class="ping-spinner" aria-label="Loading ping"></span>
 							{:else if typeof server.latency === 'number'}
-								<NumberFlow value={server.latency} /> ms
+								<RollingNumber value={server.latency} /> ms
 							{:else if server.latency === 'timeout'}
 								{t('servers.timeout')}
 							{:else if server.latency}

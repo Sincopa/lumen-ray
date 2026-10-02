@@ -117,16 +117,20 @@ impl CoreProcess {
             .filter(|(key, _)| {
                 let k = key.to_string_lossy();
                 !k.eq_ignore_ascii_case("XRAY_LOCATION_ASSET")
-                    && !k.eq_ignore_ascii_case("GOMEMLIMIT")
-                    && !k.eq_ignore_ascii_case("GODEBUG")
+                    && !crate::core::xray::GO_RUNTIME_ENV
+                        .iter()
+                        .any(|(name, _)| k.eq_ignore_ascii_case(name))
             })
             .collect();
         vars.push((
             "XRAY_LOCATION_ASSET".into(),
             crate::xray::geo::assets_for_core(core).into_os_string(),
         ));
-        vars.push(("GOMEMLIMIT".into(), "100MiB".into()));
-        vars.push(("GODEBUG".into(), "madvdontneed=1".into()));
+        vars.extend(
+            crate::core::xray::GO_RUNTIME_ENV
+                .iter()
+                .map(|(name, value)| (name.into(), value.into())),
+        );
         vars.sort_by_key(|(key, _)| key.to_string_lossy().to_uppercase());
         let mut environment = Vec::<u16>::new();
         for (key, value) in vars {

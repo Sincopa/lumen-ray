@@ -184,16 +184,22 @@ test('Lottie reacts to hover and connection, and honors reduced motion', async (
 	await page.goto('/');
 	const face = page.locator('.lumen-face');
 	await expect(face.locator('.lottie-player.ready svg')).toBeVisible();
+	// Everything the player draws: where each layer sits and what each contour is.
 	const frame = () =>
 		face
 			.locator('svg')
 			.evaluate((svg) =>
-				[...svg.querySelectorAll('path')]
-					.map((path) => getComputedStyle(path).getPropertyValue('d'))
+				[...svg.querySelectorAll('g[transform], path')]
+					.map((element) =>
+						element instanceof SVGPathElement
+							? getComputedStyle(element).getPropertyValue('d')
+							: getComputedStyle(element).transform,
+					)
 					.join('|'),
 			);
 	await page.locator('.central-logo-btn').hover();
 	await expect(face).toHaveAttribute('data-expression', 'wink');
+	await expect(face).toHaveAttribute('data-segment', /^wink(-l)?$/);
 	const winkStart = await frame();
 	await expect.poll(frame).not.toBe(winkStart);
 	await page.evaluate(() => {
@@ -226,6 +232,57 @@ test('Lottie reacts to hover and connection, and honors reduced motion', async (
 	const initial = await frame();
 	await page.waitForTimeout(300);
 	expect(await frame()).toBe(initial);
+});
+
+test('the resting face greets, then fidgets with gestures that return to rest', async ({
+	page,
+}) => {
+	await page.goto('/');
+	const face = page.locator('.lumen-face');
+	await expect(face).toHaveAttribute('data-segment', 'idle:hello');
+	await expect(face).toHaveAttribute('data-segment', 'idle', { timeout: 5000 });
+	// After a few breaths the face plays one gesture (blink, glance, nod...)...
+	await expect
+		.poll(() => face.getAttribute('data-segment'), { timeout: 20_000 })
+		.toMatch(/^idle:/);
+	// ...and then goes back to breathing.
+	await expect(face).toHaveAttribute('data-segment', 'idle', { timeout: 5000 });
+});
+
+test('connecting scans, connecting celebrates, and disconnecting plays out', async ({
+	page,
+}) => {
+	await page.goto('/');
+	const face = page.locator('.lumen-face');
+	await expect(face.locator('.lottie-player.ready svg')).toBeVisible();
+	await page.locator('.central-logo-btn').click();
+	await expect(face).toHaveAttribute('data-segment', 'connecting');
+	await page.mouse.move(0, 0);
+	await expect(face).toHaveAttribute('data-segment', 'connected');
+	await expect(face).toHaveAttribute('data-segment', 'connected-loop', {
+		timeout: 5000,
+	});
+	await page.locator('.central-logo-btn').click();
+	await page.mouse.move(0, 0);
+	// The status flips to "disconnected" at once; the little performance still plays.
+	await expect(face).toHaveAttribute('data-segment', 'disconnecting');
+	await expect(face).toHaveAttribute('data-expression', 'idle');
+	await expect(face).toHaveAttribute('data-segment', 'idle', { timeout: 5000 });
+});
+
+test('reduced motion keeps the mood as a still pose', async ({ page }) => {
+	await page.emulateMedia({ reducedMotion: 'reduce' });
+	await page.goto('/');
+	const face = page.locator('.lumen-face');
+	await expect(face).toHaveAttribute('data-segment', 'pose:idle');
+	await page.locator('.central-logo-btn').click();
+	await page.mouse.move(0, 0);
+	await expect(face).toHaveAttribute('data-expression', 'connected');
+	await expect(face).toHaveAttribute('data-segment', 'pose:connected');
+	const still = () => face.locator('svg').evaluate((svg) => svg.innerHTML);
+	const before = await still();
+	await page.waitForTimeout(400);
+	expect(await still()).toBe(before);
 });
 
 for (const size of [

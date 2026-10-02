@@ -83,6 +83,15 @@ fn api_available(session: &XraySession) -> bool {
                 .is_some_and(|child| matches!(child.try_wait(), Ok(None)))
     }
 }
+/// Go runtime tuning for every xray child. A large geosite category (antifilter has
+/// ~620k domains) keeps ~120 MB live; a GOMEMLIMIT below that made the GC run
+/// non-stop (28 s of CPU to start, constant CPU under traffic) without saving memory.
+/// GOGC=50 keeps traffic garbage close to the live set; the limit is only a backstop.
+pub const GO_RUNTIME_ENV: [(&str, &str); 3] = [
+    ("GOGC", "50"),
+    ("GOMEMLIMIT", "384MiB"),
+    ("GODEBUG", "madvdontneed=1"),
+];
 pub fn command(core: &std::path::Path) -> Command {
     let mut command = Command::new(core);
     if let Some(parent) = core.parent() {
@@ -94,8 +103,7 @@ pub fn command(core: &std::path::Path) -> Command {
     } else {
         command.current_dir(core);
     }
-    command.env("GOMEMLIMIT", "100MiB");
-    command.env("GODEBUG", "madvdontneed=1");
+    command.envs(GO_RUNTIME_ENV);
     command.kill_on_drop(true);
     #[cfg(windows)]
     command.creation_flags(0x08000000);
