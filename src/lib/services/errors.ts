@@ -81,8 +81,21 @@ export function errorCode(error: unknown): ErrorCode {
 		NOT_CONNECTED: 'unavailable',
 		CANCELLED: 'unavailable',
 		NETWORK_CHANGED: 'unavailable',
+		NETWORK_ERROR: 'unavailable',
 		CORE_ROLLBACK_FAILED: 'unavailable',
+		CORE_STOP_FAILED: 'unavailable',
 		BUSY: 'unavailable',
+		LIVE_SWITCH_FAILED: 'unavailable',
+		IP_UNAVAILABLE: 'unavailable',
+		INVALID_CONFIG: 'unavailable',
+		DNS_UNAVAILABLE: 'unavailable',
+		METRICS_UNAVAILABLE: 'unavailable',
+		BACKUP_FAILED: 'storage',
+		BACKUP_INVALID: 'storage',
+		ALREADY_RUNNING: 'unavailable',
+		UPDATE_FAILED: 'unavailable',
+		UPDATE_UNAVAILABLE: 'unavailable',
+		GEO_UPDATE_FAILED: 'geoDataMissing',
 	};
 	if (typeof code === 'string') code = nativeCodes[code] ?? code;
 	return codes.includes(code as ErrorCode) ? (code as ErrorCode) : 'unknown';

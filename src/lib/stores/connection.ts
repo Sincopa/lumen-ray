@@ -71,8 +71,17 @@ export class ConnectionController {
 		// An IPC timeout is an unknown outcome: reconcile before enabling another connect.
 		const error = cancelled(cause) ? null : errorCode(cause);
 		try {
-			const { status, info } = await this.readConnection();
-			this.update({ status, info, error });
+			const snapshot = await this.readConnection();
+			const reported = snapshot.error != null ? errorCode(snapshot.error) : null;
+			// The native session wins once it has connected. A client timeout must
+			// not stay on screen after that, while a still-pending or failed
+			// session keeps the error that reconcile observed.
+			this.update({
+				status: snapshot.status,
+				info: snapshot.info,
+				error:
+					snapshot.status === 'connected' ? reported : (reported ?? error),
+			});
 		} catch {
 			this.update({ status: 'error', info: null, error });
 		}
