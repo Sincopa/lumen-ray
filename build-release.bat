@@ -34,7 +34,9 @@ taskkill /F /IM lumen.exe >nul 2>&1
 taskkill /F /IM misc-vpn.exe >nul 2>&1
 
 echo [1/2] Building release application...
-call npx tauri build --no-bundle
+powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0scripts\build-release.ps1" -Mode Portable
+if errorlevel 1 goto :error
+powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0scripts\sign-windows.ps1" -Mode Sign -Path "%~dp0src-tauri\target\release\app.exe"
 if errorlevel 1 goto :error
 
 echo.
@@ -45,8 +47,9 @@ if errorlevel 1 (
     echo [ERROR] Failed to copy binary to release\lumen.exe
     goto :error
 )
-if not exist "release\resources\core\" mkdir "release\resources\core"
-copy /Y "src-tauri\resources\core\*.*" "release\resources\core\" >nul
+if not exist "release\runtime\" mkdir "release\runtime"
+xcopy /E /I /Y "src-tauri\runtime\*" "release\runtime\" >nul
+if errorlevel 1 goto :error
 
 echo.
 echo ============================================================

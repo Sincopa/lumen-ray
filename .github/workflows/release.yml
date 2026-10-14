@@ -12,6 +12,8 @@ permissions:
 jobs:
   release-windows:
     runs-on: windows-latest
+    env:
+      LUMEN_SIGNING_THUMBPRINT: ${{ vars.WINDOWS_CERTIFICATE_THUMBPRINT }}
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -65,18 +67,31 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Import persistent Windows Code Signing certificate
+        shell: pwsh
+        env:
+          WINDOWS_CERTIFICATE_PFX_BASE64: ${{ secrets.WINDOWS_CERTIFICATE_PFX_BASE64 }}
+          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File scripts/ci-windows-signing.ps1 -Mode Import
+
       - name: Verify updater signing key
         shell: pwsh
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: |
           $probe = Join-Path $env:RUNNER_TEMP "lumen-updater-signing-check.txt"
           Set-Content -LiteralPath $probe -Value "lumen updater signing check" -NoNewline
-          node node_modules/@tauri-apps/cli/tauri.js signer sign --password= $probe
+          node node_modules/@tauri-apps/cli/tauri.js signer sign $probe
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Prepare verified Xray core
         shell: pwsh
-        run: powershell -NoProfile -File scripts/prepare-core.ps1
+        run: |
+          powershell -NoProfile -File scripts/prepare-core.ps1
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          powershell -NoProfile -ExecutionPolicy Bypass -File scripts/sign-windows.ps1 -Mode Runtime
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Verify frontend
         run: |
@@ -107,11 +122,12 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           tagName: v__VERSION__
           releaseName: Lumen v__VERSION__
           releaseBody: Download the Windows installer or portable archive below. Existing installations receive this version through the built-in signed updater.
-          releaseDraft: false
+          releaseDraft: true
           prerelease: false
           generateReleaseNotes: true
           uploadUpdaterJson: true
@@ -128,15 +144,36 @@ jobs:
 
           # Build portable archive
           powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-release.ps1 -Mode Portable
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
           # Prepare standardized Setup executable
           $releaseDir = "release"
-          if (-not (Test-Path -LiteralPath "$releaseDir/Lumen-Ray-$version-Setup.exe")) {
-            $nsisCandidate = Get-ChildItem -Path "src-tauri/target/release/bundle/nsis/*.exe" | Where-Object { $_.Name -notmatch '(?i)uninst' } | Select-Object -First 1
-            if ($nsisCandidate) {
-              Copy-Item -LiteralPath $nsisCandidate.FullName -Destination "$releaseDir/Lumen-Ray-$version-Setup.exe" -Force
-            }
-          }
+          $nsisCandidate = "src-tauri/target/release/bundle/nsis/Lumen_${version}_x64-setup.exe"
+          if (-not (Test-Path -LiteralPath $nsisCandidate)) { throw "Missing signed NSIS installer: $nsisCandidate" }
+          Copy-Item -LiteralPath $nsisCandidate -Destination "$releaseDir/Lumen-Ray-$version-Setup.exe" -Force
+
+          powershell -NoProfile -ExecutionPolicy Bypass -File scripts/ci-windows-signing.ps1 -Mode Verify
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
           # Upload primary release assets (Setup installer + Portable zip)
           gh release upload $tag "$releaseDir/Lumen-Ray-$version-Setup.exe" "$releaseDir/Lumen-Ray-$version-Portable.zip" --clobber
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+          # Publish only after all final artifacts passed Authenticode verification.
+          gh release edit $tag --draft=false
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Upload signature verification reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-signature-reports
+          if-no-files-found: ignore
+          path: |
+            artifacts/code-signing/*signatures.json
+            artifacts/code-signing/nsis-uninstaller.json
+
+      - name: Remove imported Windows signing key
+        if: always()
+        shell: pwsh
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File scripts/ci-windows-signing.ps1 -Mode Cleanup

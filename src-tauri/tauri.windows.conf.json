@@ -1,0 +1,25 @@
+{
+  "build": {
+    "beforeBuildCommand": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/prepare-windows-build.ps1"
+  },
+  "bundle": {
+    "windows": {
+      "digestAlgorithm": "sha256",
+      "signCommand": {
+        "cmd": "powershell",
+        "args": [
+          "-NoProfile",
+          "-ExecutionPolicy",
+          "Bypass",
+          "-File",
+          "../scripts/sign-windows.ps1",
+          "-Mode",
+          "Sign",
+          "-Path",
+          "%1",
+          "-TauriHook"
+        ]
+      }
+    }
+  }
+}

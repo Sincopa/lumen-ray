@@ -19,6 +19,8 @@ try {
     @{ bundle = @{ createUpdaterArtifacts = $true } } | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $configPath -Encoding UTF8
     Push-Location -LiteralPath $project
     try {
+        $env:TAURI_WINDOWS_SIGNTOOL_PATH = & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'sign-windows.ps1') -Mode ToolPath
+        if ($LASTEXITCODE -ne 0) { throw 'Windows SDK SignTool discovery failed.' }
         & node node_modules/@tauri-apps/cli/tauri.js build --bundles nsis --config $configPath
         if ($LASTEXITCODE -ne 0) { throw 'Signed release build failed.' }
     } finally { Pop-Location }

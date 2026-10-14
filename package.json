@@ -22,7 +22,7 @@
 		"check": "svelte-check --tsconfig ./tsconfig.app.json && tsc -p tsconfig.node.json",
 		"tauri": "tauri",
 		"tauri:dev": "tauri dev",
-		"tauri:build": "tauri build --bundles nsis",
+		"tauri:build": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-release.ps1 -Mode Installer",
 		"build:release": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-release.ps1 -Mode All",
 		"build:installer": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-release.ps1 -Mode Installer",
 		"build:portable": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-release.ps1 -Mode Portable",
