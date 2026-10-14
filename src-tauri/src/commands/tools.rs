@@ -167,10 +167,13 @@ pub async fn inspect_destination(
             let matched = match rule.matcher {
                 RuleMatcher::Domain
                     if !rule.name.contains('/')
+                        && !rule.name.starts_with("keyword:")
+                        && !rule.name.starts_with("full:")
                         && rule.name.parse::<std::net::IpAddr>().is_err() =>
                 {
                     domain_match(&rule.name, &host)
                 }
+                RuleMatcher::Final => Some(false),
                 _ => None,
             };
             match matched {

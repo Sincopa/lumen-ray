@@ -206,21 +206,21 @@ impl CoreBackend for LumenBackend {
         before: &'a Repository,
         after: &'a Repository,
         session: &'a mut BackendSession,
-    ) -> BackendFuture<'a, bool> {
+    ) -> BackendFuture<'a, crate::core::LiveRoutingStatus> {
         Box::pin(async move {
             let BackendSession::Lumen(Some(s)) = session else {
-                return Ok(false);
+                return Ok(crate::core::LiveRoutingStatus::NeedsConnect);
             };
             if before.nodes != after.nodes
                 || before.settings.network_mode != after.settings.network_mode
                 || before.settings.dns_server != after.settings.dns_server
                 || before.settings.dns_policy != after.settings.dns_policy
             {
-                return Ok(false);
+                return Ok(crate::core::LiveRoutingStatus::NeedsConnect);
             }
             let (table, _) = Self::prepare(after, selected)?;
             *s.routing.write().await = Arc::new(table);
-            Ok(true)
+            Ok(crate::core::LiveRoutingStatus::Applied)
         })
     }
 }

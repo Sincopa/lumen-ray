@@ -48,7 +48,7 @@
 		requiresProxy: boolean;
 		highlights: PresetHighlight[];
 		tags: Array<{
-			type: 'geoip' | 'geosite';
+			type: 'geoip' | 'geosite' | 'match' | 'application';
 			tag: string;
 			target: 'vpn' | 'direct';
 		}>;
@@ -62,13 +62,13 @@
 			defaultTitle: 'Россия — Оптимальный',
 			descKey: 'presets.russiaOptimizedDesc',
 			defaultDesc:
-				'Обход блокировок и зарубежных ограничений с сохранением прямого доступа к локальным сетям и российским сервисам.',
+				'Российские сервисы, локальная сеть и остальной трафик идут напрямую. Через VPN — блокировки, YouTube, Telegram и Discord.',
 			requiresProxy: true,
 			highlights: [
 				{
 					icon: 'shield',
 					labelKey: 'presets.hlAntifilter',
-					defaultLabel: 'Блокировки и фильтры',
+					defaultLabel: 'Блокировки, YouTube, Telegram и Discord',
 					target: 'vpn',
 				},
 				{
@@ -78,21 +78,25 @@
 					target: 'direct',
 				},
 				{
-					icon: 'home',
-					labelKey: 'presets.hlPrivateDirect',
-					defaultLabel: 'Локальные сети (LAN)',
+					icon: 'alt_route',
+					labelKey: 'presets.hlRestDirect',
+					defaultLabel: 'Весь остальной трафик',
 					target: 'direct',
 				},
 			],
 			tags: [
 				{ type: 'geoip', tag: 'private', target: 'direct' },
-				{ type: 'geosite', tag: 'youtube', target: 'vpn' },
+				{ type: 'geosite', tag: 'category-ru', target: 'direct' },
+				{ type: 'geoip', tag: 'ru', target: 'direct' },
 				{ type: 'geosite', tag: 'antifilter', target: 'vpn' },
 				{ type: 'geosite', tag: 'antifilter-community', target: 'vpn' },
-				{ type: 'geosite', tag: 'category-ru', target: 'direct' },
 				{ type: 'geoip', tag: 'antifilter', target: 'vpn' },
 				{ type: 'geoip', tag: 'antifilter-community', target: 'vpn' },
-				{ type: 'geoip', tag: 'ru', target: 'direct' },
+				{ type: 'geosite', tag: 'youtube', target: 'vpn' },
+				{ type: 'geosite', tag: 'discord', target: 'vpn' },
+				{ type: 'geosite', tag: 'telegram', target: 'vpn' },
+				{ type: 'geoip', tag: 'telegram', target: 'vpn' },
+				{ type: 'application', tag: 'Discord.exe', target: 'vpn' },
 			],
 		},
 		{
@@ -120,6 +124,9 @@
 			],
 			tags: [
 				{ type: 'geosite', tag: 'youtube', target: 'vpn' },
+				{ type: 'geosite', tag: 'discord', target: 'vpn' },
+				{ type: 'geosite', tag: 'telegram', target: 'vpn' },
+				{ type: 'geoip', tag: 'telegram', target: 'vpn' },
 				{ type: 'geosite', tag: 'antifilter', target: 'vpn' },
 				{ type: 'geosite', tag: 'antifilter-community', target: 'vpn' },
 				{ type: 'geoip', tag: 'antifilter', target: 'vpn' },
@@ -284,7 +291,13 @@
 										class:chip-vpn={ruleTag.target === 'vpn'}
 										class:chip-direct={ruleTag.target === 'direct'}
 									>
-										<span class="chip-name">{ruleTag.type}:{ruleTag.tag}</span>
+										<span class="chip-name">
+											{ruleTag.type === 'match'
+												? 'MATCH'
+												: ruleTag.type === 'application'
+													? ruleTag.tag
+													: `${ruleTag.type}:${ruleTag.tag}`}
+										</span>
 										<span class="chip-arrow">→</span>
 										<span class="chip-target">
 											{ruleTag.target.toUpperCase()}

@@ -18,6 +18,8 @@ pub struct FetchedSubscription {
     pub body: String,
     pub user_info: Option<SubscriptionUserInfo>,
     pub suggested_name: Option<String>,
+    /// Incy `routing` response header, when the provider sent one.
+    pub routing: Option<String>,
 }
 
 pub fn header_value_to_string(val: &reqwest::header::HeaderValue) -> Option<String> {
@@ -323,6 +325,7 @@ impl SubscriptionClient {
                 body: source.to_owned(),
                 user_info: None,
                 suggested_name: None,
+                routing: None,
             });
         }
 
@@ -454,6 +457,12 @@ impl SubscriptionClient {
                 .then(|| value.to_str().ok().and_then(parse_user_info))
                 .flatten()
         });
+        let routing = response
+            .headers()
+            .iter()
+            .find(|(name, _)| name.as_str().eq_ignore_ascii_case("routing"))
+            .and_then(|(_, value)| header_value_to_string(value))
+            .filter(|value| !value.trim().is_empty());
 
         let title_headers = [
             "profile-title",
@@ -510,6 +519,7 @@ impl SubscriptionClient {
             body: body_str,
             user_info,
             suggested_name,
+            routing,
         })
     }
 

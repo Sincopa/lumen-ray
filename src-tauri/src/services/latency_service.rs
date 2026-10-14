@@ -51,6 +51,15 @@ async fn ping_inner(state: &AppState, id: &str) -> Result<serde_json::Value> {
     // Port discovery releases its temporary listeners before Xray binds them.
     // Serialize only that short startup window so concurrent probes cannot be
     // assigned the same just-released Windows ephemeral ports.
+    // A probe only needs its SOCKS inbound and the node's outbound. With routing
+    // rules each probe loaded the ~620k-domain antifilter list (seconds of CPU and
+    // ~120 MB per process), and 25 of them at startup starved the tunnel.
+    repo.rules.clear();
+    repo.routing_mode = "global".into();
+    repo.settings.dns_policy.enabled = false;
+    if repo.settings.dns_server == "system" {
+        repo.settings.dns_server = crate::storage::repository::Settings::default().dns_server;
+    }
     let startup = PROBE_STARTUP.lock().await;
     let (proxy, metrics) = match crate::core::xray::ports() {
         Ok(p) => p,
