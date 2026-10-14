@@ -1,7 +1,7 @@
 {
 	"name": "lumen",
 	"private": true,
-	"version": "0.2.4",
+	"version": "0.2.5",
 	"description": "Lumen — Modern, ultra-lightweight desktop VPN & proxy client built with Svelte 5 and Tauri 2",
 	"license": "Apache-2.0",
 	"type": "module",
