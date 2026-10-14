@@ -68,7 +68,7 @@ const defaults: NativeSettings = {
 	bypassLan: true,
 	updateIntervalHours: 1,
 	pingUrl: 'http://www.google.com/generate_204',
-	autoReconnect: false,
+	autoReconnect: true,
 	serverSelection: 'manual',
 	pingPolicy: 'startup',
 	notifyDisconnect: false,

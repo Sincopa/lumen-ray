@@ -52,9 +52,6 @@ impl RoutingTable {
             .filter(|r| r.enabled)
             .enumerate()
         {
-            if rule.matcher != RuleMatcher::Domain {
-                return Err(unsupported());
-            }
             let target = match rule.server_id.as_str() {
                 "direct" => 0,
                 "block" => 1,
@@ -72,6 +69,12 @@ impl RoutingTable {
                     table.outbounds.len() - 1
                 }
             };
+            if rule.matcher == RuleMatcher::Final {
+                continue;
+            }
+            if rule.matcher != RuleMatcher::Domain {
+                return Err(unsupported());
+            }
             let value = rule.name.trim();
             let network = value
                 .split_once('/')

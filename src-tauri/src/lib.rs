@@ -251,12 +251,7 @@ pub fn run() {
                         }
                     };
                     if let Some(id) = id {
-                        if services::vpn_service::connect(&startup, &handle, id)
-                            .await
-                            .is_err()
-                        {
-                            log::warn!("Automatic connection failed");
-                        }
+                        services::vpn_service::auto_connect(&startup, &handle, id).await;
                     } else {
                         services::vpn_service::prewarm(&startup).await;
                     }
@@ -387,14 +382,12 @@ pub fn run() {
                 let app = app.clone();
                 let exiting = exiting.clone();
                 tauri::async_runtime::spawn(async move {
-                    let _ = tokio::time::timeout(
-                        std::time::Duration::from_millis(2000),
-                        services::vpn_service::disconnect(&state, &app),
-                    )
-                    .await;
-                    if let Ok(mut session) = state.session.try_lock() {
+                    let _ = tokio::time::timeout(std::time::Duration::from_secs(25), async {
+                        let _ = services::vpn_service::disconnect(&state, &app).await;
+                        let mut session = state.session.lock().await;
                         let _ = services::vpn_service::stop(&mut session).await;
-                    }
+                    })
+                    .await;
                     let _ = state.shutdown.send(true);
                     exiting.store(2, std::sync::atomic::Ordering::SeqCst);
                     app.exit(0);

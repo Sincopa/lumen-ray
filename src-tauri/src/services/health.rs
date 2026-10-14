@@ -108,6 +108,81 @@ pub async fn verify(proxy_port: u16, tun: bool) -> Result<Option<String>> {
     Ok(ip)
 }
 
+/// Each path of a running session, checked separately so the monitor can tell
+/// a slow VPN server from a broken tunnel.
+pub struct PathProbe {
+    pub routes: Result<()>,
+    pub proxy: Result<Option<String>>,
+    pub system: Result<Option<String>>,
+}
+
+pub async fn probe(proxy_port: u16, tun: bool) -> PathProbe {
+    #[cfg(windows)]
+    let routes_before = if tun {
+        crate::platform::network::verify_tunnel_routes()
+    } else {
+        Ok(())
+    };
+    #[cfg(not(windows))]
+    let routes_before: Result<()> = Ok(());
+    let proxy = async {
+        match client(Some(proxy_port)) {
+            Ok(proxy) => check_client(&proxy).await,
+            Err(error) => Err(error),
+        }
+    };
+    // Without TUN only the local proxy carries traffic; there is no separate system path.
+    let system = async {
+        if !tun {
+            return Ok(None);
+        }
+        match client(None) {
+            Ok(system) => check_client(&system).await,
+            Err(error) => Err(error),
+        }
+    };
+    let (proxy, system) = tokio::join!(proxy, system);
+    #[cfg(windows)]
+    let routes = routes_before.and_then(|()| {
+        if tun {
+            crate::platform::network::verify_tunnel_routes()
+        } else {
+            Ok(())
+        }
+    });
+    #[cfg(not(windows))]
+    let routes = routes_before;
+    PathProbe {
+        routes,
+        proxy,
+        system,
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Verdict {
+    Healthy,
+    /// Windows no longer sends traffic to LumenTun.
+    Routes,
+    /// Only the VPN server fails. In Rules mode everything else still works
+    /// through the tunnel, so tearing it down would only lose the session.
+    Upstream,
+    /// Traffic that should work does not.
+    Broken,
+}
+
+pub fn classify(routes_ok: bool, proxy_ok: bool, system_ok: bool, rules_mode: bool) -> Verdict {
+    if !routes_ok {
+        Verdict::Routes
+    } else if proxy_ok && system_ok {
+        Verdict::Healthy
+    } else if rules_mode && system_ok {
+        Verdict::Upstream
+    } else {
+        Verdict::Broken
+    }
+}
+
 pub fn retryable(code: &str) -> bool {
     matches!(
         code,
@@ -165,6 +240,18 @@ mod tests {
         assert!(accepted(204, "", true));
         assert!(accepted(200, "2001:db8::1\n", false));
         assert!(accepted(200, "192.0.2.1", false));
+    }
+    #[test]
+    fn only_a_broken_path_counts_toward_releasing_the_tunnel() {
+        assert_eq!(classify(true, true, true, true), Verdict::Healthy);
+        assert_eq!(classify(true, true, true, false), Verdict::Healthy);
+        // A stalled VPN server in Rules mode leaves direct traffic working.
+        assert_eq!(classify(true, false, true, true), Verdict::Upstream);
+        // In global mode the same failure means no traffic works at all.
+        assert_eq!(classify(true, false, true, false), Verdict::Broken);
+        assert_eq!(classify(true, true, false, true), Verdict::Broken);
+        assert_eq!(classify(true, false, false, true), Verdict::Broken);
+        assert_eq!(classify(false, true, true, true), Verdict::Routes);
     }
     #[test]
     fn permanent_errors_and_permission_refusal_do_not_retry() {

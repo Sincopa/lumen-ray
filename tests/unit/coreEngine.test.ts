@@ -57,4 +57,13 @@ describe('core engine settings', () => {
 			'lumenUnsupported',
 		);
 	});
+	it('maps tunnel and backup failures onto known messages', () => {
+		expect(errorCode({ code: 'LIVE_SWITCH_FAILED' })).toBe('unavailable');
+		expect(errorCode({ code: 'IP_UNAVAILABLE' })).toBe('unavailable');
+		expect(errorCode({ code: 'INVALID_CONFIG' })).toBe('unavailable');
+		expect(errorCode({ code: 'DNS_UNAVAILABLE' })).toBe('unavailable');
+		expect(errorCode({ code: 'BACKUP_INVALID' })).toBe('storage');
+		expect(errorCode({ code: 'GEO_UPDATE_FAILED' })).toBe('geoDataMissing');
+		expect(errorCode({ code: 'ALREADY_RUNNING' })).toBe('unavailable');
+	});
 });

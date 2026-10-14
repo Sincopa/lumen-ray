@@ -109,6 +109,104 @@ fn yaml_json_and_config_routing() {
     assert_eq!(generated["metrics"]["listen"], "127.0.0.1:1081");
 }
 #[test]
+fn discord_uses_the_vpn_and_other_traffic_stays_direct() {
+    use crate::services::catalog_service::generate_preset_rules;
+    let node = uri::parse(VLESS, "sub").unwrap();
+    let mut repo = Repository {
+        nodes: vec![node.clone()],
+        routing_mode: "rules".into(),
+        ..Default::default()
+    };
+    repo.rules = generate_preset_rules("russia-optimized", "subscription").unwrap();
+    let config =
+        serde_json::to_value(config::build(&repo, &node.id, 10808, 10809, true).unwrap()).unwrap();
+    let rules = config["routing"]["rules"].as_array().unwrap();
+    let discord = rules
+        .iter()
+        .position(|rule| rule["process"][0] == "Discord.exe")
+        .unwrap();
+    let category_ru = rules
+        .iter()
+        .position(|rule| rule["domain"][0] == "geosite:category-ru")
+        .unwrap();
+    // Discord voice servers are bare addresses: a Russian GeoIP match ahead of the
+    // process rule would send them to the blocked direct path.
+    let geoip_ru = rules
+        .iter()
+        .position(|rule| rule["ip"][0] == "geoip:ru")
+        .unwrap();
+    assert!(discord < category_ru && discord < geoip_ru);
+    assert_eq!(rules[discord]["outboundTag"], "proxy");
+    assert!(rules
+        .iter()
+        .any(|rule| rule["domain"][0] == "geosite:discord" && rule["outboundTag"] == "proxy"));
+    assert_eq!(rules.last().unwrap()["outboundTag"], "direct");
+    assert!(rules.iter().all(|rule| rule["network"] != "udp"));
+}
+#[test]
+fn subscription_routing_from_clash_and_incy() {
+    use base64::Engine;
+    let yaml = r#"proxies:
+  - name: Poland
+    type: trojan
+    server: example.com
+    port: 443
+    password: secret
+rules:
+  - GEOSITE,CATEGORY-RU,DIRECT
+  - GEOIP,RU,DIRECT
+  - PROCESS-NAME,Discord.exe,Poland
+  - DOMAIN-SUFFIX,openai.com,Poland
+  - MATCH,Poland
+"#;
+    let parsed = parser::parse(yaml, "sub").unwrap();
+    assert_eq!(parsed.nodes.len(), 1);
+    let names: Vec<_> = parsed.rules.iter().map(|rule| rule.name.as_str()).collect();
+    assert_eq!(
+        names,
+        vec!["category-ru", "ru", "Discord.exe", "openai.com", "match"]
+    );
+    assert_eq!(parsed.rules[0].server_id, "direct");
+    assert_eq!(parsed.rules[2].server_id, parsed.nodes[0].id);
+    assert_eq!(
+        parsed.rules[4].matcher,
+        crate::storage::repository::RuleMatcher::Final
+    );
+    assert_eq!(parsed.rules[4].server_id, parsed.nodes[0].id);
+
+    let profile = r#"{"Name":"RoscomVPN","GlobalProxy":"true","DirectSites":["geosite:category-ru"],"DirectIp":["geoip:ru"],"BlockSites":["geosite:category-ads-all"],"ProxySites":["gemini.google.com"]}"#;
+    let link = format!(
+        "incy://routing/onadd/{}",
+        base64::engine::general_purpose::STANDARD.encode(profile)
+    );
+    let body = format!("{VLESS}\n{link}");
+    let parsed = parser::parse(&body, "provider").unwrap();
+    assert_eq!(parsed.nodes.len(), 1);
+    assert!(parsed.diagnostics.is_empty());
+    assert!(parsed
+        .rules
+        .iter()
+        .any(|rule| rule.name == "category-ru" && rule.server_id == "direct"));
+    assert!(parsed
+        .rules
+        .iter()
+        .any(|rule| rule.name == "category-ads-all" && rule.server_id == "block"));
+    assert!(parsed
+        .rules
+        .iter()
+        .any(|rule| rule.name == "gemini.google.com"));
+    assert_eq!(
+        parsed.rules.last().unwrap().matcher,
+        crate::storage::repository::RuleMatcher::Final
+    );
+    assert_eq!(parsed.rules.last().unwrap().server_id, "subscription");
+
+    let off = format!("{VLESS}\nincy://routing/off");
+    let parsed = parser::parse(&off, "provider").unwrap();
+    assert!(parsed.routing_off);
+    assert!(parsed.rules.is_empty());
+}
+#[test]
 fn encrypted_repository_roundtrip() {
     let directory = tempfile::tempdir().unwrap();
     let store = RepositoryStore::new(directory.path()).unwrap();
@@ -318,6 +416,31 @@ fn disabling_a_rule_can_replace_live_routing_without_restarting_tun() {
             .is_some()
     );
 }
+#[cfg(windows)]
+#[test]
+fn tun_captures_ipv6_only_when_the_physical_network_has_it() {
+    let node = uri::parse(VLESS, "sub").unwrap();
+    let repo = Repository {
+        nodes: vec![node.clone()],
+        ..Default::default()
+    };
+    let config =
+        serde_json::to_value(config::build(&repo, &node.id, 10808, 10809, true).unwrap()).unwrap();
+    let tun = config["inbounds"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|inbound| inbound["protocol"] == "tun")
+        .unwrap();
+    let routes = tun["settings"]["autoSystemRoutingTable"]
+        .as_array()
+        .unwrap();
+    assert_eq!(routes[0], "0.0.0.0/0");
+    assert_eq!(
+        routes.iter().any(|route| route == "::/0"),
+        crate::platform::network::physical_ipv6_available()
+    );
+}
 #[test]
 fn vpn_applications_do_not_override_russian_direct_presets() {
     use crate::services::catalog_service::generate_preset_rules;
@@ -350,11 +473,13 @@ fn vpn_applications_do_not_override_russian_direct_presets() {
     let torrent = position(&process("torrent.exe"));
     let category_ru = position(&|r| r["domain"][0] == "geosite:category-ru");
     let geoip_ru = position(&|r| r["ip"][0] == "geoip:ru");
-    let antifilter = position(&|r| r["domain"][0] == "geosite:antifilter");
-    assert!(category_ru < chrome && geoip_ru < chrome && antifilter < chrome);
-    assert!(torrent < antifilter, "direct applications stay absolute");
+    assert!(category_ru < chrome && geoip_ru < chrome);
+    assert!(torrent < category_ru, "direct applications stay absolute");
     assert_eq!(rules[chrome]["outboundTag"], "proxy");
-    assert_eq!(rules[chrome + 1]["network"], "tcp,udp");
+    let catch_all = rules.last().unwrap();
+    assert_eq!(catch_all["ip"], serde_json::json!(["0.0.0.0/0", "::/0"]));
+    assert_eq!(catch_all["outboundTag"], "direct");
+    assert!(position(&process("Discord.exe")) < chrome);
 }
 #[cfg(windows)]
 #[test]
@@ -392,7 +517,7 @@ fn switching_routing_modes_keeps_the_active_tun_configuration() {
         rules_config["routing"]["domainStrategy"],
         global_config["routing"]["domainStrategy"]
     );
-    assert_eq!(global_config["routing"]["domainStrategy"], "IPOnDemand");
+    assert_eq!(global_config["routing"]["domainStrategy"], "IPIfNonMatch");
     assert_eq!(
         global_config["routing"]["rules"][0]["inboundTag"][0],
         "dns-query"
@@ -455,6 +580,123 @@ fn switching_routing_modes_keeps_the_system_proxy_configuration() {
     assert!(config::live_routing_patch(&global, &rules, &node.id, false)
         .unwrap()
         .is_some());
+}
+#[cfg(windows)]
+#[test]
+fn dns_policy_keeps_mode_and_geo_rules_on_the_live_path() {
+    use crate::storage::repository::{Rule, RuleMatcher};
+    let node = uri::parse(VLESS, "sub").unwrap();
+    let mut rules = Repository {
+        nodes: vec![node.clone()],
+        routing_mode: "rules".into(),
+        ..Default::default()
+    };
+    rules.settings.dns_policy.enabled = true;
+    rules.settings.dns_policy.direct = "9.9.9.9".into();
+    rules.rules.extend([
+        Rule {
+            id: "geo-site".into(),
+            name: "antifilter".into(),
+            matcher: RuleMatcher::Geosite,
+            server_id: "subscription".into(),
+            enabled: true,
+            preset_id: None,
+            is_domain: false,
+        },
+        Rule {
+            id: "geo-ip".into(),
+            name: "ru".into(),
+            matcher: RuleMatcher::Geoip,
+            server_id: "direct".into(),
+            enabled: true,
+            preset_id: None,
+            is_domain: false,
+        },
+    ]);
+    let mut global = rules.clone();
+    global.routing_mode = "global".into();
+    let rules_config =
+        serde_json::to_value(config::build(&rules, &node.id, 10808, 10809, true).unwrap()).unwrap();
+    let global_config =
+        serde_json::to_value(config::build(&global, &node.id, 10808, 10809, true).unwrap())
+            .unwrap();
+    for field in ["inbounds", "outbounds", "dns"] {
+        assert_eq!(
+            rules_config[field], global_config[field],
+            "{field} changed across modes"
+        );
+    }
+    assert!(config::live_routing_patch(&rules, &global, &node.id, true)
+        .unwrap()
+        .is_some());
+    assert!(config::live_routing_patch(&global, &rules, &node.id, true)
+        .unwrap()
+        .is_some());
+    let mut added = rules.clone();
+    added.rules.push(Rule {
+        id: "extra-site".into(),
+        name: "google".into(),
+        matcher: RuleMatcher::Geosite,
+        server_id: "subscription".into(),
+        enabled: true,
+        preset_id: None,
+        is_domain: false,
+    });
+    let added_config =
+        serde_json::to_value(config::build(&added, &node.id, 10808, 10809, true).unwrap()).unwrap();
+    assert_eq!(rules_config["dns"], added_config["dns"]);
+    assert_eq!(rules_config["inbounds"], added_config["inbounds"]);
+    assert_eq!(rules_config["outbounds"], added_config["outbounds"]);
+    assert!(config::live_routing_patch(&rules, &added, &node.id, true)
+        .unwrap()
+        .is_some());
+}
+#[cfg(windows)]
+#[test]
+fn rule_for_another_server_is_a_live_outbound_and_route() {
+    use crate::storage::repository::{Rule, RuleMatcher};
+    let first = uri::parse(VLESS, "sub").unwrap();
+    let second = uri::parse(
+        "vless://00000000-0000-4000-8000-000000000002@b.example:443?security=tls#B",
+        "sub",
+    )
+    .unwrap();
+    let mut before = Repository {
+        nodes: vec![first.clone(), second.clone()],
+        routing_mode: "rules".into(),
+        ..Default::default()
+    };
+    before.settings.dns_server = "1.1.1.1".into();
+    before.settings.dns_policy.enabled = true;
+    before.settings.dns_policy.direct = "9.9.9.9".into();
+    let mut after = before.clone();
+    after.rules.push(Rule {
+        id: "other".into(),
+        name: "example.org".into(),
+        matcher: RuleMatcher::Domain,
+        server_id: second.id.clone(),
+        enabled: true,
+        preset_id: None,
+        is_domain: true,
+    });
+    let before_config =
+        serde_json::to_value(config::build(&before, &first.id, 10808, 10809, true).unwrap())
+            .unwrap();
+    let after_config =
+        serde_json::to_value(config::build(&after, &first.id, 10808, 10809, true).unwrap())
+            .unwrap();
+    assert_eq!(before_config["dns"], after_config["dns"]);
+    assert_eq!(before_config["inbounds"], after_config["inbounds"]);
+    let plan = config::live_routing_plan(&before, &after, &first.id, true)
+        .unwrap()
+        .unwrap();
+    assert_eq!(plan.added_outbounds.len(), 1);
+    assert_eq!(plan.added_outbounds[0]["tag"], second.id);
+    assert!(plan.patch["routing"]["rules"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|rule| rule["outboundTag"] == second.id && rule["domain"][0] == "domain:example.org"));
 }
 #[test]
 fn balanced_xray_subscription_and_clean_names() {
@@ -626,33 +868,31 @@ fn geo_rules_xray_config_compilation() {
     let value =
         serde_json::to_value(config::build(&repo, &node.id, 10808, 10809, true).unwrap()).unwrap();
 
-    assert_eq!(value["routing"]["domainStrategy"], "IPOnDemand");
+    assert_eq!(value["routing"]["domainStrategy"], "IPIfNonMatch");
 
     let rules = value["routing"]["rules"].as_array().unwrap();
-    // Rules 0: probe, 1: process self/, 2: bypass_lan (since default true)
-    let custom_rules = &rules[5..9];
+    let rule =
+        |pred: &dyn Fn(&serde_json::Value) -> bool| rules.iter().find(|rule| pred(rule)).unwrap();
 
-    // Rule 1: geoip:private -> direct (must be in ip, never in domain)
-    assert_eq!(custom_rules[0]["ip"][0], "geoip:private");
-    assert!(custom_rules[0].get("domain").is_none());
-    assert_eq!(custom_rules[0]["outboundTag"], "direct");
+    let private = rule(&|rule| rule["ip"][0] == "geoip:private");
+    assert!(private.get("domain").is_none());
+    assert_eq!(private["outboundTag"], "direct");
 
-    // Rule 2: geosite:antifilter -> proxy (must be in domain, never in ip)
-    assert_eq!(custom_rules[1]["domain"][0], "geosite:antifilter");
-    assert!(custom_rules[1].get("ip").is_none());
-    assert_eq!(custom_rules[1]["outboundTag"], "proxy");
+    let antifilter = rule(&|rule| rule["domain"][0] == "geosite:antifilter");
+    assert!(antifilter.get("ip").is_none());
+    assert_eq!(antifilter["outboundTag"], "proxy");
 
-    // Rule 3: geosite:category-ru -> block
-    assert_eq!(custom_rules[2]["domain"][0], "geosite:category-ru");
-    assert_eq!(custom_rules[2]["outboundTag"], "block");
+    let category_ru = rule(&|rule| rule["domain"][0] == "geosite:category-ru");
+    assert_eq!(category_ru["outboundTag"], "block");
 
-    // Rule 4: geoip:ru -> direct
-    assert_eq!(custom_rules[3]["ip"][0], "geoip:ru");
-    assert_eq!(custom_rules[3]["outboundTag"], "direct");
+    let geoip_ru = rule(&|rule| rule["ip"][0] == "geoip:ru");
+    assert_eq!(geoip_ru["outboundTag"], "direct");
 
     // Final rules: unhandled DNS (port 53) and default fallback
+    // An address catch-all, so IP rules still get the resolved-domain pass.
     let last = rules.last().unwrap();
-    assert_eq!(last["network"], "tcp,udp");
+    assert_eq!(last["ip"], serde_json::json!(["0.0.0.0/0", "::/0"]));
+    assert!(last.get("network").is_none());
     assert_eq!(last["outboundTag"], "direct");
 
     // Tag validation: mismatched prefix must error
@@ -685,21 +925,33 @@ fn preset_application_idempotency_and_preservation() {
     use crate::services::catalog_service::generate_preset_rules;
 
     let rules = generate_preset_rules("russia-optimized", "sub-1").unwrap();
-    assert_eq!(rules.len(), 8);
+    assert_eq!(rules.len(), 12);
     assert_eq!(
         rules.iter().map(|r| r.name.as_str()).collect::<Vec<_>>(),
         vec![
+            "Discord.exe",
             "private",
+            "category-ru",
+            "ru",
+            "antifilter",
+            "antifilter-community",
+            "discord",
+            "telegram",
             "youtube",
             "antifilter",
             "antifilter-community",
-            "category-ru",
-            "antifilter",
-            "antifilter-community",
-            "ru"
+            "telegram"
         ]
     );
-    assert_eq!(rules[1].server_id, "sub-1");
+    assert_eq!(rules[6].server_id, "sub-1");
+    assert_eq!(
+        rules
+            .iter()
+            .find(|rule| rule.name == "Discord.exe")
+            .unwrap()
+            .matcher,
+        crate::storage::repository::RuleMatcher::Application
+    );
     // Check all preset rules have preset_id populated
     for r in &rules {
         assert_eq!(r.preset_id.as_deref(), Some("russia-optimized"));
@@ -707,8 +959,8 @@ fn preset_application_idempotency_and_preservation() {
 
     // Check bypass-blocking
     let bb = generate_preset_rules("bypass-blocking", "sub-1").unwrap();
-    assert_eq!(bb.len(), 5);
-    assert_eq!(bb[0].name, "youtube");
+    assert_eq!(bb.len(), 8);
+    assert_eq!(bb[0].name, "antifilter");
     let rd = generate_preset_rules("russia-direct", "sub-1").unwrap();
     assert_eq!(
         rd.iter().map(|r| r.name.as_str()).collect::<Vec<_>>(),

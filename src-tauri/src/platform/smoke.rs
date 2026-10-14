@@ -241,13 +241,7 @@ pub async fn warm_route_cycle() -> Result<()> {
         proxy_port,
         metrics_port,
     };
-    let mut prepared = super::helper::start_standby(request.clone(), data.path()).await;
-    if prepared.as_ref().err().is_some_and(|failure| {
-        ["TUN_ADAPTER_TIMEOUT", "CORE_START_FAILED", "TUN_FAILED"].contains(&failure.code)
-    }) {
-        prepared = super::helper::start_standby(request, data.path()).await;
-    }
-    let mut helper = prepared?;
+    let mut helper = super::helper::start_standby(request, data.path()).await?;
     let prepared_ms = started.elapsed().as_millis();
     let cycle = async {
         if public_ip().await? != original {
@@ -326,13 +320,7 @@ pub async fn warm_standby_isolation() -> Result<()> {
         proxy_port,
         metrics_port,
     };
-    let mut prepared = super::helper::start_standby(request.clone(), data.path()).await;
-    if prepared.as_ref().err().is_some_and(|failure| {
-        ["TUN_ADAPTER_TIMEOUT", "CORE_START_FAILED", "TUN_FAILED"].contains(&failure.code)
-    }) {
-        prepared = super::helper::start_standby(request, data.path()).await;
-    }
-    let mut helper = prepared?;
+    let mut helper = super::helper::start_standby(request, data.path()).await?;
     eprintln!("STANDBY_CHECK prepared adapter isolation");
     let result = async {
         if !super::network::standby_isolated() {
@@ -406,13 +394,7 @@ pub async fn warm_live() -> Result<()> {
         proxy_port,
         metrics_port,
     };
-    let mut prepared = super::helper::start_standby(request.clone(), &data).await;
-    if prepared.as_ref().err().is_some_and(|failure| {
-        ["TUN_ADAPTER_TIMEOUT", "CORE_START_FAILED", "TUN_FAILED"].contains(&failure.code)
-    }) {
-        prepared = super::helper::start_standby(request, &data).await;
-    }
-    let mut helper = prepared?;
+    let mut helper = super::helper::start_standby(request, &data).await?;
     let result = async {
         if super::network::tunnel_ready() {
             return Err(error());

@@ -21,7 +21,8 @@ export interface Subscription {
 	updatedMinutesAgo?: number;
 }
 
-export type RuleMatcher = 'domain' | 'application' | 'geosite' | 'geoip';
+export type RuleMatcher =
+	'domain' | 'application' | 'geosite' | 'geoip' | 'final';
 
 export interface Rule {
 	id: string;
@@ -33,6 +34,83 @@ export interface Rule {
 	presetId?: string;
 }
 
+/** Replace one built-in preset and keep every other rule, in routing order. */
+export function mergePreset(rules: readonly Rule[], presetId: string): Rule[] {
+	const targetServer = 'subscription';
+	let rulesToCreate: Array<{
+		matcher: RuleMatcher;
+		name: string;
+		serverId: string;
+	}>;
+	if (presetId === 'russia-optimized') {
+		rulesToCreate = [
+			{ matcher: 'geoip', name: 'private', serverId: 'direct' },
+			{ matcher: 'geosite', name: 'category-ru', serverId: 'direct' },
+			{ matcher: 'geoip', name: 'ru', serverId: 'direct' },
+			{ matcher: 'geosite', name: 'antifilter', serverId: targetServer },
+			{
+				matcher: 'geosite',
+				name: 'antifilter-community',
+				serverId: targetServer,
+			},
+			{ matcher: 'geoip', name: 'antifilter', serverId: targetServer },
+			{
+				matcher: 'geoip',
+				name: 'antifilter-community',
+				serverId: targetServer,
+			},
+			{
+				matcher: 'application',
+				name: 'Discord.exe',
+				serverId: targetServer,
+			},
+		];
+	} else if (presetId === 'bypass-blocking') {
+		rulesToCreate = [
+			{ matcher: 'geosite', name: 'antifilter', serverId: targetServer },
+			{
+				matcher: 'geosite',
+				name: 'antifilter-community',
+				serverId: targetServer,
+			},
+			{ matcher: 'geoip', name: 'antifilter', serverId: targetServer },
+			{
+				matcher: 'geoip',
+				name: 'antifilter-community',
+				serverId: targetServer,
+			},
+		];
+	} else if (presetId === 'russia-direct') {
+		rulesToCreate = [
+			{ matcher: 'geosite', name: 'category-ru', serverId: 'direct' },
+			{ matcher: 'geoip', name: 'ru', serverId: 'direct' },
+			{ matcher: 'geoip', name: 'private', serverId: 'direct' },
+		];
+	} else {
+		throw new ServiceError('invalidRule');
+	}
+	if (presetId === 'russia-optimized' || presetId === 'bypass-blocking') {
+		// Telegram is throttled by DPI but absent from the antifilter lists.
+		rulesToCreate.push(
+			{ matcher: 'geosite', name: 'youtube', serverId: targetServer },
+			{ matcher: 'geosite', name: 'discord', serverId: targetServer },
+			{ matcher: 'geosite', name: 'telegram', serverId: targetServer },
+			{ matcher: 'geoip', name: 'telegram', serverId: targetServer },
+		);
+	}
+	const customRules = rules.filter((rule) => rule.presetId !== presetId);
+	const newPresetRules: Rule[] = rulesToCreate.map((rule) => ({
+		id: `${presetId}-${rule.matcher}-${rule.name}`,
+		name: rule.name,
+		matcher: rule.matcher,
+		isDomain: rule.matcher === 'domain',
+		serverId: rule.serverId,
+		enabled: true,
+		presetId,
+	}));
+	return orderedRules([...customRules, ...newPresetRules]);
+}
+
 export function orderedRules(rules: readonly Rule[]): Rule[] {
 	const key = (r: Rule): [number, string] => {
 		const builtin = [
@@ -40,19 +118,34 @@ export function orderedRules(rules: readonly Rule[]): Rule[] {
 			'bypass-blocking',
 			'russia-direct',
 		].includes(r.presetId ?? '');
-		const rank = !builtin
-			? 0
-			: r.matcher === 'geoip' && r.name === 'private'
-				? 1
-				: r.matcher === 'geosite' && r.name === 'youtube'
-					? 2
-					: r.matcher === 'geosite' && r.serverId !== 'direct'
-						? 3
-						: r.matcher === 'geosite'
-							? 4
-							: r.serverId !== 'direct'
-								? 5
-								: 6;
+		// Mirrors catalog_service::ordered_rules: VPN-bound applications match every
+		// destination, so they follow the presets and Russian services stay direct.
+		// A preset application (Discord) is the exception: it only talks to blocked
+		// services and its voice servers are bare addresses.
+		const vpnApplication =
+			r.matcher === 'application' &&
+			r.serverId !== 'direct' &&
+			r.serverId !== 'block';
+		const rank =
+			r.matcher === 'final'
+				? 9
+				: builtin && vpnApplication
+					? 1
+					: !builtin
+						? vpnApplication
+							? 7
+							: 0
+						: r.matcher === 'geoip' && r.name === 'private'
+							? 1
+							: r.matcher === 'geosite' && r.serverId === 'direct'
+								? 2
+								: r.matcher === 'geoip' && r.serverId === 'direct'
+									? 3
+									: r.matcher === 'geosite'
+										? 4
+										: r.serverId !== 'direct'
+											? 5
+											: 6;
 		return [rank, builtin ? r.id : ''];
 	};
 	return [...rules].sort((a, b) => {
@@ -194,7 +287,9 @@ export function validCatalog(value: unknown): value is Catalog {
 			typeof r.enabled === 'boolean' &&
 			(typeof r.isDomain === 'boolean' ||
 				(typeof r.matcher === 'string' &&
-					['domain', 'application', 'geosite', 'geoip'].includes(r.matcher))) &&
+					['domain', 'application', 'geosite', 'geoip', 'final'].includes(
+						r.matcher,
+					))) &&
 			(r.serverId === 'direct' ||
 				r.serverId === 'block' ||
 				r.serverId === 'subscription' ||
@@ -523,10 +618,11 @@ export class CatalogService {
 			servers,
 			rules: this.current.rules.filter(
 				(r) =>
-					r.serverId === 'direct' ||
-					serverIds.has(r.serverId) ||
-					(r.serverId === 'subscription' && remainingSubs.length > 0) ||
-					remainingSubs.some((s) => s.id === r.serverId),
+					r.presetId !== `subscription:${id}` &&
+					(r.serverId === 'direct' ||
+						serverIds.has(r.serverId) ||
+						(r.serverId === 'subscription' && remainingSubs.length > 0) ||
+						remainingSubs.some((s) => s.id === r.serverId)),
 			),
 			selectedSubscriptionId:
 				this.current.selectedSubscriptionId === id
@@ -548,7 +644,11 @@ export class CatalogService {
 	private validateRule(rule: Rule): Rule {
 		const rawName = rule.name.trim();
 		let matcher: RuleMatcher;
-		if (rule.matcher === 'geosite' || rule.matcher === 'geoip') {
+		if (
+			rule.matcher === 'geosite' ||
+			rule.matcher === 'geoip' ||
+			rule.matcher === 'final'
+		) {
 			matcher = rule.matcher;
 		} else if (rule.isDomain !== undefined) {
 			matcher = rule.isDomain ? 'domain' : 'application';
@@ -571,6 +671,9 @@ export class CatalogService {
 			} catch {
 				valid = false;
 			}
+		} else if (matcher === 'final') {
+			normalizedName = 'match';
+			valid = true;
 		}
 
 		const isSpecial =
@@ -603,79 +706,9 @@ export class CatalogService {
 		) {
 			throw new ServiceError('invalidServer');
 		}
-		const targetServer = 'subscription';
-		let rulesToCreate: Array<{
-			matcher: RuleMatcher;
-			name: string;
-			serverId: string;
-		}>;
-
-		if (presetId === 'russia-optimized') {
-			rulesToCreate = [
-				{ matcher: 'geoip', name: 'private', serverId: 'direct' },
-				{ matcher: 'geosite', name: 'antifilter', serverId: targetServer },
-				{
-					matcher: 'geosite',
-					name: 'antifilter-community',
-					serverId: targetServer,
-				},
-				{ matcher: 'geoip', name: 'antifilter', serverId: targetServer },
-				{
-					matcher: 'geoip',
-					name: 'antifilter-community',
-					serverId: targetServer,
-				},
-				{ matcher: 'geosite', name: 'category-ru', serverId: 'direct' },
-				{ matcher: 'geoip', name: 'ru', serverId: 'direct' },
-			];
-		} else if (presetId === 'bypass-blocking') {
-			rulesToCreate = [
-				{ matcher: 'geosite', name: 'antifilter', serverId: targetServer },
-				{
-					matcher: 'geosite',
-					name: 'antifilter-community',
-					serverId: targetServer,
-				},
-				{ matcher: 'geoip', name: 'antifilter', serverId: targetServer },
-				{
-					matcher: 'geoip',
-					name: 'antifilter-community',
-					serverId: targetServer,
-				},
-			];
-		} else if (presetId === 'russia-direct') {
-			rulesToCreate = [
-				{ matcher: 'geosite', name: 'category-ru', serverId: 'direct' },
-				{ matcher: 'geoip', name: 'ru', serverId: 'direct' },
-				{ matcher: 'geoip', name: 'private', serverId: 'direct' },
-			];
-		} else {
-			throw new ServiceError('invalidRule');
-		}
-
-		const customRules = this.current.rules.filter(
-			(r) => r.presetId !== presetId,
-		);
-		if (presetId !== 'russia-direct') {
-			rulesToCreate.push({
-				matcher: 'geosite',
-				name: 'youtube',
-				serverId: targetServer,
-			});
-		}
-		const newPresetRules: Rule[] = rulesToCreate.map((r) => ({
-			id: `${presetId}-${r.matcher}-${r.name}`,
-			name: r.name,
-			matcher: r.matcher,
-			isDomain: r.matcher === 'domain',
-			serverId: r.serverId,
-			enabled: true,
-			presetId,
-		}));
-
 		this.commit({
 			...this.current,
-			rules: orderedRules([...customRules, ...newPresetRules]),
+			rules: mergePreset(this.current.rules, presetId),
 		});
 	}
 

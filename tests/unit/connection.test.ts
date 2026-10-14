@@ -119,6 +119,37 @@ describe('connection lifecycle', () => {
 		expect(get(controller.state).status).toBe('disconnected');
 	});
 
+	it('drops a client timeout once the native session is already connected', async () => {
+		vi.useFakeTimers();
+		const snapshot = vi
+			.fn()
+			.mockResolvedValueOnce({ status: 'disconnected', info: null })
+			.mockResolvedValue({
+				status: 'connected' as const,
+				info: {
+					serverId: 'native-server',
+					demo: false,
+					ip: '203.0.113.5',
+					protocol: 'Vless' as const,
+					connectedAt: 1,
+				},
+			});
+		const vpn = Object.assign(new BrowserVpnService(0), {
+			getSnapshot: snapshot,
+		});
+		const controller = new ConnectionController(vpn, 20);
+		await controller.initialize();
+		vi.spyOn(vpn, 'connect').mockImplementation(() => new Promise(() => {}));
+		const pending = controller.toggle('native-server');
+		await vi.advanceTimersByTimeAsync(21);
+		await pending;
+		expect(get(controller.state)).toMatchObject({
+			status: 'connected',
+			busy: false,
+			error: null,
+		});
+	});
+
 	it('releases the lock after failure and allows retry', async () => {
 		const vpn = new BrowserVpnService(0);
 		const controller = new ConnectionController(vpn);

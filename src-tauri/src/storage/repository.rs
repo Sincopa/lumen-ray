@@ -33,6 +33,8 @@ pub enum RuleMatcher {
     Application,
     Geosite,
     Geoip,
+    /// Catch-all, equivalent to Clash `MATCH`.
+    Final,
 }
 
 pub fn is_valid_geo_tag(tag: &str) -> bool {
@@ -183,7 +185,7 @@ pub struct Settings {
     pub update_interval_hours: u32,
     #[serde(default = "default_ping_url")]
     pub ping_url: String,
-    #[serde(default)]
+    #[serde(default = "default_true")]
     pub auto_reconnect: bool,
     #[serde(default = "default_server_selection")]
     pub server_selection: String,
@@ -213,7 +215,7 @@ impl Default for Settings {
             bypass_lan: true,
             update_interval_hours: 1,
             ping_url: default_ping_url(),
-            auto_reconnect: false,
+            auto_reconnect: true,
             server_selection: default_server_selection(),
             ping_policy: default_ping_policy(),
             notify_disconnect: false,

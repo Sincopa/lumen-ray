@@ -231,17 +231,19 @@ pub async fn mutate(state: &AppState, mutation: Mutation) -> Result<Value> {
                 .name = name.trim().into();
         }
         Mutation::RemoveSubscription { id } => {
+            let provider_rules = crate::subscription::routing::subscription_preset_id(&id);
             next.subscriptions.retain(|s| s.id != id);
             next.nodes.retain(|n| n.subscription_id != id);
             next.sources.remove(&id);
             next.selected_servers.remove(&id);
             next.rules.retain(|r| {
-                r.server_id == "direct"
-                    || r.server_id == "subscription"
-                    || next
-                        .nodes
-                        .iter()
-                        .any(|n| n.id == r.server_id || n.subscription_id == r.server_id)
+                r.preset_id.as_deref() != Some(provider_rules.as_str())
+                    && (r.server_id == "direct"
+                        || r.server_id == "subscription"
+                        || next
+                            .nodes
+                            .iter()
+                            .any(|n| n.id == r.server_id || n.subscription_id == r.server_id))
             });
             reconcile(&mut next);
         }
@@ -431,9 +433,27 @@ pub async fn prepare_import(
     let id = refresh_id
         .clone()
         .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
-    let parsed = crate::subscription::parser::parse(&fetched.body, &id).inspect_err(|error| {
-        log::warn!("Subscription {operation} parsing failed: {}", error.code);
-    })?;
+    let mut parsed =
+        crate::subscription::parser::parse(&fetched.body, &id).inspect_err(|error| {
+            log::warn!("Subscription {operation} parsing failed: {}", error.code);
+        })?;
+    if let Some(header) = fetched.routing.as_deref() {
+        use crate::subscription::routing::HeaderRouting;
+        match crate::subscription::routing::header_routing(header) {
+            HeaderRouting::Off => {
+                parsed.rules.clear();
+                parsed.routing_off = true;
+            }
+            HeaderRouting::Profile(profile) if parsed.rules.is_empty() && !parsed.routing_off => {
+                parsed.rules = crate::subscription::routing::from_profiles(
+                    std::slice::from_ref(&profile),
+                    &id,
+                    &parsed.nodes,
+                );
+            }
+            HeaderRouting::Profile(_) | HeaderRouting::Absent => {}
+        }
+    }
     let mut skipped = std::collections::BTreeMap::new();
     for diagnostic in &parsed.diagnostics {
         *skipped.entry(diagnostic.code).or_insert(0usize) += 1;
@@ -497,6 +517,29 @@ pub async fn apply_import(state: &AppState, prepared: PreparedImport) -> Result<
         });
     }
     next.sources.insert(id.clone(), input);
+    let provider_rules = crate::subscription::routing::subscription_preset_id(&id);
+    let previous_provider: Vec<Rule> = next
+        .rules
+        .iter()
+        .filter(|rule| rule.preset_id.as_deref() == Some(provider_rules.as_str()))
+        .cloned()
+        .collect();
+    let incoming = if parsed.routing_off {
+        Vec::new()
+    } else {
+        std::mem::take(&mut parsed.rules)
+    };
+    if incoming != previous_provider {
+        next.rules
+            .retain(|rule| rule.preset_id.as_deref() != Some(provider_rules.as_str()));
+        if !incoming.is_empty() {
+            // Provider rules only run in Rules mode. Global mode ignores them and
+            // would send Russian banks through the VPN as well.
+            next.routing_mode = "rules".into();
+        }
+        next.rules.extend(incoming);
+        next.rules = ordered_rules(&next.rules).into_iter().cloned().collect();
+    }
     if !refresh {
         next.selected_server_id = next
             .nodes
@@ -533,10 +576,32 @@ pub async fn apply_import(state: &AppState, prepared: PreparedImport) -> Result<
 pub fn generate_preset_rules(preset_id: &str, target_proxy: &str) -> Result<Vec<Rule>> {
     use crate::storage::repository::{Rule, RuleMatcher};
     let mut rules = match preset_id {
+        // Russian sites and the rest of the system stay direct. Only the
+        // blocking lists, YouTube, Telegram and the Discord process use the VPN.
+        // A final MATCH would tunnel the whole system, and VLESS Vision cannot
+        // carry Discord's voice UDP, so that traffic must not be forced in.
         "russia-optimized" => Ok(vec![
             Rule {
                 id: format!("{preset_id}-geoip-private"),
                 name: "private".into(),
+                matcher: RuleMatcher::Geoip,
+                server_id: "direct".into(),
+                enabled: true,
+                preset_id: Some(preset_id.into()),
+                is_domain: false,
+            },
+            Rule {
+                id: format!("{preset_id}-geosite-category-ru"),
+                name: "category-ru".into(),
+                matcher: RuleMatcher::Geosite,
+                server_id: "direct".into(),
+                enabled: true,
+                preset_id: Some(preset_id.into()),
+                is_domain: false,
+            },
+            Rule {
+                id: format!("{preset_id}-geoip-ru"),
+                name: "ru".into(),
                 matcher: RuleMatcher::Geoip,
                 server_id: "direct".into(),
                 enabled: true,
@@ -579,20 +644,13 @@ pub fn generate_preset_rules(preset_id: &str, target_proxy: &str) -> Result<Vec<
                 preset_id: Some(preset_id.into()),
                 is_domain: false,
             },
+            // The desktop client, including voice, is blocked and must use the
+            // VPN. A domain list misses the voice-server addresses.
             Rule {
-                id: format!("{preset_id}-geosite-category-ru"),
-                name: "category-ru".into(),
-                matcher: RuleMatcher::Geosite,
-                server_id: "direct".into(),
-                enabled: true,
-                preset_id: Some(preset_id.into()),
-                is_domain: false,
-            },
-            Rule {
-                id: format!("{preset_id}-geoip-ru"),
-                name: "ru".into(),
-                matcher: RuleMatcher::Geoip,
-                server_id: "direct".into(),
+                id: format!("{preset_id}-application-Discord.exe"),
+                name: "Discord.exe".into(),
+                matcher: RuleMatcher::Application,
+                server_id: target_proxy.into(),
                 enabled: true,
                 preset_id: Some(preset_id.into()),
                 is_domain: false,
@@ -668,15 +726,30 @@ pub fn generate_preset_rules(preset_id: &str, target_proxy: &str) -> Result<Vec<
         _ => Err(BackendError::new("INVALID_PRESET", "Unknown rule preset")),
     }?;
     if matches!(preset_id, "russia-optimized" | "bypass-blocking") {
-        rules.push(Rule {
-            id: format!("{preset_id}-geosite-youtube"),
-            name: "youtube".into(),
-            matcher: RuleMatcher::Geosite,
-            server_id: target_proxy.into(),
-            enabled: true,
-            preset_id: Some(preset_id.into()),
-            is_domain: false,
-        });
+        // Telegram is throttled by DPI but absent from the antifilter lists, so
+        // t.me and web.telegram.org time out on the direct path without these.
+        // Discord is blocked too; its gateway and CDN hosts are not all in antifilter.
+        for (name, matcher) in [
+            ("youtube", RuleMatcher::Geosite),
+            ("discord", RuleMatcher::Geosite),
+            ("telegram", RuleMatcher::Geosite),
+            ("telegram", RuleMatcher::Geoip),
+        ] {
+            let kind = if matcher == RuleMatcher::Geosite {
+                "geosite"
+            } else {
+                "geoip"
+            };
+            rules.push(Rule {
+                id: format!("{preset_id}-{kind}-{name}"),
+                name: name.into(),
+                matcher,
+                server_id: target_proxy.into(),
+                enabled: true,
+                preset_id: Some(preset_id.into()),
+                is_domain: false,
+            });
+        }
     }
     Ok(ordered_rules(&rules).into_iter().cloned().collect())
 }
@@ -696,7 +769,20 @@ pub fn ordered_rules(rules: &[Rule]) -> Vec<&Rule> {
             r.preset_id.as_deref(),
             Some("russia-optimized" | "bypass-blocking" | "russia-direct")
         );
-        let rank = if !builtin {
+        // Russian domains and IPs come before every proxy list. Otherwise a
+        // site such as 2ip.ru that also appears in a blocking list, or that
+        // resolves to a foreign CDN address, leaves through the VPN.
+        let rank = if r.matcher == RuleMatcher::Final {
+            9
+        } else if builtin
+            && r.matcher == RuleMatcher::Application
+            && !["direct", "block"].contains(&r.server_id.as_str())
+        {
+            // A preset application (Discord) talks only to blocked services. Its
+            // voice servers are bare addresses, so a Russian GeoIP match must not
+            // send them to the direct path where they drop after a few minutes.
+            1
+        } else if !builtin {
             if r.matcher == RuleMatcher::Application
                 && !["direct", "block"].contains(&r.server_id.as_str())
             {
@@ -706,9 +792,9 @@ pub fn ordered_rules(rules: &[Rule]) -> Vec<&Rule> {
             }
         } else if r.matcher == RuleMatcher::Geoip && r.name == "private" {
             1
-        } else if r.matcher == RuleMatcher::Geosite && r.name == "youtube" {
+        } else if r.matcher == RuleMatcher::Geosite && r.server_id == "direct" {
             2
-        } else if r.matcher == RuleMatcher::Geosite && r.server_id != "direct" {
+        } else if r.matcher == RuleMatcher::Geoip && r.server_id == "direct" {
             3
         } else if r.matcher == RuleMatcher::Geosite {
             4
@@ -720,6 +806,57 @@ pub fn ordered_rules(rules: &[Rule]) -> Vec<&Rule> {
         (rank, if builtin { r.id.as_str() } else { "" })
     });
     rows
+}
+
+/// Replace a preset that still tunnels every connection, or that does not send
+/// Discord.exe through the VPN.
+pub fn upgrade_russia_optimized(repo: &mut Repository) -> bool {
+    use crate::storage::repository::RuleMatcher;
+    let preset = "russia-optimized";
+    let current: Vec<Rule> = repo
+        .rules
+        .iter()
+        .filter(|rule| rule.preset_id.as_deref() == Some(preset))
+        .cloned()
+        .collect();
+    // An earlier version shipped the Discord.exe row disabled, which left voice on
+    // the blocked direct path.
+    let discord_via_vpn = current.iter().any(|rule| {
+        rule.matcher == RuleMatcher::Application
+            && rule.enabled
+            && rule.name.eq_ignore_ascii_case("Discord.exe")
+            && !matches!(rule.server_id.as_str(), "direct" | "block")
+    });
+    let has = |name: &str, matcher: RuleMatcher| {
+        current
+            .iter()
+            .any(|rule| rule.matcher == matcher && rule.name == name)
+    };
+    let russian_domains_lose = current.iter().position(|rule| rule.name == "youtube")
+        < current.iter().position(|rule| rule.name == "category-ru");
+    let stale = current
+        .iter()
+        .any(|rule| rule.matcher == RuleMatcher::Final)
+        || !discord_via_vpn
+        || !has("discord", RuleMatcher::Geosite)
+        || !has("youtube", RuleMatcher::Geosite)
+        || russian_domains_lose;
+    if current.is_empty() || !stale {
+        return false;
+    }
+    let target = current
+        .iter()
+        .find(|rule| !matches!(rule.server_id.as_str(), "direct" | "block"))
+        .map(|rule| rule.server_id.clone())
+        .unwrap_or_else(|| "subscription".into());
+    let Ok(rules) = generate_preset_rules(preset, &target) else {
+        return false;
+    };
+    repo.rules
+        .retain(|rule| rule.preset_id.as_deref() != Some(preset));
+    repo.rules.extend(rules);
+    repo.rules = ordered_rules(&repo.rules).into_iter().cloned().collect();
+    true
 }
 
 async fn fetch_subscription(

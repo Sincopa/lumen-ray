@@ -587,6 +587,10 @@
 								<span class="globe-text" aria-hidden="true">
 									<MaterialIcon name="pin_drop" size={20} />
 								</span>
+							{:else if matcher === 'final'}
+								<span class="globe-text" aria-hidden="true">
+									<MaterialIcon name="alt_route" size={20} />
+								</span>
 							{:else}
 								<span class="globe-text" aria-hidden="true">
 									<MaterialIcon name="description" size={20} />
@@ -602,17 +606,21 @@
 							aria-label={t('rules.edit', { name: rule.name })}
 						>
 							<span class="rule-name" title={formatRuleDisplayName(rule.name)}>
-								{formatRuleDisplayName(rule.name)}
+								{matcher === 'final'
+									? t('rules.everythingElse') || 'Всё остальное'
+									: formatRuleDisplayName(rule.name)}
 							</span>
 							<span
 								class="rule-details"
 								class:domain-details={matcher === 'domain'}
 							>
-								{isGeo
-									? matcher === 'geosite'
-										? 'GeoSite'
-										: 'GeoIP'
-									: serverName}
+								{matcher === 'final'
+									? t('rules.finalDetails') || 'MATCH'
+									: isGeo
+										? matcher === 'geosite'
+											? 'GeoSite'
+											: 'GeoIP'
+										: serverName}
 							</span>
 						</button>
 					</div>

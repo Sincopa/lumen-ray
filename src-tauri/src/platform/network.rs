@@ -121,26 +121,195 @@ pub fn system_dns() -> crate::domain::errors::Result<Vec<String>> {
     Err(error())
 }
 /// Read-only confirmation that Xray installed the default route on its own adapter.
+/// An unreadable table is not treated as ready.
 pub fn tunnel_ready() -> bool {
-    tunnel_route_exists(AF_INET)
+    tunnel_route_exists(AF_INET) == Some(true)
 }
-fn tunnel_route_exists(family: u16) -> bool {
-    let Some(luid) = tunnel_luid() else {
-        return false;
-    };
+
+/// Whether a physical adapter has an IPv6 default route. Without one, a tunnel
+/// `::/0` invents IPv6 connectivity: browsers then prefer AAAA records, direct
+/// rules have no IPv6 path, and Xray cannot match processes on TUN IPv6 flows.
+pub fn physical_ipv6_available() -> bool {
+    let tunnel = tunnel_luid().map(|luid| unsafe { luid.Value });
     unsafe {
         let mut table = std::ptr::null_mut();
-        if GetIpForwardTable2(family, &mut table) != 0 || table.is_null() {
+        if GetIpForwardTable2(AF_INET6, &mut table) != 0 || table.is_null() {
             return false;
         }
         let entries =
             std::slice::from_raw_parts((*table).Table.as_ptr(), (*table).NumEntries as usize);
-        let found = entries
-            .iter()
-            .any(|r| r.InterfaceLuid.Value == luid.Value && r.DestinationPrefix.PrefixLength == 0);
+        let found = entries.iter().any(|r| {
+            r.DestinationPrefix.PrefixLength == 0 && Some(r.InterfaceLuid.Value) != tunnel
+        });
         FreeMibTable(table as _);
         found
     }
+}
+/// Default route owned by the tunnel adapter. Other prefixes and other
+/// interfaces stay untouched.
+pub(crate) fn is_lumen_default_route(
+    interface_luid: u64,
+    prefix_length: u8,
+    tunnel_luid: u64,
+) -> bool {
+    interface_luid == tunnel_luid && prefix_length == 0
+}
+
+/// `Some(true)` means a Lumen default route is present. `Some(false)` means the
+/// table was readable and that route is gone, including when the adapter itself
+/// is gone. `None` means the table could not be read: that is not evidence the
+/// route is gone, and callers must not tear the tunnel down on it.
+fn tunnel_route_exists(family: u16) -> Option<bool> {
+    let Some(luid) = tunnel_luid() else {
+        return Some(false);
+    };
+    unsafe {
+        let mut table = std::ptr::null_mut();
+        if GetIpForwardTable2(family, &mut table) != 0 || table.is_null() {
+            return None;
+        }
+        let entries =
+            std::slice::from_raw_parts((*table).Table.as_ptr(), (*table).NumEntries as usize);
+        let found = entries.iter().any(|route| {
+            is_lumen_default_route(
+                route.InterfaceLuid.Value,
+                route.DestinationPrefix.PrefixLength,
+                luid.Value,
+            )
+        });
+        FreeMibTable(table as _);
+        Some(found)
+    }
+}
+
+/// Both families were read and neither still has a Lumen default route.
+/// A failed read stays `false` so a cleanup path will not kill Xray on a guess.
+pub(crate) fn defaults_absent_from_reads(ipv4: Option<bool>, ipv6: Option<bool>) -> bool {
+    ipv4 == Some(false) && ipv6 == Some(false)
+}
+
+/// No default route remains on LumenTun. A missing adapter counts as clear:
+/// Windows drops routes that belonged to an interface that no longer exists.
+pub fn tunnel_defaults_absent() -> bool {
+    defaults_absent_from_reads(tunnel_route_exists(AF_INET), tunnel_route_exists(AF_INET6))
+}
+
+/// Default routes are gone and, when the adapter still exists, it no longer
+/// outranks a physical interface.
+pub fn routes_released() -> bool {
+    if !tunnel_defaults_absent() {
+        return false;
+    }
+    let Some(luid) = tunnel_luid() else {
+        return true;
+    };
+    use windows_sys::Win32::NetworkManagement::IpHelper::{
+        GetIpInterfaceEntry, InitializeIpInterfaceEntry, MIB_IPINTERFACE_ROW,
+    };
+    unsafe {
+        [AF_INET, AF_INET6].into_iter().all(|family| {
+            let mut interface = MIB_IPINTERFACE_ROW::default();
+            InitializeIpInterfaceEntry(&mut interface);
+            interface.Family = family;
+            interface.InterfaceLuid = luid;
+            let status = GetIpInterfaceEntry(&mut interface);
+            status != 0 || (!interface.UseAutomaticMetric && interface.Metric >= 5_000)
+        })
+    }
+}
+
+/// Delete every default route Windows actually installed on LumenTun, then
+/// push the adapter behind physical interfaces. Success is a second read of
+/// the routing table, not the status of a single delete.
+pub fn release_lumen_routes() -> crate::domain::errors::Result<()> {
+    use crate::domain::errors::BackendError;
+    let Some(luid) = tunnel_luid() else {
+        return Ok(());
+    };
+    let tunnel = unsafe { luid.Value };
+    for family in [AF_INET, AF_INET6] {
+        delete_lumen_default_routes(family, tunnel)?;
+    }
+    lower_tunnel_priority(luid)?;
+    if routes_released() {
+        Ok(())
+    } else {
+        Err(BackendError::new(
+            "TUN_FAILED",
+            "Could not remove tunnel routes",
+        ))
+    }
+}
+
+fn delete_lumen_default_routes(family: u16, tunnel: u64) -> crate::domain::errors::Result<()> {
+    use crate::domain::errors::BackendError;
+    use windows_sys::Win32::Foundation::ERROR_NOT_FOUND;
+    use windows_sys::Win32::NetworkManagement::IpHelper::{
+        DeleteIpForwardEntry2, MIB_IPFORWARD_ROW2,
+    };
+    unsafe {
+        let mut table = std::ptr::null_mut();
+        if GetIpForwardTable2(family, &mut table) != 0 || table.is_null() {
+            return Err(BackendError::new(
+                "TUN_FAILED",
+                "Could not read tunnel routes",
+            ));
+        }
+        let entries =
+            std::slice::from_raw_parts((*table).Table.as_ptr(), (*table).NumEntries as usize);
+        let owned: Vec<MIB_IPFORWARD_ROW2> = entries
+            .iter()
+            .filter(|route| {
+                is_lumen_default_route(
+                    route.InterfaceLuid.Value,
+                    route.DestinationPrefix.PrefixLength,
+                    tunnel,
+                )
+            })
+            .copied()
+            .collect();
+        FreeMibTable(table as _);
+        for route in &owned {
+            let status = DeleteIpForwardEntry2(route);
+            if status != 0 && status != ERROR_NOT_FOUND {
+                return Err(BackendError::new(
+                    "TUN_FAILED",
+                    "Could not remove tunnel routes",
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
+fn lower_tunnel_priority(luid: NET_LUID_LH) -> crate::domain::errors::Result<()> {
+    use crate::domain::errors::BackendError;
+    use windows_sys::Win32::NetworkManagement::IpHelper::{
+        GetIpInterfaceEntry, InitializeIpInterfaceEntry, MIB_IPINTERFACE_ROW,
+    };
+    for family in [AF_INET, AF_INET6] {
+        let mut interface = MIB_IPINTERFACE_ROW::default();
+        unsafe {
+            InitializeIpInterfaceEntry(&mut interface);
+        }
+        interface.Family = family;
+        interface.InterfaceLuid = luid;
+        if unsafe { GetIpInterfaceEntry(&mut interface) } != 0 {
+            continue;
+        }
+        if !interface.UseAutomaticMetric && interface.Metric >= 5_000 {
+            continue;
+        }
+        interface.UseAutomaticMetric = false;
+        interface.Metric = 5_000;
+        if set_tunnel_interface(&mut interface) != 0 {
+            return Err(BackendError::new(
+                "TUN_FAILED",
+                "Could not lower standby tunnel priority",
+            ));
+        }
+    }
+    Ok(())
 }
 
 /// The prepared adapter must not own default routes or outrank ordinary adapters.
@@ -148,7 +317,7 @@ pub fn standby_isolated() -> bool {
     use windows_sys::Win32::NetworkManagement::IpHelper::{
         GetIpInterfaceEntry, InitializeIpInterfaceEntry, MIB_IPINTERFACE_ROW,
     };
-    if tunnel_route_exists(AF_INET) || tunnel_route_exists(AF_INET6) {
+    if tunnel_route_exists(AF_INET) != Some(false) || tunnel_route_exists(AF_INET6) != Some(false) {
         return false;
     }
     let Some(luid) = tunnel_luid() else {
@@ -203,6 +372,7 @@ pub struct TunnelRoutes {
     luid: NET_LUID_LH,
     rows: Vec<windows_sys::Win32::NetworkManagement::IpHelper::MIB_IPFORWARD_ROW2>,
     metrics: Vec<(u16, bool, u32)>,
+    active: bool,
 }
 
 impl TunnelRoutes {
@@ -241,7 +411,12 @@ impl TunnelRoutes {
             luid,
             rows: Vec::new(),
             metrics: Vec::new(),
+            active: false,
         })
+    }
+
+    pub fn is_active(&self) -> bool {
+        self.active
     }
 
     pub fn activate(&mut self) -> crate::domain::errors::Result<()> {
@@ -250,7 +425,7 @@ impl TunnelRoutes {
             CreateIpForwardEntry2, GetIpInterfaceEntry, InitializeIpForwardEntry,
             InitializeIpInterfaceEntry, MIB_IPFORWARD_ROW2, MIB_IPINTERFACE_ROW,
         };
-        if self.rows.len() == 2 {
+        if self.active {
             return Ok(());
         }
         if !self.rows.is_empty() || !self.metrics.is_empty() {
@@ -259,7 +434,12 @@ impl TunnelRoutes {
                 "Tunnel route cleanup is incomplete",
             ));
         }
-        for family in [AF_INET, AF_INET6] {
+        let families: &[u16] = if physical_ipv6_available() {
+            &[AF_INET, AF_INET6]
+        } else {
+            &[AF_INET]
+        };
+        for &family in families {
             let mut interface = MIB_IPINTERFACE_ROW::default();
             unsafe {
                 InitializeIpInterfaceEntry(&mut interface);
@@ -320,6 +500,7 @@ impl TunnelRoutes {
                         attempt * 50
                     );
                 }
+                self.active = true;
                 return Ok(());
             }
             std::thread::sleep(std::time::Duration::from_millis(50));
@@ -329,51 +510,28 @@ impl TunnelRoutes {
             let _ = self.deactivate();
             return Err(error);
         }
+        self.active = true;
         Ok(())
     }
 
     pub fn deactivate(&mut self) -> crate::domain::errors::Result<()> {
-        use crate::domain::errors::BackendError;
-        use windows_sys::Win32::Foundation::ERROR_NOT_FOUND;
-        use windows_sys::Win32::NetworkManagement::IpHelper::{
-            DeleteIpForwardEntry2, GetIpInterfaceEntry, InitializeIpInterfaceEntry,
-            MIB_IPINTERFACE_ROW,
-        };
-        let mut failed = false;
-        let mut remaining_routes = Vec::new();
-        for route in self.rows.drain(..) {
-            let status = unsafe { DeleteIpForwardEntry2(&route) };
-            if status != 0 && status != ERROR_NOT_FOUND {
-                failed = true;
-                remaining_routes.push(route);
+        // Drop every default route on the adapter Windows currently has, including
+        // rows that no longer match the values passed to CreateIpForwardEntry2.
+        self.active = false;
+        match release_lumen_routes() {
+            Ok(()) => {
+                self.rows.clear();
+                self.metrics.clear();
+                Ok(())
             }
-        }
-        self.rows = remaining_routes;
-        let mut remaining_metrics = Vec::new();
-        for (family, automatic, metric) in self.metrics.drain(..) {
-            let mut interface = MIB_IPINTERFACE_ROW::default();
-            unsafe {
-                InitializeIpInterfaceEntry(&mut interface);
-            }
-            interface.Family = family;
-            interface.InterfaceLuid = self.luid;
-            if unsafe { GetIpInterfaceEntry(&mut interface) } == 0 {
-                interface.UseAutomaticMetric = automatic;
-                interface.Metric = metric;
-                if set_tunnel_interface(&mut interface) != 0 {
-                    failed = true;
-                    remaining_metrics.push((family, automatic, metric));
+            Err(error) => {
+                // Keep a sentinel so activate() will not install another default
+                // route on top of one that is still in the table.
+                if self.rows.is_empty() {
+                    self.rows.push(windows_sys::Win32::NetworkManagement::IpHelper::MIB_IPFORWARD_ROW2::default());
                 }
+                Err(error)
             }
-        }
-        self.metrics = remaining_metrics;
-        if failed {
-            Err(BackendError::new(
-                "TUN_FAILED",
-                "Could not remove tunnel routes",
-            ))
-        } else {
-            Ok(())
         }
     }
 }
@@ -438,4 +596,29 @@ fn tunnel_route_conflict() -> Option<&'static str> {
         }
     }
     None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_lumen_default_route;
+
+    #[test]
+    fn selects_only_lumen_default_routes() {
+        let tunnel = 42u64;
+        assert!(is_lumen_default_route(tunnel, 0, tunnel));
+        assert!(!is_lumen_default_route(tunnel, 24, tunnel));
+        assert!(!is_lumen_default_route(tunnel, 32, tunnel));
+        assert!(!is_lumen_default_route(7, 0, tunnel));
+        assert!(!is_lumen_default_route(7, 128, tunnel));
+    }
+
+    #[test]
+    fn unreadable_route_table_is_not_treated_as_clear() {
+        assert!(super::defaults_absent_from_reads(Some(false), Some(false)));
+        assert!(!super::defaults_absent_from_reads(Some(true), Some(false)));
+        assert!(!super::defaults_absent_from_reads(Some(false), Some(true)));
+        assert!(!super::defaults_absent_from_reads(None, Some(false)));
+        assert!(!super::defaults_absent_from_reads(Some(false), None));
+        assert!(!super::defaults_absent_from_reads(None, None));
+    }
 }
