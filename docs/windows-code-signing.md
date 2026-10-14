@@ -91,6 +91,9 @@ created by the job from both locations. Local builds retain CurrentUser-only tru
 
 The existing `TAURI_SIGNING_PRIVATE_KEY` and `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`
 secrets continue to protect automatic updates independently of Authenticode.
+The updater-key probe tries the configured passphrase and the legacy empty
+passphrase, then passes the verified choice to the build through `GITHUB_ENV`.
+This retains the existing key when an obsolete password secret is configured.
 
 ## Verification and backups
 
