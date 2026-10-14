@@ -237,6 +237,55 @@ fn assets_match(session: &XraySession, version: &str, geo: Option<[u8; 32]>) -> 
     session.prepared_core_version.as_deref() == Some(version) && session.prepared_geo_hash == geo
 }
 
+/// A live elevated helper is never replaced by another UAC prompt.
+#[cfg(windows)]
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) enum HelperPlan {
+    Reuse,
+    Reload,
+    Launch,
+}
+
+#[cfg(windows)]
+pub(crate) fn helper_plan(alive: bool, config_matches: bool) -> HelperPlan {
+    if !alive {
+        HelperPlan::Launch
+    } else if config_matches {
+        HelperPlan::Reuse
+    } else {
+        HelperPlan::Reload
+    }
+}
+
+#[cfg(windows)]
+#[allow(clippy::too_many_arguments)]
+fn note_prepared(
+    session: &mut XraySession,
+    selected: &str,
+    hash: [u8; 32],
+    version: &str,
+    geo: Option<[u8; 32]>,
+    outbound_hash: [u8; 32],
+    repository: Arc<Repository>,
+    proxy_port: u16,
+    metrics_port: u16,
+) {
+    session.prepared_server_id = Some(selected.into());
+    session.prepared_config_hash = Some(hash);
+    session.prepared_core_version = Some(version.into());
+    session.prepared_geo_hash = geo;
+    session.base_server_id = Some(selected.into());
+    session.base_outbound_hash = Some(outbound_hash);
+    session.base_repository = Some(repository.clone());
+    session.prepared_repository = Some(repository);
+    session.active_proxy_tag = Some("proxy".into());
+    session.live_outbound_tags.clear();
+    session.pending_live_switch = None;
+    session.proxy_port = proxy_port;
+    session.metrics_port = metrics_port;
+    session.is_tun = true;
+}
+
 #[cfg(windows)]
 fn outbound_fingerprint(repo: &Repository, selected: &str) -> Result<[u8; 32]> {
     let node = repo
@@ -264,7 +313,8 @@ fn cached_outbound_matches(session: &XraySession, selected: &str, hash: [u8; 32]
 
 /// Apply a routing-only catalog change to the running core (active or prepared
 /// TUN, or a connected system proxy) without restarting it.
-/// Returns false when the change needs a full core restart.
+/// `NeedsConnect` is only a network-mode change or a core that is not running.
+/// Any other miss leaves the tunnel up (`KeepTunnel`).
 #[cfg(windows)]
 pub async fn apply_live_rules(
     state: &Arc<AppState>,
@@ -272,26 +322,26 @@ pub async fn apply_live_rules(
     before: Option<&Repository>,
     after: &Repository,
     session: &mut XraySession,
-) -> Result<bool> {
+) -> Result<crate::core::LiveRoutingStatus> {
     let tun = session.is_tun;
     if (after.settings.network_mode == "tun") != tun {
-        log::info!("engine=xray routing update needs restart: network mode changed");
-        return Ok(false);
+        log::info!("engine=xray routing update needs a new connection: network mode changed");
+        return Ok(crate::core::LiveRoutingStatus::NeedsConnect);
     }
     if !api_available(session) {
         log::info!("engine=xray routing update skipped: core is not running");
-        return Ok(false);
+        return Ok(crate::core::LiveRoutingStatus::NeedsConnect);
     }
     if session.prepared_server_id.as_deref() != Some(selected) {
-        log::warn!("engine=xray routing update skipped: active server changed");
-        return Ok(false);
+        log::warn!("engine=xray routing update kept the tunnel: active server changed");
+        return Ok(crate::core::LiveRoutingStatus::KeepTunnel);
     }
     if session.pending_live_switch.is_some() {
-        return Ok(false);
+        return Ok(crate::core::LiveRoutingStatus::KeepTunnel);
     }
     let after_hash = configuration_fingerprint(after, selected, tun)?;
     if session.prepared_config_hash == Some(after_hash) {
-        return Ok(true);
+        return Ok(crate::core::LiveRoutingStatus::Applied);
     }
     // Patch from what the core actually runs; a caller snapshot may be stale
     // after an earlier failed update.
@@ -304,21 +354,32 @@ pub async fn apply_live_rules(
             stripped(before)
         }
         _ => {
-            log::warn!("engine=xray routing update skipped: configuration changed");
-            return Ok(false);
+            log::warn!("engine=xray routing update kept the tunnel: configuration changed");
+            return Ok(crate::core::LiveRoutingStatus::KeepTunnel);
         }
     };
-    let Some(mut patch) = crate::xray::config::live_routing_patch(&current, after, selected, tun)?
+    let Some(mut plan) = crate::xray::config::live_routing_plan(&current, after, selected, tun)?
     else {
-        log::info!("engine=xray routing update needs restart");
-        return Ok(false);
+        log::info!("engine=xray routing update kept the tunnel");
+        return Ok(crate::core::LiveRoutingStatus::KeepTunnel);
     };
     if let Some(tag) = session.active_proxy_tag.as_deref() {
-        replace_primary_proxy_tag(&mut patch, tag);
+        replace_primary_proxy_tag(&mut plan.patch, tag);
     }
     let core = state.core.read().await.clone();
     let applied_at = Instant::now();
-    if let Err(error) = run_live_routing_patch(&core, session.metrics_port + 2, &patch).await {
+    let api_port = session.metrics_port + 2;
+    for outbound in &plan.added_outbounds {
+        if let Err(error) = run_live_outbound_add(&core, api_port, outbound).await {
+            log::warn!(
+                "engine=xray routing outbound add failed: {} ({})",
+                error.code,
+                error.message
+            );
+            return Err(error);
+        }
+    }
+    if let Err(error) = run_live_routing_patch(&core, api_port, &plan.patch).await {
         log::warn!(
             "engine=xray routing update failed: {} ({})",
             error.code,
@@ -332,7 +393,7 @@ pub async fn apply_live_rules(
         "engine=xray routing update applied {} ms",
         applied_at.elapsed().as_millis()
     );
-    Ok(true)
+    Ok(crate::core::LiveRoutingStatus::Applied)
 }
 
 /// Bring a running core to the requested server and routing through its API.
@@ -349,7 +410,9 @@ async fn update_running_core(
         if session.prepared_config_hash == Some(config_hash) {
             return true;
         }
-        apply_live_rules(state, selected, None, repo, session).await
+        apply_live_rules(state, selected, None, repo, session)
+            .await
+            .map(|status| status == crate::core::LiveRoutingStatus::Applied)
     } else {
         switch_server_live(state, repo, selected, config_hash, session).await
     };
@@ -539,6 +602,14 @@ mod live_switch_tests {
     }
 
     #[test]
+    fn live_helper_is_reloaded_instead_of_launched() {
+        assert_eq!(helper_plan(true, true), HelperPlan::Reuse);
+        assert_eq!(helper_plan(true, false), HelperPlan::Reload);
+        assert_eq!(helper_plan(false, true), HelperPlan::Launch);
+        assert_eq!(helper_plan(false, false), HelperPlan::Launch);
+    }
+
+    #[test]
     fn switches_primary_outbound_without_changing_tun_and_keeps_rollback_route() {
         let first = crate::subscription::uri::parse(
             "vless://00000000-0000-4000-8000-000000000001@a.example:443?security=tls#A",
@@ -682,10 +753,11 @@ mod live_switch_tests {
             let started = xray(&mut session)?.started;
             assert!(started.is_some());
             // All -> Rules with a new rule, then a server switch, then back to All.
-            assert!(
+            assert_eq!(
                 XrayBackend
                     .update_routing(&state, &first.id, &global, &rules, &mut session)
-                    .await?
+                    .await?,
+                crate::core::LiveRoutingStatus::Applied
             );
             XrayBackend
                 .connect(&state, &rules, &second.id, &mut session)
@@ -695,13 +767,17 @@ mod live_switch_tests {
             assert!(s.pending_live_switch.take().is_some());
             let mut toggled = rules.clone();
             toggled.rules[0].enabled = false;
-            assert!(
+            assert_eq!(
                 XrayBackend
                     .update_routing(&state, &second.id, &rules, &toggled, &mut session)
-                    .await?
+                    .await?,
+                crate::core::LiveRoutingStatus::Applied
             );
             let s = xray(&mut session)?;
-            assert!(apply_live_rules(&state, &second.id, None, &global, s).await?);
+            assert_eq!(
+                apply_live_rules(&state, &second.id, None, &global, s).await?,
+                crate::core::LiveRoutingStatus::Applied
+            );
             // The process that served the first connection is still the same one.
             assert_eq!(s.started, started);
             Ok::<_, BackendError>(())
@@ -860,7 +936,7 @@ async fn run_live_outbound_add(
     command
         .stdin(Stdio::piped())
         .stdout(Stdio::null())
-        .stderr(Stdio::null());
+        .stderr(Stdio::piped());
     let mut child = command.spawn().map_err(|_| {
         BackendError::new("LIVE_SWITCH_FAILED", "Could not start Xray outbound update")
     })?;
@@ -871,11 +947,17 @@ async fn run_live_outbound_add(
             BackendError::new("LIVE_SWITCH_FAILED", "Could not send Xray outbound update")
         })?;
     }
-    let status = tokio::time::timeout(Duration::from_secs(8), child.wait())
+    let output = tokio::time::timeout(Duration::from_secs(8), child.wait_with_output())
         .await
         .map_err(|_| BackendError::new("LIVE_SWITCH_FAILED", "Xray outbound update timed out"))?
         .map_err(|_| BackendError::new("LIVE_SWITCH_FAILED", "Xray outbound update failed"))?;
-    if !status.success() {
+    if !output.status.success() {
+        let detail = String::from_utf8_lossy(&output.stderr).to_ascii_lowercase();
+        // A previous attempt may have added the tag before routing was rejected.
+        if detail.contains("existing tag") {
+            return Ok(());
+        }
+        log::warn!("engine=xray outbound command failed");
         return Err(BackendError::new(
             "LIVE_SWITCH_FAILED",
             "Xray rejected the outbound update",
@@ -972,6 +1054,13 @@ async fn start_tunnel(
     let tunnel_at = Instant::now();
     #[cfg(windows)]
     {
+        if session
+            .helper
+            .as_ref()
+            .is_some_and(|helper| helper.exited())
+        {
+            session.helper = None;
+        }
         if session.helper.is_none() {
             session.helper = Some(
                 crate::platform::helper::start_standby(
@@ -1095,27 +1184,22 @@ pub(crate) async fn start(
 
 pub async fn stop(session: &mut XraySession) -> Result<()> {
     let mut failures = Vec::new();
+    // A process we failed to stop still owns the tunnel. Dropping the
+    // bookkeeping would make the monitor treat that live tunnel as idle.
+    let mut retained = false;
     #[cfg(windows)]
     if let Some(mut helper) = session.helper.take() {
         if !helper.exited() {
             if let Err(error) = helper.stop().await {
+                // The helper refused to stop because routes are still installed
+                // and it is still the process reading the adapter. Keep the pipe.
+                if !helper.exited() {
+                    session.helper = Some(helper);
+                    retained = true;
+                }
                 failures.push(error);
             }
         }
-    }
-    #[cfg(windows)]
-    {
-        session.prepared_server_id = None;
-        session.prepared_config_hash = None;
-        session.prepared_core_version = None;
-        session.prepared_geo_hash = None;
-        session.base_server_id = None;
-        session.base_outbound_hash = None;
-        session.active_proxy_tag = None;
-        session.live_outbound_tags.clear();
-        session.pending_live_switch = None;
-        session.prepared_repository = None;
-        session.base_repository = None;
     }
     if let Some(mut child) = session.child.take() {
         if !matches!(child.try_wait(), Ok(Some(_))) && child.kill().await.is_err() {
@@ -1124,9 +1208,26 @@ pub async fn stop(session: &mut XraySession) -> Result<()> {
                 "Cannot stop Xray process",
             ));
             session.child = Some(child);
+            retained = true;
         }
     }
-    session.started = None;
+    if !retained {
+        #[cfg(windows)]
+        {
+            session.prepared_server_id = None;
+            session.prepared_config_hash = None;
+            session.prepared_core_version = None;
+            session.prepared_geo_hash = None;
+            session.base_server_id = None;
+            session.base_outbound_hash = None;
+            session.active_proxy_tag = None;
+            session.live_outbound_tags.clear();
+            session.pending_live_switch = None;
+            session.prepared_repository = None;
+            session.base_repository = None;
+        }
+        session.started = None;
+    }
     for failure in &failures {
         log::warn!("engine=xray VPN cleanup incomplete: {}", failure.code);
     }
@@ -1268,15 +1369,16 @@ impl CoreBackend for XrayBackend {
                     .is_some_and(|h| !h.exited() && h.is_standby());
             #[cfg(not(windows))]
             let reuse = false;
-            let uses_geo = repo.routing_mode == "rules"
-                && repo.rules.iter().any(|r| {
-                    r.enabled
-                        && matches!(
-                            r.matcher,
-                            crate::storage::repository::RuleMatcher::Geosite
-                                | crate::storage::repository::RuleMatcher::Geoip
-                        )
-                });
+            let uses_geo = repo.settings.dns_policy.enabled
+                || (repo.routing_mode == "rules"
+                    && repo.rules.iter().any(|r| {
+                        r.enabled
+                            && matches!(
+                                r.matcher,
+                                crate::storage::repository::RuleMatcher::Geosite
+                                    | crate::storage::repository::RuleMatcher::Geoip
+                            )
+                    }));
             if uses_geo && !reuse {
                 // Hashing both databases is disk-bound; keep it off the async workers.
                 let data = state.data.clone();
@@ -1308,6 +1410,46 @@ impl CoreBackend for XrayBackend {
                     BackendError::new("INVALID_CONFIG", "Could not serialize Xray config")
                 })?
             };
+            #[cfg(windows)]
+            {
+                let alive = tun
+                    && s.helper
+                        .as_ref()
+                        .is_some_and(|helper| !helper.exited() && helper.is_standby());
+                match helper_plan(alive, reuse) {
+                    HelperPlan::Reuse => {}
+                    HelperPlan::Reload => {
+                        let repository = stripped(repo);
+                        let request = crate::platform::helper::StartTunnel {
+                            core_version: version.to_owned(),
+                            repository: (*repository).clone(),
+                            selected: selected.into(),
+                            proxy_port,
+                            metrics_port,
+                        };
+                        s.helper
+                            .as_mut()
+                            .ok_or_else(BackendError::invalid)?
+                            .reload(request, &state.data)
+                            .await?;
+                        note_prepared(
+                            s,
+                            selected,
+                            hash,
+                            version,
+                            current_geo,
+                            outbound_fingerprint(repo, selected)?,
+                            repository,
+                            proxy_port,
+                            metrics_port,
+                        );
+                    }
+                    HelperPlan::Launch => {
+                        stop(s).await?;
+                    }
+                }
+            }
+            #[cfg(not(windows))]
             if !reuse {
                 stop(s).await?;
             }
@@ -1372,57 +1514,81 @@ impl CoreBackend for XrayBackend {
                     .and_then(|s| s.to_str())
                     .unwrap_or(crate::xray::core::VERSION)
                     .to_owned();
-                if s.is_tun
-                    && s.helper
-                        .as_ref()
-                        .is_some_and(|h| !h.exited() && h.is_standby())
-                    && assets_match(s, &version, geo)
-                {
-                    // Rules, routing mode and server selection change through the
-                    // prepared core's API: no new elevated helper while disconnected.
-                    if update_running_core(state, repo, selected, hash, s).await {
-                        // Nothing to verify while disconnected; keep the new routing.
+                let alive = s
+                    .helper
+                    .as_ref()
+                    .is_some_and(|h| !h.exited() && h.is_standby());
+                // Rules, routing mode and server selection change through the
+                // prepared core's API: no new elevated helper while disconnected.
+                let config_matches = if alive && s.is_tun && assets_match(s, &version, geo) {
+                    update_running_core(state, repo, selected, hash, s).await
+                } else {
+                    false
+                };
+                match helper_plan(alive, config_matches) {
+                    HelperPlan::Reuse => {
                         s.pending_live_switch = None;
                         return Ok(());
                     }
+                    HelperPlan::Reload => {
+                        let (proxy_port, metrics_port) = ports()?;
+                        let repository = stripped(repo);
+                        let request = crate::platform::helper::StartTunnel {
+                            core_version: version.clone(),
+                            repository: (*repository).clone(),
+                            selected: selected.into(),
+                            proxy_port,
+                            metrics_port,
+                        };
+                        s.helper
+                            .as_mut()
+                            .ok_or_else(BackendError::invalid)?
+                            .reload(request, &state.data)
+                            .await?;
+                        note_prepared(
+                            s,
+                            selected,
+                            hash,
+                            &version,
+                            geo,
+                            outbound_hash,
+                            repository,
+                            proxy_port,
+                            metrics_port,
+                        );
+                        log::info!("engine=xray TUN reloaded without a new elevation");
+                        return Ok(());
+                    }
+                    HelperPlan::Launch => {
+                        if s.helper.is_some() {
+                            stop(s).await?;
+                        }
+                        let (proxy_port, metrics_port) = ports()?;
+                        let repository = stripped(repo);
+                        let request = crate::platform::helper::StartTunnel {
+                            core_version: version.clone(),
+                            repository: (*repository).clone(),
+                            selected: selected.into(),
+                            proxy_port,
+                            metrics_port,
+                        };
+                        s.helper = Some(
+                            crate::platform::helper::start_standby(request, &state.data).await?,
+                        );
+                        note_prepared(
+                            s,
+                            selected,
+                            hash,
+                            &version,
+                            geo,
+                            outbound_hash,
+                            repository,
+                            proxy_port,
+                            metrics_port,
+                        );
+                        log::info!("engine=xray TUN prepared without installing routes");
+                    }
                 }
-                if repo.settings.auto_connect {
-                    return stop(s).await;
-                }
-                stop(s).await?;
-                let (proxy_port, metrics_port) = ports()?;
-                let repository = stripped(repo);
-                let request = crate::platform::helper::StartTunnel {
-                    core_version: version.clone(),
-                    repository: (*repository).clone(),
-                    selected: selected.into(),
-                    proxy_port,
-                    metrics_port,
-                };
-                let mut prepared =
-                    crate::platform::helper::start_standby(request.clone(), &state.data).await;
-                if prepared.as_ref().err().is_some_and(|e| {
-                    ["TUN_ADAPTER_TIMEOUT", "CORE_START_FAILED", "TUN_FAILED"].contains(&e.code)
-                }) {
-                    tokio::time::sleep(Duration::from_millis(200)).await;
-                    prepared = crate::platform::helper::start_standby(request, &state.data).await;
-                }
-                s.helper = Some(prepared?);
-                s.prepared_server_id = Some(selected.into());
-                s.prepared_config_hash = Some(hash);
-                s.prepared_core_version = Some(version);
-                s.prepared_geo_hash = geo;
-                s.base_server_id = Some(selected.into());
-                s.base_outbound_hash = Some(outbound_hash);
-                s.base_repository = Some(repository.clone());
-                s.prepared_repository = Some(repository);
-                s.active_proxy_tag = Some("proxy".into());
-                s.live_outbound_tags.clear();
-                s.pending_live_switch = None;
-                s.proxy_port = proxy_port;
-                s.metrics_port = metrics_port;
-                s.is_tun = true;
-                log::info!("engine=xray TUN prepared without installing routes");
             }
             Ok(())
         })
@@ -1437,11 +1603,12 @@ impl CoreBackend for XrayBackend {
             #[cfg(windows)]
             if keep_warm {
                 if let Some(helper) = s.helper.as_mut().filter(|h| h.is_standby() && !h.exited()) {
-                    if s.started.is_some() {
+                    if s.started.is_some() || !crate::platform::network::tunnel_defaults_absent() {
                         if let Err(error) = helper.deactivate().await {
-                            // Never leave routes behind: drop the helper instead.
+                            // Routes are still installed, so the helper keeps reading
+                            // the adapter. Killing it here would black-hole the system.
                             log::warn!("engine=xray TUN standby release failed: {}", error.code);
-                            return stop(s).await;
+                            return Err(error);
                         }
                     }
                     s.started = None;
@@ -1458,7 +1625,7 @@ impl CoreBackend for XrayBackend {
         before: &'a Repository,
         after: &'a Repository,
         session: &'a mut BackendSession,
-    ) -> BackendFuture<'a, bool> {
+    ) -> BackendFuture<'a, crate::core::LiveRoutingStatus> {
         Box::pin(async move {
             #[cfg(windows)]
             {
@@ -1466,10 +1633,26 @@ impl CoreBackend for XrayBackend {
             }
             #[cfg(not(windows))]
             {
-                Ok(false)
+                Ok(crate::core::LiveRoutingStatus::NeedsConnect)
             }
         })
     }
+}
+
+/// Reinstall the default routes of a connected TUN session in its elevated
+/// helper, after Windows stopped selecting LumenTun. No new elevation.
+#[cfg(windows)]
+pub async fn reassert_routes(session: &mut XraySession) -> Result<()> {
+    if session.started.is_none() || !session.is_tun {
+        return Err(BackendError::new("TUN_FAILED", "Tunnel is not connected"));
+    }
+    let helper = session
+        .helper
+        .as_mut()
+        .filter(|helper| helper.is_standby() && !helper.exited())
+        .ok_or_else(|| BackendError::new("TUN_FAILED", "Tunnel helper is unavailable"))?;
+    helper.deactivate().await?;
+    helper.activate().await
 }
 
 pub fn failed(session: &mut XraySession) -> bool {

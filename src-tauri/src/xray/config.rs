@@ -58,22 +58,26 @@ pub fn enable_api(config: &mut XrayConfig, metrics_port: u16) -> Result<()> {
     Ok(())
 }
 
-/// Xray replaces the complete rule set atomically through RoutingService.
-/// Other configuration sections must stay identical during a live update.
+/// Routing replacement plus node outbounds that the running core does not have yet.
 #[cfg(windows)]
-pub fn live_routing_patch(
+pub struct LiveRoutingPlan {
+    pub patch: Value,
+    pub added_outbounds: Vec<Value>,
+}
+
+/// Xray replaces the complete rule set atomically through RoutingService.
+/// Inbounds, DNS, and the router strategy must stay identical. A rule that
+/// points at a server which is not loaded yet adds that outbound first.
+#[cfg(windows)]
+pub fn live_routing_plan(
     repo_before: &Repository,
     repo_after: &Repository,
     selected: &str,
     tun: bool,
-) -> Result<Option<Value>> {
+) -> Result<Option<LiveRoutingPlan>> {
     let before = build(repo_before, selected, 10808, 10809, tun)?;
     let after = build(repo_after, selected, 10808, 10809, tun)?;
-    if after
-        .outbounds
-        .iter()
-        .any(|outbound| !before.outbounds.contains(outbound))
-        || before.inbounds != after.inbounds
+    if before.inbounds != after.inbounds
         || before.dns != after.dns
         || before.observatory != after.observatory
         || before.routing["domainStrategy"] != after.routing["domainStrategy"]
@@ -81,7 +85,39 @@ pub fn live_routing_patch(
     {
         return Ok(None);
     }
-    Ok(Some(json!({"routing": after.routing})))
+    let mut added_outbounds = Vec::new();
+    for outbound in &after.outbounds {
+        if before.outbounds.contains(outbound) {
+            continue;
+        }
+        let tag = outbound["tag"].as_str().unwrap_or("");
+        // The same tag with a new body is a credential or transport change.
+        // Built-in tags are part of the process, not a rule target.
+        if tag.is_empty()
+            || matches!(tag, "proxy" | "direct" | "block" | "dns")
+            || before
+                .outbounds
+                .iter()
+                .any(|existing| existing["tag"].as_str() == Some(tag))
+        {
+            return Ok(None);
+        }
+        added_outbounds.push(outbound.clone());
+    }
+    Ok(Some(LiveRoutingPlan {
+        patch: json!({"routing": after.routing}),
+        added_outbounds,
+    }))
+}
+
+#[cfg(windows)]
+pub fn live_routing_patch(
+    repo_before: &Repository,
+    repo_after: &Repository,
+    selected: &str,
+    tun: bool,
+) -> Result<Option<Value>> {
+    Ok(live_routing_plan(repo_before, repo_after, selected, tun)?.map(|plan| plan.patch))
 }
 pub fn outbound(node: &VpnNode, tag: &str) -> Result<Value> {
     node.validate()?;
@@ -247,18 +283,27 @@ pub fn build(
                     }
                 })
             });
+        // In Rules mode the resolver is reached directly. Through the VPN, one stalled
+        // server took every lookup with it, so direct sites went down as well. The
+        // sniffed domain still goes to the VPN for proxied traffic, so a poisoned
+        // direct answer does not decide where a blocked site connects.
         rules.insert(
             0,
-            if local {
+            if local || repo.routing_mode == "rules" {
                 json!({"type":"field","inboundTag":["dns-query"],"outboundTag":"direct"})
             } else {
                 json!({"type":"field","inboundTag":["dns-query"],target_field:target_tag})
             },
         );
+        // A local resolver is always reached directly, so it keeps plain UDP: many
+        // home routers do not answer DNS over TCP. Public resolvers keep TCP, which
+        // also survives the VPN path in global mode.
         let servers: Vec<_> = dns_servers
             .iter()
             .map(|s| {
-                if s.contains(':') {
+                if local {
+                    s.clone()
+                } else if s.contains(':') {
                     format!("tcp://[{s}]")
                 } else {
                     format!("tcp://{s}")
@@ -312,20 +357,34 @@ pub fn build(
         if !rule.enabled || repo.routing_mode != "rules" {
             continue;
         }
-        let is_balancer_target = balancer_tag.as_deref() == Some(&target);
-        let mut compiled = if is_balancer_target {
-            json!({"type":"field","balancerTag":target})
-        } else {
-            json!({"type":"field","outboundTag":target})
-        };
         if rule.name.is_empty() || rule.name.len() > 1024 || rule.name.chars().any(char::is_control)
         {
             return Err(BackendError::new("INVALID_RULE", "Invalid routing rule"));
         }
+        let is_balancer_target = balancer_tag.as_deref() == Some(target.as_str());
+        let mut compiled = if is_balancer_target {
+            json!({"type":"field","balancerTag":target.clone()})
+        } else {
+            json!({"type":"field","outboundTag":target.clone()})
+        };
         match rule.matcher {
             crate::storage::repository::RuleMatcher::Domain => {
                 let value = rule.name.trim();
-                if let Some((address, prefix)) = value.split_once('/') {
+                if let Some(keyword) = value.strip_prefix("keyword:") {
+                    if keyword.is_empty()
+                        || keyword.len() > 128
+                        || keyword.chars().any(|c| {
+                            !(c.is_ascii_alphanumeric() || c == '.' || c == '-' || c == '_')
+                        })
+                    {
+                        return Err(BackendError::new("INVALID_RULE", "Invalid routing rule"));
+                    }
+                    compiled["domain"] = json!([format!("keyword:{keyword}")]);
+                } else if let Some(host) = value.strip_prefix("full:") {
+                    let exact = domain_rule(host)?;
+                    let host = exact.strip_prefix("domain:").unwrap_or(host);
+                    compiled["domain"] = json!([format!("full:{host}")]);
+                } else if let Some((address, prefix)) = value.split_once('/') {
                     if let Ok(ip) = address.parse::<std::net::IpAddr>() {
                         let prefix: u8 = prefix.parse().map_err(|_| {
                             BackendError::new("INVALID_RULE", "Invalid network prefix")
@@ -347,11 +406,7 @@ pub fn build(
                 }
             }
             crate::storage::repository::RuleMatcher::Application => {
-                compiled["process"] = json!(rule
-                    .name
-                    .split(',')
-                    .map(|p| p.trim().replace('\\', "/"))
-                    .collect::<Vec<_>>());
+                compiled["process"] = json!(process_names(&rule.name));
             }
             crate::storage::repository::RuleMatcher::Geosite => {
                 let tag = crate::storage::repository::normalize_geo_tag(&rule.name, "geosite")?;
@@ -361,20 +416,33 @@ pub fn build(
                 let tag = crate::storage::repository::normalize_geo_tag(&rule.name, "geoip")?;
                 compiled["ip"] = json!([format!("geoip:{tag}")]);
             }
+            // A MATCH/final rule must not turn Rules mode into a full tunnel.
+            // Unmatched traffic stays direct; only the listed services use the VPN.
+            crate::storage::repository::RuleMatcher::Final => continue,
         }
         rules.push(compiled);
     }
-    let default_field = if repo.routing_mode == "rules" || balancer_tag.is_none() {
-        "outboundTag"
+    let default_target = if repo.routing_mode == "rules" {
+        "direct".to_string()
     } else {
+        target_tag.to_string()
+    };
+    let default_field = if balancer_tag.as_deref() == Some(default_target.as_str()) {
         "balancerTag"
-    };
-    let default_val = if repo.routing_mode == "rules" {
-        "direct"
     } else {
-        target_tag
+        "outboundTag"
     };
-    rules.push(json!({"type":"field","network":"tcp,udp", default_field: default_val}));
+    if repo.routing_mode == "rules" {
+        // IPIfNonMatch resolves a domain only when no rule matched it. A network
+        // catch-all always matched, so GeoIP, antifilter and Telegram ranges and
+        // manual addresses never saw a domain. An address catch-all leaves room for
+        // that second pass. A name the direct resolver cannot answer falls through
+        // to the first outbound (the VPN), which resolves it on the server.
+        rules
+            .push(json!({"type":"field","ip":["0.0.0.0/0","::/0"], default_field: default_target}));
+    } else {
+        rules.push(json!({"type":"field","network":"tcp,udp", default_field: default_target}));
+    }
     if repo.settings.dns_policy.enabled {
         for outbound in &mut outbounds {
             if matches!(
@@ -398,12 +466,38 @@ pub fn build(
         inbounds.push(json!({"tag":"system-proxy","listen":"127.0.0.1","port":metrics_port.checked_add(1).ok_or_else(BackendError::invalid)?,"protocol":"http","settings":{}}));
     }
     if tun {
-        inbounds.push(json!({"tag":"tun","protocol":"tun","settings":{"name":"LumenTun","mtu":1500,"gateway":["172.31.255.1/30","fd42:6c75:6d65::1/126"],"dns":dns_servers,"autoSystemRoutingTable":["0.0.0.0/0","::/0"],"autoOutboundsInterface":"auto"},"sniffing":{"enabled":true,"destOverride":["http","tls","quic"],"routeOnly":true}}));
+        // Capture IPv6 only when the physical network has it; see physical_ipv6_available.
+        #[cfg(windows)]
+        let routes = if crate::platform::network::physical_ipv6_available() {
+            json!(["0.0.0.0/0", "::/0"])
+        } else {
+            json!(["0.0.0.0/0"])
+        };
+        #[cfg(not(windows))]
+        let routes = json!(["0.0.0.0/0", "::/0"]);
+        let ipv6 = routes.as_array().is_some_and(|routes| routes.len() > 1);
+        // The sniffed domain replaces the destination address. The VPN server then
+        // resolves blocked sites itself, so a stub or foreign-CDN answer from the
+        // direct resolver cannot send them to a dead address. Direct traffic resolves
+        // through Xray's own DNS (cached, direct in Rules mode) instead of looping the
+        // Windows resolver back through the adapter.
+        inbounds.push(json!({"tag":"tun","protocol":"tun","settings":{"name":"LumenTun","mtu":1500,"gateway":["172.31.255.1/30","fd42:6c75:6d65::1/126"],"dns":dns_servers,"autoSystemRoutingTable":routes,"autoOutboundsInterface":"auto"},"sniffing":{"enabled":true,"destOverride":["http","tls","quic"],"routeOnly":false,"domainsExcluded":[
+            // Local names resolve through LLMNR/mDNS, not Xray's resolver: keep the
+            // address so the LAN bypass applies.
+            "regexp:^[^.]+$","regexp:(^|\\.)(local|lan|home\\.arpa|internal)$","courier.push.apple.com"]}}));
+        for outbound in &mut outbounds {
+            if outbound["tag"] == "direct" && outbound["protocol"] == "freedom" {
+                outbound["settings"] =
+                    json!({"domainStrategy": if ipv6 { "UseIPv4v6" } else { "UseIPv4" }});
+            }
+        }
     }
 
     // One router strategy in both routing modes lets rules change without
     // restarting the core. The global catch-all still selects the VPN.
-    let mut routing = json!({"domainStrategy":"IPOnDemand","rules":rules});
+    // Match the domain first. IPOnDemand resolved every site before the Russian
+    // domain rule, so a .ru site on a foreign CDN was sent through the VPN.
+    let mut routing = json!({"domainStrategy":"IPIfNonMatch","rules":rules});
     if let Some(balancer) = &node.balancer {
         routing["balancers"] = json!([{
             "tag": balancer.tag,
@@ -424,6 +518,34 @@ pub fn build(
         metrics: json!({"tag":"metrics","listen":format!("127.0.0.1:{metrics_port}")}),
         observatory,
     })
+}
+/// Xray compares a process name case-sensitively with the executable on disk,
+/// while Windows names are not: a `claude.exe` rule never matched `Claude.exe`.
+/// Emit the spellings Windows applications use. Paths are matched as written.
+pub(crate) fn process_names(value: &str) -> Vec<String> {
+    let mut names: Vec<String> = Vec::new();
+    for entry in value.split(',') {
+        let name = entry.trim().replace('\\', "/");
+        if name.is_empty() {
+            continue;
+        }
+        let mut variants = vec![name.clone()];
+        if !name.contains('/') {
+            let lower = name.to_lowercase();
+            let mut chars = lower.chars();
+            let title = chars
+                .next()
+                .map(|first| first.to_uppercase().chain(chars).collect::<String>())
+                .unwrap_or_default();
+            variants.extend([lower, title, name.to_uppercase()]);
+        }
+        for variant in variants {
+            if !names.contains(&variant) {
+                names.push(variant);
+            }
+        }
+    }
+    names
 }
 pub(crate) fn domain_rule(value: &str) -> Result<String> {
     let value = value.trim_end_matches('/');

@@ -16,6 +16,9 @@ pub struct ImportDiagnostic {
 pub struct ParsedSubscription {
     pub nodes: Vec<VpnNode>,
     pub diagnostics: Vec<ImportDiagnostic>,
+    pub rules: Vec<crate::storage::repository::Rule>,
+    /// The provider explicitly turned routing profiles off.
+    pub routing_off: bool,
 }
 
 pub fn parse(input: &str, subscription: &str) -> Result<ParsedSubscription> {
@@ -33,6 +36,9 @@ pub fn parse(input: &str, subscription: &str) -> Result<ParsedSubscription> {
     } else {
         input
     };
+    let mut clash_rules: Option<serde_json::Value> = None;
+    let mut incy_profiles: Vec<serde_json::Value> = Vec::new();
+    let mut routing_off = false;
     let entries: Vec<Result<VpnNode>> = if text.starts_with(['{', '[']) {
         let json: serde_json::Value =
             serde_json::from_str(text).map_err(|_| BackendError::invalid())?;
@@ -137,6 +143,7 @@ pub fn parse(input: &str, subscription: &str) -> Result<ParsedSubscription> {
     } else if text.contains("proxies:") {
         let json: serde_json::Value =
             serde_saphyr::from_str(text).map_err(|_| BackendError::invalid())?;
+        clash_rules = json.get("rules").cloned();
         let values = json["proxies"]
             .as_array()
             .ok_or_else(BackendError::invalid)?;
@@ -148,18 +155,33 @@ pub fn parse(input: &str, subscription: &str) -> Result<ParsedSubscription> {
             .map(|v| super::clash::parse(v, subscription))
             .collect()
     } else {
-        let lines = text
+        let mut lines = Vec::new();
+        for line in text
             .lines()
             .map(str::trim)
-            .filter(|line| !line.is_empty() && !line.starts_with('#'));
-        if lines.clone().take(MAX_NODES + 1).count() > MAX_NODES {
+            .filter(|line| !line.is_empty() && !line.starts_with('#'))
+        {
+            match super::routing::line_routing(line) {
+                Some(super::routing::LineRouting::Off) => routing_off = true,
+                Some(super::routing::LineRouting::Profile(profile)) => {
+                    incy_profiles.push(profile);
+                }
+                None => lines.push(line.to_string()),
+            }
+        }
+        if lines.len() > MAX_NODES {
             return Err(BackendError::invalid());
         }
-        lines.map(|line| uri::parse(line, subscription)).collect()
+        lines
+            .iter()
+            .map(|line| uri::parse(line, subscription))
+            .collect()
     };
     let mut result = ParsedSubscription {
         nodes: vec![],
         diagnostics: vec![],
+        rules: vec![],
+        routing_off,
     };
     let mut seen = HashSet::new();
     for (index, entry) in entries.into_iter().enumerate() {
@@ -177,6 +199,21 @@ pub fn parse(input: &str, subscription: &str) -> Result<ParsedSubscription> {
     }
     if result.nodes.is_empty() {
         return Err(BackendError::invalid());
+    }
+    if !routing_off {
+        if clash_rules
+            .as_ref()
+            .is_some_and(|rules| rules.as_array().is_some_and(|rules| !rules.is_empty()))
+        {
+            result.rules = super::routing::from_clash(
+                clash_rules.as_ref().unwrap(),
+                subscription,
+                &result.nodes,
+            );
+        } else if !incy_profiles.is_empty() {
+            result.rules =
+                super::routing::from_profiles(&incy_profiles, subscription, &result.nodes);
+        }
     }
     Ok(result)
 }

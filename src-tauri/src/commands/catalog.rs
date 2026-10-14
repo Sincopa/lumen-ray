@@ -30,6 +30,18 @@ async fn restore_catalog_if_unchanged(
     }
     Ok(())
 }
+#[cfg(windows)]
+async fn rollback_live_routing(
+    state: &AppState,
+    app: &tauri::AppHandle,
+    before: Option<&crate::storage::repository::Repository>,
+    after: &crate::storage::repository::Repository,
+) -> Result<()> {
+    if let Some(before) = before {
+        restore_catalog_if_unchanged(state, app, before, after).await?;
+    }
+    Ok(())
+}
 #[tauri::command]
 pub async fn mutate_catalog(
     state: tauri::State<'_, Arc<AppState>>,
@@ -81,8 +93,8 @@ pub async fn apply_mutation(
         if let Some(before) = previous.as_ref() {
             let after = state.repository.read().await.clone();
             match crate::services::vpn_service::apply_live_rules(state, &id, before, &after).await {
-                Ok(true) => return Ok(value),
-                Ok(false) => {
+                Ok(crate::core::LiveRoutingStatus::Applied) => return Ok(value),
+                Ok(crate::core::LiveRoutingStatus::NeedsConnect) => {
                     let still_connected = state
                         .snapshot
                         .read()
@@ -97,11 +109,23 @@ pub async fn apply_mutation(
                         });
                         return Ok(value);
                     }
-                    // Live patching is an optimization. A full reconnect is the
-                    // supported fallback when the active core has changed.
+                    // The core is down or the tunnel mode changed. Reconnect.
+                }
+                Ok(crate::core::LiveRoutingStatus::KeepTunnel) => {
+                    log::warn!("Routing change kept the running tunnel");
+                    rollback_live_routing(state, app, previous.as_ref(), &after).await?;
+                    return Err(BackendError::new(
+                        "RULE_UPDATE_FAILED",
+                        "The routing change was not applied and the connection stayed up",
+                    ));
                 }
                 Err(error) => {
-                    log::warn!("Routing change needs reconnect after {}", error.code);
+                    log::warn!(
+                        "Routing change kept the running tunnel after {}",
+                        error.code
+                    );
+                    rollback_live_routing(state, app, previous.as_ref(), &after).await?;
+                    return Err(error);
                 }
             }
         }
@@ -132,6 +156,43 @@ pub async fn apply_mutation(
     }
     Ok(value)
 }
+async fn publish_routing_if_changed(
+    state: &Arc<AppState>,
+    before: &crate::storage::repository::Repository,
+    after: &crate::storage::repository::Repository,
+) {
+    if before.rules == after.rules && before.routing_mode == after.routing_mode {
+        return;
+    }
+    let Some(id) = state
+        .snapshot
+        .read()
+        .await
+        .info
+        .as_ref()
+        .map(|info| info.server_id.clone())
+    else {
+        return;
+    };
+    if !after.nodes.iter().any(|node| node.id == id) {
+        return;
+    }
+    #[cfg(windows)]
+    match crate::services::vpn_service::apply_live_rules(state, &id, before, after).await {
+        Ok(crate::core::LiveRoutingStatus::Applied) => {
+            log::info!("Applied subscription routing without reconnecting");
+        }
+        Ok(_) => log::warn!("Subscription routing is saved. Reconnect to apply it"),
+        Err(error) => {
+            log::warn!(
+                "Subscription routing is saved but was not applied: {}",
+                error.code
+            );
+        }
+    }
+    #[cfg(not(windows))]
+    let _ = id;
+}
 #[tauri::command]
 pub async fn import_subscription(
     state: tauri::State<'_, Arc<AppState>>,
@@ -141,7 +202,10 @@ pub async fn import_subscription(
 ) -> Result<service::ImportResult> {
     let prepared = service::prepare_import(&state, input, name, None).await?;
     let _transaction = state.updates.lock().await;
+    let before = state.repository.read().await.clone();
     let result = service::apply_import(&state, prepared).await?;
+    let after = state.repository.read().await.clone();
+    publish_routing_if_changed(state.inner(), &before, &after).await;
     crate::update_tray_menu(&app, &state);
     let warm_state = state.inner().clone();
     tauri::async_runtime::spawn(async move {
@@ -212,6 +276,8 @@ pub async fn refresh_subscription(
             }
             return Err(error);
         }
+    } else {
+        publish_routing_if_changed(state.inner(), &before, &after).await;
     }
     disconnect_removed_server(&state, &app).await?;
     crate::update_tray_menu(&app, &state);
