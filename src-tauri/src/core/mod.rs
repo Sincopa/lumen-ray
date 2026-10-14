@@ -35,6 +35,16 @@ pub struct CoreCapabilities {
 
 pub type BackendFuture<'a, T> = Pin<Box<dyn Future<Output = Result<T>> + Send + 'a>>;
 
+/// Result of pushing a catalog change into a core that is already running.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum LiveRoutingStatus {
+    Applied,
+    /// The core is down, or the tunnel mode itself changed. A full connect may proceed.
+    NeedsConnect,
+    /// The running core kept its tunnel. The catalog change has to be reverted.
+    KeepTunnel,
+}
+
 pub trait CoreBackend: Send + Sync {
     fn capabilities(&self) -> CoreCapabilities;
     fn validate(&self, repo: &Repository, selected: &str) -> Result<()>;
@@ -72,7 +82,7 @@ pub trait CoreBackend: Send + Sync {
         before: &'a Repository,
         after: &'a Repository,
         session: &'a mut BackendSession,
-    ) -> BackendFuture<'a, bool>;
+    ) -> BackendFuture<'a, LiveRoutingStatus>;
 }
 
 pub fn backend(engine: CoreEngine) -> &'static dyn CoreBackend {

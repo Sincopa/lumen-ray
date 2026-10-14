@@ -105,6 +105,17 @@
 		error = '';
 		const targetServer = serverId || 'subscription';
 
+		if (matcher === 'final') {
+			onSave({
+				...rule,
+				matcher: 'final',
+				isDomain: false,
+				name: 'match',
+				serverId: targetServer,
+			});
+			return;
+		}
+
 		if (matcher === 'domain') {
 			const finalName = cleanDomain(name);
 			if (!finalName) {
@@ -215,61 +226,70 @@
 		<!-- Section 1: Rule Type (Application / Domain / GeoSite / GeoIP) -->
 		<div class="field-group">
 			<span class="field-label">{t('rules.kind')}</span>
-			<div
-				class="type-segmented-pill"
-				role="tablist"
-				aria-label={t('rules.kind')}
-			>
+			{#if matcher === 'final'}
+				<p class="field-hint">
+					{t('rules.everythingElse') || 'Всё остальное'}.
+					{t('rules.finalDetails') || 'Если правило выше не подошло'}
+				</p>
+			{:else}
 				<div
-					class="slider-thumb"
-					style:width="calc((100% - 12px - 18px) / 4)"
-					style:transform="translateX(calc({matcherIndex} * (100% + 6px)))"
-				></div>
-				<button
-					type="button"
-					role="tab"
-					class="segment-btn"
-					class:active-segment={matcher === 'application'}
-					aria-selected={matcher === 'application'}
-					onclick={() => switchMatcher('application')}
+					class="type-segmented-pill"
+					role="tablist"
+					aria-label={t('rules.kind')}
 				>
-					{t('rules.applicationTab') || 'Программа'}
-				</button>
-				<button
-					type="button"
-					role="tab"
-					class="segment-btn"
-					class:active-segment={matcher === 'domain'}
-					aria-selected={matcher === 'domain'}
-					onclick={() => switchMatcher('domain')}
-				>
-					{t('rules.domainTab') || 'Домен'}
-				</button>
-				<button
-					type="button"
-					role="tab"
-					class="segment-btn"
-					class:active-segment={matcher === 'geosite'}
-					aria-selected={matcher === 'geosite'}
-					onclick={() => switchMatcher('geosite')}
-				>
-					GeoSite
-				</button>
-				<button
-					type="button"
-					role="tab"
-					class="segment-btn"
-					class:active-segment={matcher === 'geoip'}
-					aria-selected={matcher === 'geoip'}
-					onclick={() => switchMatcher('geoip')}
-				>
-					GeoIP
-				</button>
-			</div>
+					<div
+						class="slider-thumb"
+						style:width="calc((100% - 12px - 18px) / 4)"
+						style:transform="translateX(calc({matcherIndex} * (100% + 6px)))"
+					></div>
+					<button
+						type="button"
+						role="tab"
+						class="segment-btn"
+						class:active-segment={matcher === 'application'}
+						aria-selected={matcher === 'application'}
+						onclick={() => switchMatcher('application')}
+					>
+						{t('rules.applicationTab') || 'Программа'}
+					</button>
+					<button
+						type="button"
+						role="tab"
+						class="segment-btn"
+						class:active-segment={matcher === 'domain'}
+						aria-selected={matcher === 'domain'}
+						onclick={() => switchMatcher('domain')}
+					>
+						{t('rules.domainTab') || 'Домен'}
+					</button>
+					<button
+						type="button"
+						role="tab"
+						class="segment-btn"
+						class:active-segment={matcher === 'geosite'}
+						aria-selected={matcher === 'geosite'}
+						onclick={() => switchMatcher('geosite')}
+					>
+						GeoSite
+					</button>
+					<button
+						type="button"
+						role="tab"
+						class="segment-btn"
+						class:active-segment={matcher === 'geoip'}
+						aria-selected={matcher === 'geoip'}
+						onclick={() => switchMatcher('geoip')}
+					>
+						GeoIP
+					</button>
+				</div>
+			{/if}
 		</div>
 
 		<!-- Section 2: Input Field based on Matcher -->
-		{#if matcher === 'domain'}
+		{#if matcher === 'final'}
+			<!-- The server picker below chooses where unmatched traffic goes. -->
+		{:else if matcher === 'domain'}
 			<div class="field-group">
 				<label class="field-label" for="domain-input">
 					{t('rules.domain')}
@@ -445,6 +465,13 @@
 		font-weight: 500;
 		color: #ffffff;
 		letter-spacing: -0.2px;
+	}
+
+	.field-hint {
+		margin: 0;
+		font-size: 13px;
+		line-height: 1.4;
+		color: rgba(255, 255, 255, 0.72);
 	}
 
 	/* Segmented switcher */

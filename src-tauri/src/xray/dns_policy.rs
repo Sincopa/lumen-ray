@@ -1,7 +1,4 @@
-use crate::{
-    domain::errors::Result,
-    storage::repository::{Repository, RuleMatcher},
-};
+use crate::{domain::errors::Result, storage::repository::Repository};
 use serde_json::{json, Value};
 
 #[cfg(test)]
@@ -71,50 +68,22 @@ pub fn build(
             servers.push(server);
         }
     };
+    // The server list is fixed for the life of the process. Mode switches and
+    // rule edits then replace routing only, so Xray does not restart the tunnel.
+    // Sniffed domains follow the new route immediately; category-ru and local
+    // names keep a direct resolver, and everything else uses the proxy resolver.
     add_group(
         &direct,
         vec![
             "domain:local".into(),
             "domain:lan".into(),
             "full:localhost".into(),
+            "geosite:category-ru".into(),
         ],
         "dns-direct",
         true,
     );
-    if repo.routing_mode == "rules" {
-        for rule in crate::services::catalog_service::ordered_rules(&repo.rules)
-            .into_iter()
-            .filter(|r| r.enabled)
-        {
-            let domain = match rule.matcher {
-                RuleMatcher::Geosite => Some(format!(
-                    "geosite:{}",
-                    crate::storage::repository::normalize_geo_tag(&rule.name, "geosite")?
-                )),
-                RuleMatcher::Domain
-                    if !rule.name.contains('/')
-                        && rule.name.parse::<std::net::IpAddr>().is_err() =>
-                {
-                    Some(super::config::domain_rule(&rule.name)?)
-                }
-                _ => None,
-            };
-            if let Some(domain) = domain {
-                let local = rule.server_id == "direct";
-                add_group(
-                    if local { &direct } else { &proxy },
-                    vec![domain],
-                    if local { "dns-direct" } else { "dns-proxy" },
-                    true,
-                );
-            }
-        }
-    }
-    if repo.routing_mode == "rules" {
-        add_group(&direct, vec![], "dns-direct", false);
-    } else {
-        add_group(&proxy, vec![], "dns-proxy", false);
-    }
+    add_group(&proxy, vec![], "dns-proxy", false);
     rules.insert(
         0,
         json!({"type":"field","inboundTag":["dns-direct","dns-bootstrap"],"outboundTag":"direct"}),
@@ -159,5 +128,47 @@ mod tests {
             .filter(|s| s["skipFallback"] == false)
             .all(|s| s["tag"] == "dns-proxy"));
         assert_eq!(servers[0]["finalQuery"], true);
+        assert!(servers.iter().any(|server| {
+            server["domains"]
+                .as_array()
+                .is_some_and(|domains| domains.iter().any(|domain| domain == "geosite:category-ru"))
+        }));
+    }
+    #[test]
+    fn server_list_ignores_routing_mode_and_user_rules() {
+        use crate::storage::repository::{Rule, RuleMatcher};
+        let mut rules_mode = Repository {
+            routing_mode: "rules".into(),
+            ..Default::default()
+        };
+        rules_mode.settings.dns_policy.direct = "9.9.9.9".into();
+        rules_mode.settings.dns_policy.fallback = vec!["8.8.8.8".into()];
+        rules_mode.rules.push(Rule {
+            id: "site".into(),
+            name: "antifilter".into(),
+            matcher: RuleMatcher::Geosite,
+            server_id: "subscription".into(),
+            enabled: true,
+            preset_id: None,
+            is_domain: false,
+        });
+        rules_mode.rules.push(Rule {
+            id: "ip".into(),
+            name: "ru".into(),
+            matcher: RuleMatcher::Geoip,
+            server_id: "direct".into(),
+            enabled: true,
+            preset_id: None,
+            is_domain: false,
+        });
+        let mut global = rules_mode.clone();
+        global.routing_mode = "global".into();
+        global.rules.clear();
+        let mut rules_routing = vec![];
+        let mut global_routing = vec![];
+        let rules_dns = build(&rules_mode, "outboundTag", "proxy", &mut rules_routing).unwrap();
+        let global_dns = build(&global, "outboundTag", "proxy", &mut global_routing).unwrap();
+        assert_eq!(rules_dns, global_dns);
+        assert_eq!(rules_routing, global_routing);
     }
 }

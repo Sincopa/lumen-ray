@@ -117,7 +117,7 @@ pub async fn apply_live_rules(
     selected: &str,
     before: &crate::storage::repository::Repository,
     after: &crate::storage::repository::Repository,
-) -> Result<bool> {
+) -> Result<crate::core::LiveRoutingStatus> {
     let _operation = state
         .connection_operation
         .acquire()
@@ -527,7 +527,35 @@ fn protocol_name(repo: &crate::storage::repository::Repository, id: &str) -> Res
 /// Tear down a failed or cancelled attempt. An unreachable server says nothing
 /// about the local tunnel, so a healthy prepared TUN helper is kept and the next
 /// attempt needs neither a new elevated helper nor a new Wintun adapter.
+pub(super) async fn release_to_standby(session: &mut Session) -> Result<()> {
+    // The stopped listener must not stay the Windows proxy: browsers would lose
+    // every site until the user disconnected by hand.
+    #[cfg(windows)]
+    if let Some(proxy) = session.system_proxy.as_ref() {
+        proxy.restore()?;
+        session.system_proxy = None;
+    }
+    backend(session.engine())
+        .disconnect(&mut session.backend, true)
+        .await?;
+    #[cfg(windows)]
+    if session.is_tun() && !crate::platform::network::tunnel_defaults_absent() {
+        return Err(BackendError::new(
+            "TUN_FAILED",
+            "Could not remove tunnel routes",
+        ));
+    }
+    Ok(())
+}
 async fn release(session: &mut Session, cause: &BackendError) -> Result<()> {
+    // A live tunnel helper is kept. Stopping it would ask for administrator
+    // permission again and can drop the default route after the reader is gone.
+    #[cfg(windows)]
+    if tun_helper_alive(session) {
+        return backend(session.engine())
+            .disconnect(&mut session.backend, true)
+            .await;
+    }
     if !keeps_prepared_core(cause.code) {
         return stop(session).await;
     }
@@ -539,6 +567,18 @@ async fn release(session: &mut Session, cause: &BackendError) -> Result<()> {
     backend(session.engine())
         .disconnect(&mut session.backend, true)
         .await
+}
+#[cfg(windows)]
+fn tun_helper_alive(session: &Session) -> bool {
+    matches!(
+        &session.backend,
+        crate::core::BackendSession::Xray(session)
+            if session.is_tun
+                && session
+                    .helper
+                    .as_ref()
+                    .is_some_and(|helper| !helper.exited() && helper.is_standby())
+    )
 }
 fn keeps_prepared_core(code: &str) -> bool {
     matches!(code, "CANCELLED" | "SERVER_UNREACHABLE" | "IP_UNAVAILABLE")
@@ -625,6 +665,58 @@ async fn disconnect_session(
     *state.traffic.write().await = Default::default();
     publish(state, app, Snapshot::default()).await;
     Ok(())
+}
+/// Connection at application start. Windows starts login items before Wi-Fi or
+/// DHCP are up; a single attempt then failed verification and the tunnel stayed
+/// down until the user restarted the app. Wait for a network, then retry.
+pub async fn auto_connect(state: &Arc<AppState>, app: &tauri::AppHandle, id: String) {
+    #[cfg(windows)]
+    {
+        let deadline = Instant::now() + Duration::from_secs(90);
+        let mut waited = false;
+        while crate::platform::network_watch::physical_fingerprint().is_none()
+            && Instant::now() < deadline
+        {
+            if *state.shutdown.borrow() {
+                return;
+            }
+            waited = true;
+            tokio::time::sleep(Duration::from_millis(500)).await;
+        }
+        if waited {
+            log::info!("Automatic connection waited for the network");
+            // DHCP and DNS settle a moment after the adapter reports a gateway.
+            tokio::time::sleep(Duration::from_secs(2)).await;
+        }
+    }
+    let mut delay = 3u64;
+    for attempt in 1..=6 {
+        let error = match connect(state, app, id.clone()).await {
+            Ok(()) => return,
+            Err(error) => error,
+        };
+        log::warn!(
+            "Automatic connection attempt {attempt} failed: {}",
+            error.code
+        );
+        if !super::health::retryable(error.code) && error.code != "ROUTING_CONFLICT" {
+            return;
+        }
+        // Stop as soon as the user connects, disconnects or picks another server.
+        let ours = state.connection_generation.load(Ordering::Acquire);
+        let mut shutdown = state.shutdown.subscribe();
+        tokio::select! {
+            _ = shutdown.changed() => return,
+            _ = tokio::time::sleep(Duration::from_secs(delay)) => {}
+        }
+        if *state.shutdown.borrow()
+            || state.connection_generation.load(Ordering::Acquire) != ours
+            || state.snapshot.read().await.status == "connected"
+        {
+            return;
+        }
+        delay = (delay * 2).min(30);
+    }
 }
 pub(super) fn schedule_recovery(state: Arc<AppState>, app: tauri::AppHandle, server_id: String) {
     if state.recovery_running.swap(true, Ordering::AcqRel) {

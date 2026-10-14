@@ -47,7 +47,35 @@ impl AppState {
         fs2::FileExt::try_lock_exclusive(&instance)
             .map_err(|_| BackendError::new("ALREADY_RUNNING", "Lumen is already running"))?;
         let store = RepositoryStore::new(&data.join("data"))?;
-        let repository = store.load()?;
+        let mut repository = store.load()?;
+        if crate::services::catalog_service::upgrade_russia_optimized(&mut repository) {
+            log::info!(
+                "Updated the Russia preset: blocked services and Discord use the VPN, other traffic stays direct"
+            );
+            if let Err(error) = store.save(&repository) {
+                log::warn!("Could not save the updated routing preset: {}", error.code);
+            }
+        }
+        // Automatic reconnection is now on by default. Existing data had it off
+        // only because that was the old default, which left a dropped tunnel
+        // disconnected for good. Apply once; a later opt-out is kept.
+        let reconnect_marker = data.join("data").join("auto-reconnect-default");
+        if !reconnect_marker.exists() {
+            let saved = if repository.settings.auto_reconnect {
+                Ok(())
+            } else {
+                repository.settings.auto_reconnect = true;
+                store.save(&repository)
+            };
+            match saved {
+                Ok(()) => {
+                    let _ = std::fs::write(&reconnect_marker, b"1");
+                }
+                Err(error) => {
+                    log::warn!("Could not enable automatic reconnection: {}", error.code);
+                }
+            }
+        }
         #[cfg(windows)]
         crate::platform::proxy::SystemProxy::recover(&data)?;
         let core = crate::xray::core::prepare(resources.into(), &data)?;

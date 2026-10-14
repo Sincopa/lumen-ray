@@ -264,7 +264,7 @@
 		"switchModeDesc": "Preset applied. To take effect, it is recommended to switch the application mode to \"Rules\".",
 		"switchToRules": "Enable",
 		"russiaOptimizedTitle": "Russia — Optimized",
-		"russiaOptimizedDesc": "YouTube and services on the blocking lists use the VPN; Russian services and other traffic connect directly. Manual rules take priority.",
+		"russiaOptimizedDesc": "Russian services, the local network and other traffic stay direct. Blocked sites, YouTube, Telegram and Discord use the VPN.",
 		"bypassBlockingTitle": "Bypass blocking only",
 		"bypassBlockingDesc": "Routes blocked resources through VPN, all other traffic remains direct.",
 		"russiaDirectTitle": "Russian resources directly",
@@ -275,7 +275,8 @@
 		"hlAntifilter": "Blocked & restricted",
 		"hlRuDirect": "Russian services",
 		"hlPrivateDirect": "Local networks (LAN)",
-		"hlRestDirect": "All other traffic"
+		"hlRestDirect": "All other traffic",
+		"hlRestVpn": "Everything else"
 	},
 	"rules": {
 		"title": "Rules",
@@ -314,6 +315,8 @@
 		"direct": "Direct",
 		"directDesc": "Bypass VPN",
 		"subscriptionServer": "Subscription default",
-		"subscriptionServerDesc": "Current server in this subscription"
+		"subscriptionServerDesc": "Current server in this subscription",
+		"everythingElse": "Everything else",
+		"finalDetails": "Used when no rule above matches"
 	}
 }

@@ -3,6 +3,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import {
 	LatencyProbeTracker,
+	mergePreset,
 	type Catalog,
 	type Rule,
 } from '../../services/catalog';
@@ -146,7 +147,11 @@ export class TauriCatalogService {
 		);
 	}
 	async applyPreset(presetId: string) {
-		await this.mutate({ kind: 'applyPreset', presetId });
+		mergePreset(this.current.rules, presetId);
+		await this.mutate({ kind: 'applyPreset', presetId }, (catalog) => ({
+			...catalog,
+			rules: mergePreset(catalog.rules, presetId),
+		}));
 	}
 	async removePreset(presetId: string) {
 		await this.mutate({ kind: 'removePreset', presetId }, (catalog) => ({

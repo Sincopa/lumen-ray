@@ -27,8 +27,8 @@ it('combines presets in either order and preserves manual priority and deleted r
 		for (const id of order) await service.applyPreset(id);
 		const rules = get(service.state).rules;
 		expect(rules[0].id).toBe('manual');
-		expect(rules.findIndex((r) => r.name === 'youtube')).toBeLessThan(
-			rules.findIndex((r) => r.name === 'ru'),
+		expect(rules.findIndex((r) => r.name === 'ru')).toBeLessThan(
+			rules.findIndex((r) => r.name === 'youtube'),
 		);
 		results.push(rules);
 		await service.applyPreset(order[0]);
@@ -409,6 +409,36 @@ describe('catalog', () => {
 		expect(r3?.isDomain).toBe(false);
 	});
 
+	it('evaluates VPN applications after Russian direct presets', async () => {
+		const service = new CatalogService();
+		service.saveRules([
+			{
+				id: 'chrome',
+				name: 'chrome.exe',
+				matcher: 'application',
+				serverId: 'subscription',
+				enabled: true,
+			},
+			{
+				id: 'torrent',
+				name: 'torrent.exe',
+				matcher: 'application',
+				serverId: 'direct',
+				enabled: true,
+			},
+		]);
+		await service.applyPreset('russia-optimized');
+		const ids = get(service.state).rules.map((r) => r.id);
+		expect(ids[0]).toBe('torrent');
+		expect(ids.at(-1)).toBe('chrome');
+		expect(ids.indexOf('russia-optimized-geoip-ru')).toBeLessThan(
+			ids.indexOf('chrome'),
+		);
+		expect(
+			ids.indexOf('russia-optimized-application-Discord.exe'),
+		).toBeLessThan(ids.indexOf('chrome'));
+	});
+
 	it('applies presets idempotently and preserves custom user rules', async () => {
 		const service = new CatalogService();
 
@@ -425,25 +455,32 @@ describe('catalog', () => {
 		await service.applyPreset('russia-optimized');
 		let rules = get(service.state).rules;
 
-		expect(rules.length).toBe(9);
+		expect(rules.length).toBe(13);
 		expect(rules[0].id).toBe('user-custom-rule');
 		const presetRules = rules.filter((r) => r.presetId === 'russia-optimized');
 		expect(presetRules.map((r) => r.name)).toEqual([
+			'Discord.exe',
 			'private',
+			'category-ru',
+			'ru',
+			'antifilter',
+			'antifilter-community',
+			'discord',
+			'telegram',
 			'youtube',
 			'antifilter',
 			'antifilter-community',
-			'category-ru',
-			'antifilter',
-			'antifilter-community',
-			'ru',
+			'telegram',
 		]);
-		expect(presetRules[1].serverId).toBe('subscription');
+		expect(presetRules[6].serverId).toBe('subscription');
+		expect(presetRules.find((r) => r.name === 'Discord.exe')?.matcher).toBe(
+			'application',
+		);
 
 		// Idempotency: applying again must not duplicate rules
 		await service.applyPreset('russia-optimized');
 		rules = get(service.state).rules;
-		expect(rules.length).toBe(9);
+		expect(rules.length).toBe(13);
 
 		// Remove preset: custom user rule must remain intact
 		await service.removePreset('russia-optimized');
