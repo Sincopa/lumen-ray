@@ -27,6 +27,10 @@ if (-not (Get-Command cargo -ErrorAction SilentlyContinue)) {
     throw 'Rust/Cargo is not found in PATH. Please install Rust.'
 }
 
+# Tauri also calls SignTool internally when inspecting NSIS resources.
+$env:TAURI_WINDOWS_SIGNTOOL_PATH = & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'sign-windows.ps1') -Mode ToolPath
+if ($LASTEXITCODE -ne 0) { throw 'Windows SDK SignTool discovery failed.' }
+
 # Ensure verified bundled runtime is present
 $runtimeRoot = Join-Path $root 'src-tauri/runtime'
 $xrayExe = Join-Path $runtimeRoot 'xray/xray.exe'
@@ -58,6 +62,13 @@ Write-Host '[1/3] Building application bundle via Tauri...' -ForegroundColor Gre
 if ($LASTEXITCODE -ne 0) {
     throw "Tauri build failed with exit code $LASTEXITCODE"
 }
+
+# Tauri's bundler signs installers and their embedded EXE/uninstaller. --no-bundle
+# has no signing phase, so sign the main executable explicitly before any copies/ZIPs.
+$builtExe = Join-Path $root 'src-tauri/target/release/app.exe'
+& powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'sign-windows.ps1') -Mode Sign -Path $builtExe
+if ($LASTEXITCODE -ne 0) { throw 'Application Authenticode signing failed.' }
+Copy-Item -LiteralPath (Join-Path $root 'artifacts/code-signing/Lumen-SelfSigned.cer') -Destination (Join-Path $releaseDir 'Lumen-SelfSigned.cer') -Force
 
 # 1. Package Windows Setup installer (.exe)
 if ($Mode -eq 'All' -or $Mode -eq 'Installer') {

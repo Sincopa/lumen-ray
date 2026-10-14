@@ -67,4 +67,4 @@ cargo clippy --locked --manifest-path src-tauri/Cargo.toml --all-targets --all-f
 
 On Windows, `npm run test:tun` checks DNS, IPv4/IPv6 routes, and video playback through an already connected Lumen TUN session. It does not change the connection. `npm run benchmark:latency` measures the startup time and memory of one and four isolated Xray probe processes without a subscription.
 
-The release workflow builds the Windows installer and signed updater artifacts from a version tag. Native data is stored as user-scoped DPAPI ciphertext under `%LOCALAPPDATA%\app.lumen.desktop\data`. The installer does not currently have an Authenticode signature.
+The release workflow builds the Windows installer and signed updater artifacts from a version tag. Native data is stored as user-scoped DPAPI ciphertext under `%LOCALAPPDATA%\app.lumen.desktop\data`. Windows builds automatically apply a self-signed SHA-256 Authenticode signature to application executables and installers; see [Windows code signing](docs/windows-code-signing.md). Other computers do not automatically trust this certificate, and SmartScreen warnings or Defender detections may still occur.
