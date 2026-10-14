@@ -84,6 +84,11 @@ before the draft release is published. Signature reports are uploaded separately
 as Actions artifacts. The runner key and temporary PFX are cleaned up even after
 failure. PFX/password files are never uploaded as build artifacts.
 
+The hosted Windows VM uses `LUMEN_SIGNING_TRUST_SCOPE=LocalMachine` for its public
+Root/TrustedPublisher entries, avoiding interactive CurrentUser root-import
+dialogs. The private key remains in CurrentUser/My. Cleanup removes the entries
+created by the job from both locations. Local builds retain CurrentUser-only trust.
+
 The existing `TAURI_SIGNING_PRIVATE_KEY` and `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`
 secrets continue to protect automatic updates independently of Authenticode.
 

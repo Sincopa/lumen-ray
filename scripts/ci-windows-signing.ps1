@@ -16,9 +16,12 @@ if ($Mode -eq 'Cleanup') {
     if (Test-Path -LiteralPath $statePath) {
         $state = Get-Content -LiteralPath $statePath -Raw | ConvertFrom-Json
         if ($state.thumbprint -notmatch '^[a-fA-F0-9]{40}$') { throw 'Invalid signing cleanup state.' }
-        foreach ($store in $state.createdStores) {
-            if ($store -notin @('My', 'Root', 'TrustedPublisher')) { throw 'Invalid cleanup store.' }
-            $certificatePath = "Cert:\CurrentUser\$store\$($state.thumbprint)"
+        foreach ($entry in $state.createdStores) {
+            if ($entry -in @('My', 'Root', 'TrustedPublisher')) { $entry = "CurrentUser/$entry" }
+            if ($entry -notmatch '^(CurrentUser|LocalMachine)/(My|Root|TrustedPublisher)$') { throw 'Invalid cleanup store.' }
+            $location, $store = $entry.Split('/')
+            if ($store -eq 'My' -and $location -ne 'CurrentUser') { throw 'Unexpected private key store.' }
+            $certificatePath = "Cert:\$location\$store\$($state.thumbprint)"
             if (Test-Path -LiteralPath $certificatePath) {
                 if ($store -eq 'My') { Remove-Item -LiteralPath $certificatePath -DeleteKey -Force }
                 else { Remove-Item -LiteralPath $certificatePath -Force }
@@ -37,19 +40,31 @@ if ($Mode -eq 'Import') {
     }
     $pfxPath = Join-Path $runnerDirectory ('lumen-signing-' + [guid]::NewGuid().ToString('N') + '.pfx')
     try {
+        Write-Host 'Validating the pinned release PFX.'
         [IO.File]::WriteAllBytes($pfxPath, [Convert]::FromBase64String($env:WINDOWS_CERTIFICATE_PFX_BASE64))
         $password = ConvertTo-SecureString $env:WINDOWS_CERTIFICATE_PASSWORD -AsPlainText -Force
         $pfx = Get-PfxData -FilePath $pfxPath -Password $password
         if ($pfx.EndEntityCertificates.Count -ne 1 -or $pfx.EndEntityCertificates[0].Thumbprint -ne $env:LUMEN_SIGNING_THUMBPRINT) {
             throw 'The PFX does not match the pinned release certificate.'
         }
-        $createdStores = @('My', 'Root', 'TrustedPublisher' | Where-Object { -not (Test-Path -LiteralPath "Cert:\CurrentUser\$_\$env:LUMEN_SIGNING_THUMBPRINT") })
+        $trustScope = 'CurrentUser'
+        if ($env:LUMEN_SIGNING_TRUST_SCOPE) { $trustScope = $env:LUMEN_SIGNING_TRUST_SCOPE }
+        if ($trustScope -notin @('CurrentUser', 'LocalMachine')) { throw 'Invalid LUMEN_SIGNING_TRUST_SCOPE.' }
+        $stores = @('CurrentUser/My', "$trustScope/Root", "$trustScope/TrustedPublisher")
+        $createdStores = @($stores | Where-Object {
+            $location, $store = $_.Split('/')
+            -not (Test-Path -LiteralPath "Cert:\$location\$store\$env:LUMEN_SIGNING_THUMBPRINT")
+        })
         @{ thumbprint = $env:LUMEN_SIGNING_THUMBPRINT; createdStores = $createdStores } | ConvertTo-Json | Set-Content -LiteralPath $statePath -Encoding UTF8
         # Omit -Exportable: the imported runner key cannot be exported again.
+        Write-Host 'Importing the private key into CurrentUser/My.'
         Import-PfxCertificate -FilePath $pfxPath -Password $password -CertStoreLocation Cert:\CurrentUser\My | Out-Null
-        & powershell -NoProfile -ExecutionPolicy Bypass -File $signer -Mode Initialize
+        Write-Host "Initializing $trustScope certificate trust and SignTool."
+        $initializeArguments = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $signer, '-Mode', 'Initialize')
+        if ($trustScope -eq 'LocalMachine') { $initializeArguments = @('-NonInteractive') + $initializeArguments }
+        & powershell @initializeArguments
         if ($LASTEXITCODE -ne 0) { throw 'The imported release certificate failed validation.' }
-        $toolPath = & powershell -NoProfile -ExecutionPolicy Bypass -File $signer -Mode ToolPath
+        $toolPath = & powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $signer -Mode ToolPath
         if ($LASTEXITCODE -ne 0) { throw 'Windows SDK SignTool is missing.' }
         if ($env:GITHUB_ENV) { "TAURI_WINDOWS_SIGNTOOL_PATH=$toolPath" | Out-File -LiteralPath $env:GITHUB_ENV -Encoding UTF8 -Append }
         Write-Host "Imported release certificate: $env:LUMEN_SIGNING_THUMBPRINT"

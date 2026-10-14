@@ -73,10 +73,15 @@ function Get-SigningIdentity {
     $exportPath = $publicCertificatePath
     if ($requestedThumbprint) { $exportPath = Join-Path $identityDirectory "$requestedThumbprint.cer" }
     Export-Certificate -Cert $certificate -FilePath $exportPath -Force | Out-Null
-    # Trust only this user's self-signed Code Signing identity. Never alter LocalMachine.
+    $trustScope = 'CurrentUser'
+    if ($env:LUMEN_SIGNING_TRUST_SCOPE) { $trustScope = $env:LUMEN_SIGNING_TRUST_SCOPE }
+    if ($trustScope -notin @('CurrentUser', 'LocalMachine')) { throw 'Invalid LUMEN_SIGNING_TRUST_SCOPE.' }
+    # A hosted runner uses its temporary machine stores to avoid CurrentUser
+    # root-import dialogs. Local builds keep the default CurrentUser scope.
     foreach ($storeName in @('Root', 'TrustedPublisher')) {
-        if (-not (Test-Path -LiteralPath "Cert:\CurrentUser\$storeName\$($certificate.Thumbprint)")) {
-            Import-Certificate -FilePath $exportPath -CertStoreLocation "Cert:\CurrentUser\$storeName" | Out-Null
+        if (-not (Test-Path -LiteralPath "Cert:\$trustScope\$storeName\$($certificate.Thumbprint)")) {
+            Write-Host "Trusting release certificate in $trustScope/$storeName."
+            Import-Certificate -FilePath $exportPath -CertStoreLocation "Cert:\$trustScope\$storeName" | Out-Null
         }
     }
     Copy-Item -LiteralPath $exportPath -Destination (Join-Path $evidenceDirectory 'Lumen-SelfSigned.cer') -Force
