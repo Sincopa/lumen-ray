@@ -512,13 +512,14 @@ mod tests {
     }
 
     #[test]
-    fn test_code_and_agy_icons() {
-        let code_icon = super::get_app_icon("Code.exe");
-        println!("Code.exe resolved icon: {}", code_icon.is_some());
-        assert!(code_icon.is_some(), "Code.exe icon must be resolved");
+    fn resolves_executable_path_and_cached_file_name() {
+        let directory = tempfile::tempdir().unwrap();
+        let executable = directory.path().join("lumen-icon-fixture.exe");
+        std::fs::copy(std::env::current_exe().unwrap(), &executable).unwrap();
 
-        let agy_icon = super::get_app_icon("agy.exe");
-        println!("agy.exe resolved icon: {}", agy_icon.is_some());
-        assert!(agy_icon.is_some(), "agy.exe icon must be resolved");
+        let quoted_path = format!("\"{}\"", executable.display());
+        let icon = super::get_app_icon(&quoted_path).expect("fixture icon must be resolved");
+        assert!(icon.starts_with("data:image/png;base64,iVBOR"));
+        assert_eq!(super::get_app_icon("lumen-icon-fixture.exe"), Some(icon));
     }
 }
