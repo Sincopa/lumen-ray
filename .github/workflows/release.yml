@@ -14,6 +14,7 @@ jobs:
     runs-on: windows-latest
     env:
       LUMEN_SIGNING_THUMBPRINT: ${{ vars.WINDOWS_CERTIFICATE_THUMBPRINT }}
+      LUMEN_SIGNING_TRUST_SCOPE: LocalMachine
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -68,6 +69,7 @@ jobs:
         run: npm ci
 
       - name: Import persistent Windows Code Signing certificate
+        timeout-minutes: 3
         shell: pwsh
         env:
           WINDOWS_CERTIFICATE_PFX_BASE64: ${{ secrets.WINDOWS_CERTIFICATE_PFX_BASE64 }}
