@@ -45,8 +45,15 @@ test('dropdown starts closed, toggles on click, dismisses on outside click and o
 	const scrollContainer = page
 		.locator('.settings-content, .settings-view')
 		.first();
-	await scrollContainer.evaluate((el) => (el.scrollTop = 100));
-	await page.waitForTimeout(100);
+	const previousScrollTop = await scrollContainer.evaluate(
+		(el) => el.scrollTop,
+	);
+	await scrollContainer.evaluate((el) => {
+		el.scrollTop = el.scrollTop > 0 ? 0 : 100;
+	});
+	await expect
+		.poll(() => scrollContainer.evaluate((el) => el.scrollTop))
+		.not.toBe(previousScrollTop);
 	await expect(langList).not.toBeVisible();
 
 	// 6. Screenshot clean settings view
