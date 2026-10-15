@@ -670,10 +670,15 @@ test('verifies all 7 bug fixes and visual refinements', async ({ page }) => {
 			.locator('.app-ui')
 			.evaluate((el) => el.classList.contains('dim-backdrop')),
 	).toBe(false);
-	const backdropOpacity = await page
-		.locator('.app-ui')
-		.evaluate((el) => window.getComputedStyle(el, '::before').opacity);
-	expect(parseFloat(backdropOpacity)).toBe(0);
+	await expect
+		.poll(() =>
+			page
+				.locator('.app-ui')
+				.evaluate((el) =>
+					parseFloat(window.getComputedStyle(el, '::before').opacity),
+				),
+		)
+		.toBe(0);
 	await page.screenshot({
 		path: 'artifacts/verification/check7-home-after-rules.png',
 	});

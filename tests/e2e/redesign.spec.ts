@@ -229,6 +229,7 @@ test('Lottie reacts to hover and connection, and honors reduced motion', async (
 	await page.mouse.move(0, 0);
 	await expect(face).toHaveAttribute('data-expression', 'idle');
 	await page.emulateMedia({ reducedMotion: 'reduce' });
+	await expect(face).toHaveAttribute('data-segment', 'pose:idle');
 	const initial = await frame();
 	await page.waitForTimeout(300);
 	expect(await frame()).toBe(initial);
@@ -315,6 +316,7 @@ for (const size of [
 		await page.getByRole('button', { name: ru.nav.home, exact: true }).click();
 		await page.locator('.server-selector').click();
 		await page
+			.getByRole('region', { name: ru.nav.servers, exact: true })
 			.getByRole('button', { name: ru.common.search, exact: true })
 			.click();
 		await page
