@@ -1082,13 +1082,14 @@ async fn geo_presets_real_xray_outbound_selection_and_dns_priority() {
         {"tag":"block","protocol":"blackhole"}, {"tag":"dns","protocol":"blackhole"}
     ]);
     config.as_object_mut().unwrap().remove("metrics");
-    let output = tempfile::tempfile().unwrap();
+    let output = tempfile::NamedTempFile::new().unwrap();
     drop(listener);
     let mut child = crate::core::xray::command(&core)
         .args(["run", "-config", "stdin:"])
         .stdin(std::process::Stdio::piped())
-        .stdout(output.try_clone().unwrap())
-        .stderr(output.try_clone().unwrap())
+        .stdout(output.as_file().try_clone().unwrap())
+        .stderr(output.as_file().try_clone().unwrap())
+        .kill_on_drop(true)
         .spawn()
         .unwrap();
     child
@@ -1110,7 +1111,7 @@ async fn geo_presets_real_xray_outbound_selection_and_dns_priority() {
     let client = reqwest::Client::builder()
         .no_proxy()
         .proxy(reqwest::Proxy::all(format!("http://127.0.0.1:{port}")).unwrap())
-        .timeout(std::time::Duration::from_secs(2))
+        .timeout(std::time::Duration::from_secs(10))
         .build()
         .unwrap();
     let cases = [
@@ -1125,17 +1126,24 @@ async fn geo_presets_real_xray_outbound_selection_and_dns_priority() {
     for (host, _) in cases {
         let _ = client.get(format!("http://{host}/")).send().await;
     }
+    // Xray writes access logs asynchronously, after a blackhole can close the
+    // HTTP request. Wait for every route before terminating the process.
+    for _ in 0..100 {
+        let logs = String::from_utf8_lossy(&std::fs::read(output.path()).unwrap()).into_owned();
+        if cases.iter().all(|(host, target)| {
+            logs.contains(&format!("taking detour [{target}] for [tcp:{host}:80]"))
+        }) {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    }
     child.kill().await.unwrap();
     child.wait().await.unwrap();
-    use std::io::{Read, Seek};
-    let mut output = output;
-    output.rewind().unwrap();
-    let mut logs = String::new();
-    output.read_to_string(&mut logs).unwrap();
+    let logs = std::fs::read_to_string(output.path()).unwrap();
     for (host, target) in cases {
         assert!(
             logs.contains(&format!("taking detour [{target}] for [tcp:{host}:80]")),
-            "No expected route for {host}"
+            "No expected route for {host}; Xray logs:\n{logs}"
         );
     }
     // Compiling old saved presets must not recreate a deleted service row.
