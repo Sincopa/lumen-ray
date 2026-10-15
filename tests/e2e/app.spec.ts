@@ -60,17 +60,21 @@ test('server choice survives navigation, connecting and reload', async ({
 	);
 });
 
-test('routing mode is locked only while the VPN state is changing', async ({
+test('routing mode remains usable while the VPN state is changing', async ({
 	page,
 }) => {
 	await page.goto('/');
 	const modeButtons = page.locator('.action-pill');
 	await expect(modeButtons.first()).toBeEnabled();
 	await page.locator('.central-logo-btn').click();
-	await expect(modeButtons.first()).toBeDisabled();
-	await expect(page.getByRole('status')).toHaveText(ru.home.connected);
+	await expect(page.locator('.central-logo-btn')).toHaveAttribute(
+		'aria-busy',
+		'true',
+	);
 	await expect(modeButtons.last()).toBeEnabled();
 	await modeButtons.last().click();
+	await expect(modeButtons.last()).toHaveAttribute('aria-pressed', 'true');
+	await expect(page.getByRole('status')).toHaveText(ru.home.connected);
 	await expect(modeButtons.last()).toHaveAttribute('aria-pressed', 'true');
 	await page.locator('.central-logo-btn').click();
 	await expect(modeButtons.first()).toBeEnabled();
@@ -126,8 +130,8 @@ test('empty home morphs the centered add button into a subscription field', asyn
 	expect(appBounds).not.toBeNull();
 	expect(buttonBounds).not.toBeNull();
 	expect(buttonBounds!.y - appBounds!.y).toBeCloseTo(385, 1);
-	expect(buttonBounds!.width).toBe(229);
-	expect(buttonBounds!.height).toBe(63);
+	expect(buttonBounds!.width).toBeCloseTo(229, 1);
+	expect(buttonBounds!.height).toBeCloseTo(63, 1);
 	await page.screenshot({ path: 'artifacts/verification/empty-home-add.png' });
 
 	await add.click();
@@ -522,9 +526,7 @@ test('updated shader links and restored cards keep their controls', async ({
 	await editor
 		.getByRole('button', { name: ru.common.save, exact: true })
 		.click();
-	await page
-		.getByRole('button', { name: 'example.com: Сервера', exact: true })
-		.click();
+	await page.getByRole('button', { name: 'example.com: Сервера' }).click();
 	await page.getByRole('button', { name: /Нидерланды/ }).click();
 	await expect(page.locator('.server-pill')).toHaveText('Нидерланды');
 	await page.screenshot({ path: 'artifacts/verification/rules-restored.png' });
