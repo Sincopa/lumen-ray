@@ -49,9 +49,7 @@ test('rule lookup and selection stay reactive after changing a server', async ({
 	await page.getByRole('button', { name: 'Правила', exact: true }).click();
 	const row = page.locator('.rule-row').filter({ hasText: 'example.com' });
 	await expect(row.locator('.server-pill')).toContainText('Финляндия');
-	await row
-		.getByRole('button', { name: 'example.com: Сервера', exact: true })
-		.click();
+	await row.getByRole('button', { name: 'example.com: Сервера' }).click();
 	await page.getByRole('button', { name: /Нидерланды/ }).click();
 	await expect(row.locator('.server-pill')).toContainText('Нидерланды');
 	await page
