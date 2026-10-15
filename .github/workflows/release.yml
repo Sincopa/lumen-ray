@@ -58,6 +58,7 @@ jobs:
     env:
       LUMEN_SIGNING_THUMBPRINT: ${{ vars.WINDOWS_CERTIFICATE_THUMBPRINT }}
       LUMEN_SIGNING_TRUST_SCOPE: LocalMachine
+      RUST_TEST_THREADS: '1'
     steps:
       - name: Checkout
         uses: actions/checkout@v6
