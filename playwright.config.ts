@@ -11,6 +11,8 @@ export default defineConfig({
 	use: {
 		baseURL: 'http://127.0.0.1:5187',
 		viewport: { width: APP_WIDTH, height: APP_HEIGHT },
+		// Software WebGL on CI renders fewer pixels; layout stays in CSS pixels.
+		deviceScaleFactor: isCI ? 0.5 : 1,
 		locale: 'ru-RU',
 		launchOptions: isCI
 			? {
