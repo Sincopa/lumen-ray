@@ -72,6 +72,9 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Install Playwright Chromium
+        run: npx playwright install chromium
+
       - name: Import persistent Windows Code Signing certificate
         timeout-minutes: 3
         shell: pwsh
@@ -105,19 +108,29 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           npm test
 
+      - name: Build frontend for browser checks
+        run: npm run build
+
+      - name: Verify browser flows
+        run: npm run test:e2e
+
+      - name: Upload browser failure reports
+        if: failure() || cancelled()
+        uses: actions/upload-artifact@v4
+        with:
+          name: browser-test-results
+          if-no-files-found: ignore
+          path: test-results/
+          retention-days: 7
+
       - name: Verify Rust backend
         run: |
           cargo test --locked --manifest-path src-tauri/Cargo.toml
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           cargo clippy --locked --manifest-path src-tauri/Cargo.toml --all-targets --all-features -- -D warnings
 
-      - name: Verify native local traffic and browser flows
-        run: |
-          npm run test:smoke
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          npm run build
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          npm run test:e2e
+      - name: Verify native local traffic
+        run: npm run test:smoke
 
       - name: Build and publish signed release
         uses: tauri-apps/tauri-action@v1
@@ -127,7 +140,7 @@ jobs:
         with:
           tagName: v__VERSION__
           releaseName: Lumen v__VERSION__
-          releaseBody: Download the Windows installer or portable archive below. Existing installations receive this version through the built-in signed updater.
+          releaseBody: Download the Windows installer or portable archive below. Updater metadata and a version-bound signature are included.
           releaseDraft: true
           prerelease: false
           generateReleaseNotes: true

@@ -69,7 +69,14 @@ test('shader animates without reuploading static settings and pauses when disabl
 	).toBe(1);
 	await page.emulateMedia({ reducedMotion: 'reduce' });
 	// Allow the single replacement frame requested by the media change.
-	await page.waitForTimeout(100);
+	await page.evaluate(async () => {
+		await new Promise<void>((resolve) =>
+			requestAnimationFrame(() => resolve()),
+		);
+		await new Promise<void>((resolve) =>
+			requestAnimationFrame(() => resolve()),
+		);
+	});
 	const reducedMotionDraws = await page.evaluate(
 		() => window.shaderTestStats.draws,
 	);
