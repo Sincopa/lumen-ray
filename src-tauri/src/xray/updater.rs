@@ -163,7 +163,7 @@ pub async fn prepare(version: &str, directory: &Path) -> Result<PathBuf> {
     let executable = staging.path().join("xray.exe");
     let output = tokio::time::timeout(
         Duration::from_secs(10),
-        crate::core::xray::command(&executable)
+        crate::engine::xray::command(&executable)
             .arg("version")
             .output(),
     )
@@ -179,7 +179,7 @@ pub async fn prepare(version: &str, directory: &Path) -> Result<PathBuf> {
     let staging_wintun = staging.path().join("wintun.dll");
     if !staging_wintun.is_file() {
         let base_wintun = directory
-            .join(crate::xray::core::VERSION)
+            .join(crate::xray::bundle::VERSION)
             .join("wintun.dll");
         if base_wintun.is_file() {
             let _ = std::fs::copy(&base_wintun, &staging_wintun);
@@ -202,7 +202,7 @@ pub async fn prepare(version: &str, directory: &Path) -> Result<PathBuf> {
         }
     }
     crate::xray::geo::validate_geo_files_sync(&executable, staging.path())?;
-    crate::core::xray::validate(
+    crate::engine::xray::validate(
         &executable,
         br#"{"inbounds":[],"outbounds":[{"protocol":"freedom"}]}"#,
     )
@@ -273,7 +273,7 @@ pub fn current(directory: &Path) -> String {
     std::fs::read_to_string(directory.join("current-version"))
         .ok()
         .filter(|v| version_parts(v).is_ok())
-        .unwrap_or_else(|| super::core::VERSION.into())
+        .unwrap_or_else(|| super::bundle::VERSION.into())
 }
 pub fn activate(directory: &Path, version: &str) -> Result<()> {
     version_parts(version)?;
@@ -288,7 +288,7 @@ mod tests {
     #[ignore = "Downloads a verified official release; requires Internet access"]
     async fn official_release_integrity_and_activation() {
         let directory = tempfile::tempdir().unwrap();
-        let version = super::super::core::VERSION;
+        let version = super::super::bundle::VERSION;
         let update = metadata(version).await.unwrap();
         assert_eq!(update.architecture, std::env::consts::ARCH);
         assert_eq!(update.sha256.len(), 64);

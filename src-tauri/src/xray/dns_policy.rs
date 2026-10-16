@@ -2,9 +2,9 @@ use crate::{domain::errors::Result, storage::repository::Repository};
 use serde_json::{json, Value};
 
 #[cfg(test)]
-use crate::core::dns::valid_resolver;
+use crate::engine::dns::valid_resolver;
 #[cfg(test)]
-use crate::core::dns::DnsPolicy;
+use crate::engine::dns::DnsPolicy;
 
 fn address(value: &str) -> String {
     if value.starts_with("https://") {

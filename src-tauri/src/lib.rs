@@ -1,38 +1,36 @@
 mod app;
 mod commands;
-mod core;
-mod diagnostics;
 mod domain;
+mod engine;
 mod platform;
 mod runtime;
 mod services;
-mod startup;
 mod storage;
 mod subscription;
 #[cfg(test)]
 mod tests;
 mod xray;
 use commands::vpn;
-use tauri::{Emitter, Manager};
+use tauri::Manager;
 pub fn run_startup_check_if_requested() -> bool {
     if std::env::args().nth(1).as_deref() != Some("--lumen-startup-check") {
         return false;
     }
     let context = tauri::generate_context!();
-    let result = startup::verify_embedded_frontend(&context)
-        .and_then(|_| startup::preflight())
+    let result = app::startup::verify_embedded_frontend(&context)
+        .and_then(|_| app::startup::preflight())
         .and_then(|_| {
             runtime::resolve()
                 .map(|_| ())
-                .map_err(|error| startup::classify(&error.to_string()))
+                .map_err(|error| app::startup::classify(&error.to_string()))
         });
     match result {
         Ok(()) => {
-            startup::record("STARTUP_CHECK_OK");
+            app::startup::record("STARTUP_CHECK_OK");
             println!("STARTUP_CHECK_OK (embedded frontend, WebView2 and runtime discovery)");
         }
         Err(failure) => {
-            startup::record(failure.code);
+            app::startup::record(failure.code);
             eprintln!("{}: {}", failure.code, failure.advice);
             std::process::exit(1);
         }
@@ -105,16 +103,16 @@ pub fn run_smoke_if_requested() -> bool {
 }
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    startup::install_panic_handler();
+    app::startup::install_panic_handler();
     let mut context = tauri::generate_context!();
     if !cfg!(dev) {
-        if let Err(failure) = startup::verify_embedded_frontend(&context) {
-            startup::report(failure);
+        if let Err(failure) = app::startup::verify_embedded_frontend(&context) {
+            app::startup::report(failure);
             std::process::exit(1);
         }
     }
-    if let Err(failure) = startup::preflight() {
-        startup::report(failure);
+    if let Err(failure) = app::startup::preflight() {
+        app::startup::report(failure);
         std::process::exit(1);
     }
     // Exercise the shipped UI with a fresh repository, without auto-connect or prewarm.
@@ -123,7 +121,7 @@ pub fn run() {
         match tempfile::tempdir() {
             Ok(directory) => Some(directory),
             Err(_) => {
-                startup::report(startup::classify("STORAGE_FAILED"));
+                app::startup::report(app::startup::classify("STORAGE_FAILED"));
                 std::process::exit(1);
             }
         }
@@ -137,10 +135,10 @@ pub fn run() {
         for window in &mut context.config_mut().app.windows {
             window.title = "Lumen — проверка запуска".into();
         }
-        startup::record("ISOLATED_UI_SMOKE");
+        app::startup::record("ISOLATED_UI_SMOKE");
     }
     let application = tauri::Builder::default()
-        .manage(startup::FrontendReadiness::default())
+        .manage(app::startup::FrontendReadiness::default())
         .plugin(tauri_plugin_single_instance::init(|app, args, _| {
             for arg in args {
                 commands::tools::queue_import_link(app, &arg);
@@ -163,7 +161,7 @@ pub fn run() {
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_notification::init())
         .invoke_handler(tauri::generate_handler![
-            startup::frontend_ready,
+            app::startup::frontend_ready,
             commands::tools::export_backup,
             commands::tools::take_import_link,
             commands::tools::preview_backup,
@@ -203,7 +201,7 @@ pub fn run() {
         ])
         .setup(move |app| {
             let resources = runtime::resolve_from(Some(&app.path().resource_dir()?))?;
-            startup::record("RUNTIME_RESOLVED");
+            app::startup::record("RUNTIME_RESOLVED");
             let data = app.path().app_local_data_dir()?;
             let data = smoke_path.clone().unwrap_or(data);
             #[cfg(debug_assertions)]
@@ -219,9 +217,9 @@ pub fn run() {
                     .settings
                     .close_to_tray = false;
             }
-            startup::record("APPLICATION_DATA_READY");
+            app::startup::record("APPLICATION_DATA_READY");
             let active = crate::xray::updater::current(&state.data.join("core"));
-            if active != crate::xray::core::VERSION {
+            if active != crate::xray::bundle::VERSION {
                 let resolved = tauri::async_runtime::block_on(async {
                     tokio::time::timeout(
                         std::time::Duration::from_secs(15),
@@ -257,49 +255,7 @@ pub fn run() {
                     }
                 });
             }
-            let initial_menu = create_tray_menu(app.handle(), &state)?;
-            let mut tray_builder = tauri::tray::TrayIconBuilder::with_id("main-tray")
-                .menu(&initial_menu)
-                .tooltip("Lumen")
-                .show_menu_on_left_click(false)
-                .on_menu_event(|app, event| {
-                    let id = event.id().as_ref().to_string();
-                    let state = app
-                        .state::<std::sync::Arc<app::state::AppState>>()
-                        .inner()
-                        .clone();
-                    let app_handle = app.clone();
-                    tauri::async_runtime::spawn(async move {
-                        handle_tray_menu_event(&app_handle, &state, &id).await;
-                    });
-                })
-                .on_tray_icon_event(|tray, event| {
-                    if let tauri::tray::TrayIconEvent::Click {
-                        button: tauri::tray::MouseButton::Left,
-                        button_state: tauri::tray::MouseButtonState::Up,
-                        ..
-                    } = event
-                    {
-                        let app = tray.app_handle();
-                        if let Some(window) = tauri::Manager::get_webview_window(app, "main") {
-                            let is_visible = window.is_visible().unwrap_or(false);
-                            let is_minimized = window.is_minimized().unwrap_or(false);
-                            if is_visible && !is_minimized {
-                                let _ = window.hide();
-                            } else {
-                                let _ = window.show();
-                                let _ = window.unminimize();
-                                let _ = window.set_focus();
-                            }
-                        }
-                    }
-                });
-
-            if let Some(icon) = app.default_window_icon() {
-                tray_builder = tray_builder.icon(icon.clone());
-            }
-
-            tray_builder.build(app)?;
+            app::tray::install(app, &state)?;
 
             let start_minimized = std::env::args().any(|a| a == "--minimized")
                 || state
@@ -349,15 +305,15 @@ pub fn run() {
         Ok(app) => app,
         Err(error) => {
             let failure = match &error {
-                tauri::Error::Runtime(_) => startup::classify("WEBVIEW_INIT_FAILED"),
-                _ => startup::classify(&error.to_string()),
+                tauri::Error::Runtime(_) => app::startup::classify("WEBVIEW_INIT_FAILED"),
+                _ => app::startup::classify(&error.to_string()),
             };
-            startup::report(failure);
+            app::startup::report(failure);
             std::process::exit(1);
         }
     };
-    startup::record("APPLICATION_INITIALIZED");
-    startup::watch_frontend(application.handle().clone());
+    app::startup::record("APPLICATION_INITIALIZED");
+    app::startup::watch_frontend(application.handle().clone());
     // 0 = idle, 1 = cleanup in progress, 2 = safe to exit.
     let exiting = std::sync::Arc::new(std::sync::atomic::AtomicU8::new(0));
     application.run(move |app, event| {
@@ -397,230 +353,3 @@ pub fn run() {
     });
 }
 
-pub fn create_tray_menu(
-    app: &tauri::AppHandle,
-    state: &app::state::AppState,
-) -> tauri::Result<tauri::menu::Menu<tauri::Wry>> {
-    use tauri::menu::*;
-
-    let (is_connected, is_connecting) = state
-        .snapshot
-        .try_read()
-        .map(|s| (s.status == "connected", s.status == "connecting"))
-        .unwrap_or((false, false));
-
-    let (selected_server_name, current_sub_nodes, is_global) = state
-        .repository
-        .try_read()
-        .map(|r| {
-            let selected_name = if is_connected {
-                r.nodes
-                    .iter()
-                    .find(|n| Some(&n.id) == r.selected_server_id.as_ref())
-                    .map(|n| n.name.clone())
-            } else {
-                None
-            };
-            let nodes: Vec<(String, String, bool)> = r
-                .nodes
-                .iter()
-                .filter(|n| {
-                    r.selected_subscription_id
-                        .as_ref()
-                        .is_none_or(|sid| n.subscription_id == *sid)
-                })
-                .take(25)
-                .map(|n| {
-                    (
-                        n.id.clone(),
-                        n.name.clone(),
-                        Some(&n.id) == r.selected_server_id.as_ref(),
-                    )
-                })
-                .collect();
-            (selected_name, nodes, r.routing_mode != "rules")
-        })
-        .unwrap_or_else(|_| (None, Vec::new(), true));
-
-    let status_text = if is_connected {
-        let server_name = selected_server_name.as_deref().unwrap_or("Подключено");
-        format!("● {}", server_name)
-    } else if is_connecting {
-        "◌ Подключение...".to_string()
-    } else {
-        "○ Отключено".to_string()
-    };
-    let status_item = MenuItem::with_id(app, "status_header", status_text, false, None::<&str>)?;
-
-    let toggle_text = if is_connected {
-        "Отключиться"
-    } else {
-        "Подключиться"
-    };
-    let toggle_item = MenuItem::with_id(
-        app,
-        "toggle_connect",
-        toggle_text,
-        !is_connecting,
-        None::<&str>,
-    )?;
-
-    let sep1 = PredefinedMenuItem::separator(app)?;
-
-    let mut servers_sub = SubmenuBuilder::new(app, "Серверы");
-
-    if current_sub_nodes.is_empty() {
-        servers_sub = servers_sub.text("no_servers", "(Нет серверов)");
-    } else {
-        for (node_id, node_name, is_sel) in &current_sub_nodes {
-            let check_item = CheckMenuItem::with_id(
-                app,
-                format!("srv:{node_id}"),
-                node_name,
-                true,
-                *is_sel,
-                None::<&str>,
-            )?;
-            servers_sub = servers_sub.item(&check_item);
-        }
-    }
-    let servers_menu = servers_sub.build()?;
-    let mode_global = CheckMenuItem::with_id(
-        app,
-        "mode:global",
-        "Все сайты (Global)",
-        true,
-        is_global,
-        None::<&str>,
-    )?;
-    let mode_rules = CheckMenuItem::with_id(
-        app,
-        "mode:rules",
-        "По правилам (Rules)",
-        true,
-        !is_global,
-        None::<&str>,
-    )?;
-    let mode_menu = SubmenuBuilder::new(app, "Маршрутизация")
-        .item(&mode_global)
-        .item(&mode_rules)
-        .build()?;
-
-    let sep2 = PredefinedMenuItem::separator(app)?;
-    let show_item = MenuItem::with_id(app, "show", "Открыть Lumen", true, None::<&str>)?;
-    let settings_item = MenuItem::with_id(app, "settings", "Настройки", true, None::<&str>)?;
-    let sep3 = PredefinedMenuItem::separator(app)?;
-    let quit_item = MenuItem::with_id(app, "quit", "Выход", true, None::<&str>)?;
-
-    let menu = MenuBuilder::new(app)
-        .item(&status_item)
-        .item(&toggle_item)
-        .item(&sep1)
-        .item(&servers_menu)
-        .item(&mode_menu)
-        .item(&sep2)
-        .item(&show_item)
-        .item(&settings_item)
-        .item(&sep3)
-        .item(&quit_item)
-        .build()?;
-
-    Ok(menu)
-}
-
-pub fn update_tray_menu(app: &tauri::AppHandle, state: &app::state::AppState) {
-    if let Some(tray) = app.tray_by_id("main-tray") {
-        if let Ok(menu) = create_tray_menu(app, state) {
-            let _ = tray.set_menu(Some(menu));
-        }
-    }
-}
-
-/// Tray actions have no command result; publish the catalog the window would get.
-async fn emit_catalog(
-    app: &tauri::AppHandle,
-    state: &app::state::AppState,
-    result: domain::errors::Result<serde_json::Value>,
-) {
-    let catalog = match result {
-        Ok(catalog) => catalog,
-        // A failed change may have been rolled back: show what is persisted.
-        Err(_) => services::catalog_service::snapshot(
-            &*state.repository.read().await,
-            &*state.latencies.read().await,
-        ),
-    };
-    let _ = tauri::Emitter::emit(app, "catalog://changed", catalog);
-}
-
-async fn handle_tray_menu_event(
-    app: &tauri::AppHandle,
-    state: &std::sync::Arc<app::state::AppState>,
-    id: &str,
-) {
-    match id {
-        "show" => {
-            if let Some(window) = tauri::Manager::get_webview_window(app, "main") {
-                let _ = window.show();
-                let _ = window.unminimize();
-                let _ = window.set_focus();
-            }
-        }
-        "settings" => {
-            if let Some(window) = tauri::Manager::get_webview_window(app, "main") {
-                let _ = window.show();
-                let _ = window.unminimize();
-                let _ = window.set_focus();
-                let _ = window.emit("navigate:settings", ());
-            }
-        }
-        "toggle_connect" => {
-            let status = state.snapshot.read().await.status.clone();
-            if status == "connected" {
-                let _ = services::vpn_service::disconnect(state, app).await;
-                services::vpn_service::prewarm(state).await;
-            } else {
-                let server_id = state.repository.read().await.selected_server_id.clone();
-                if let Some(srv_id) = server_id {
-                    let _ = services::vpn_service::connect(state, app, srv_id).await;
-                }
-            }
-            update_tray_menu(app, state);
-        }
-        "mode:global" | "mode:rules" => {
-            // Same path as the window: apply to the live connection and notify the UI.
-            let mode = id.trim_start_matches("mode:").to_owned();
-            let result = commands::catalog::apply_mutation(
-                state,
-                app,
-                services::catalog_service::Mutation::SetRoutingMode { mode },
-            )
-            .await;
-            emit_catalog(app, state, result).await;
-            update_tray_menu(app, state);
-        }
-        "quit" => {
-            app.exit(0);
-        }
-        srv if srv.starts_with("srv:") => {
-            let srv_id = &srv[4..];
-            let status = state.snapshot.read().await.status.clone();
-            if status == "connected" {
-                // A successful switch persists the selection and notifies the UI.
-                let _ = services::vpn_service::connect_exact(state, app, srv_id.to_string()).await;
-            } else {
-                let result = commands::catalog::apply_mutation(
-                    state,
-                    app,
-                    services::catalog_service::Mutation::SelectServer {
-                        id: srv_id.to_string(),
-                    },
-                )
-                .await;
-                emit_catalog(app, state, result).await;
-            }
-            update_tray_menu(app, state);
-        }
-        _ => {}
-    }
-}

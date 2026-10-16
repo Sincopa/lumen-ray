@@ -80,7 +80,7 @@ pub fn version(path: &std::path::Path) -> String {
     path.parent()
         .and_then(|p| p.file_name())
         .and_then(|n| n.to_str())
-        .unwrap_or(crate::xray::core::VERSION)
+        .unwrap_or(crate::xray::bundle::VERSION)
         .into()
 }
 #[tauri::command]
@@ -110,7 +110,7 @@ pub async fn install_core_update(
             10809,
             repo.settings.network_mode == "tun",
         )?;
-        crate::core::xray::validate(
+        crate::engine::xray::validate(
             &candidate,
             &serde_json::to_vec(&config).map_err(|_| BackendError::invalid())?,
         )

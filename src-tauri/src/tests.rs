@@ -5,7 +5,7 @@ use crate::{
         secure::{OsSecretStore, SecretStore},
     },
     subscription::{parser, uri},
-    xray::{config, core},
+    xray::{bundle, config},
 };
 const VLESS:&str="vless://00000000-0000-4000-8000-000000000001@example.com:443?type=ws&security=tls&sni=example.com&path=%2Fvpn#Example";
 #[test]
@@ -223,13 +223,13 @@ async fn bundled_core_validation() {
     let runtime = crate::runtime::RuntimePaths::new(
         std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("runtime"),
     );
-    let path = core::prepare(&runtime, directory.path()).unwrap();
-    let version = crate::core::xray::command(&path)
+    let path = bundle::prepare(&runtime, directory.path()).unwrap();
+    let version = crate::engine::xray::command(&path)
         .arg("version")
         .output()
         .await
         .unwrap();
-    assert!(String::from_utf8_lossy(&version.stdout).contains(core::VERSION));
+    assert!(String::from_utf8_lossy(&version.stdout).contains(bundle::VERSION));
     let node = uri::parse(VLESS, "sub").unwrap();
     let repo = Repository {
         nodes: vec![node.clone()],
@@ -237,7 +237,7 @@ async fn bundled_core_validation() {
     };
     let bytes =
         serde_json::to_vec(&config::build(&repo, &node.id, 10808, 10809, false).unwrap()).unwrap();
-    crate::core::xray::validate(&path, &bytes).await.unwrap();
+    crate::engine::xray::validate(&path, &bytes).await.unwrap();
     #[cfg(windows)]
     {
         let standby = config::build_standby(&repo, &node.id, 10808, 10809).unwrap();
@@ -249,11 +249,11 @@ async fn bundled_core_validation() {
             .find(|inbound| inbound["protocol"] == "tun")
             .unwrap();
         assert!(tun["settings"].get("autoSystemRoutingTable").is_none());
-        crate::core::xray::validate(&path, &serde_json::to_vec(&standby).unwrap())
+        crate::engine::xray::validate(&path, &serde_json::to_vec(&standby).unwrap())
             .await
             .unwrap();
     }
-    assert!(crate::core::xray::validate(&path, b"{invalid")
+    assert!(crate::engine::xray::validate(&path, b"{invalid")
         .await
         .is_err());
     let advanced = [
@@ -276,7 +276,7 @@ async fn bundled_core_validation() {
         let bytes =
             serde_json::to_vec(&config::build(&repo, &node.id, 10808, 10809, false).unwrap())
                 .unwrap();
-        crate::core::xray::validate(&path, &bytes).await.unwrap();
+        crate::engine::xray::validate(&path, &bytes).await.unwrap();
     }
 }
 
@@ -287,8 +287,8 @@ async fn core_readiness_does_not_wait_for_external_ip() {
     let runtime = crate::runtime::RuntimePaths::new(
         std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("runtime"),
     );
-    let path = core::prepare(&runtime, directory.path()).unwrap();
-    let (proxy_port, metrics_port) = crate::core::xray::ports().unwrap();
+    let path = bundle::prepare(&runtime, directory.path()).unwrap();
+    let (proxy_port, metrics_port) = crate::engine::xray::ports().unwrap();
     let bytes = serde_json::to_vec(&serde_json::json!({
         "log": { "loglevel": "none" },
         "inbounds": [{
@@ -303,12 +303,12 @@ async fn core_readiness_does_not_wait_for_external_ip() {
     let mut samples = Vec::new();
     for _ in 0..9 {
         let started = std::time::Instant::now();
-        let mut session = crate::core::xray::XraySession::default();
-        crate::core::xray::start(&path, &mut session, &bytes, proxy_port, metrics_port)
+        let mut session = crate::engine::xray::XraySession::default();
+        crate::engine::xray::start(&path, &mut session, &bytes, proxy_port, metrics_port)
             .await
             .unwrap();
         samples.push(started.elapsed().as_millis());
-        crate::core::xray::stop(&mut session).await.unwrap();
+        crate::engine::xray::stop(&mut session).await.unwrap();
     }
     samples.sort_unstable();
     eprintln!(
@@ -1045,7 +1045,7 @@ async fn geo_presets_real_xray_outbound_selection_and_dns_priority() {
         std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("runtime"),
     );
     let data = tempfile::tempdir().unwrap();
-    let core = core::prepare(&runtime, data.path()).unwrap();
+    let core = bundle::prepare(&runtime, data.path()).unwrap();
     let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let port = listener.local_addr().unwrap().port();
     let mut config =
@@ -1059,11 +1059,11 @@ async fn geo_presets_real_xray_outbound_selection_and_dns_priority() {
             < rules.iter().position(|r| r["ip"].is_array()).unwrap()
     );
     assert_eq!(rules[0]["inboundTag"][0], "dns-query");
-    crate::core::xray::validate(&core, &serde_json::to_vec(&config).unwrap())
+    crate::engine::xray::validate(&core, &serde_json::to_vec(&config).unwrap())
         .await
         .unwrap();
     let tun = config::build(&repo, &node.id, 10808, 10809, true).unwrap();
-    crate::core::xray::validate(&core, &serde_json::to_vec(&tun).unwrap())
+    crate::engine::xray::validate(&core, &serde_json::to_vec(&tun).unwrap())
         .await
         .unwrap();
     // Exercise the real router, with deterministic DNS and inert outbounds; no private node required.
@@ -1081,7 +1081,7 @@ async fn geo_presets_real_xray_outbound_selection_and_dns_priority() {
     config.as_object_mut().unwrap().remove("metrics");
     let output = tempfile::NamedTempFile::new().unwrap();
     drop(listener);
-    let mut child = crate::core::xray::command(&core)
+    let mut child = crate::engine::xray::command(&core)
         .args(["run", "-config", "stdin:"])
         .stdin(std::process::Stdio::piped())
         .stdout(output.as_file().try_clone().unwrap())
@@ -1441,7 +1441,7 @@ mod hwid_tests {
     fn actual_application_version_in_user_agent() {
         let ua = build_user_agent();
         let expected_prefix = format!("Lumen/{}", env!("CARGO_PKG_VERSION"));
-        let expected_xray = format!("Xray/{}", crate::xray::core::VERSION);
+        let expected_xray = format!("Xray/{}", crate::xray::bundle::VERSION);
 
         assert!(ua.starts_with(&expected_prefix));
         assert!(ua.contains(&expected_xray));

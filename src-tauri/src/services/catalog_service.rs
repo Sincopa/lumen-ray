@@ -556,7 +556,7 @@ pub async fn apply_import(state: &AppState, prepared: PreparedImport) -> Result<
     {
         if next.nodes.iter().any(|node| node.id == active) {
             let engine = state.session.lock().await.engine();
-            crate::core::backend(engine)
+            crate::engine::backend(engine)
                 .validate_runtime(state, &next, &active)
                 .await?;
         }

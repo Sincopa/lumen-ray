@@ -1,5 +1,5 @@
-pub use crate::core::Session;
-use crate::core::{backend, BackendSession};
+pub use crate::engine::Session;
+use crate::engine::{backend, BackendSession};
 use crate::{
     app::state::AppState,
     domain::errors::{BackendError, Result},
@@ -14,7 +14,7 @@ use tauri::Emitter;
 #[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ConnectionInfo {
-    pub engine: crate::core::CoreEngine,
+    pub engine: crate::engine::CoreEngine,
     pub server_id: String,
     pub ip: String,
     pub protocol: String,
@@ -42,7 +42,7 @@ pub async fn publish(state: &AppState, app: &tauri::AppHandle, snapshot: Snapsho
     if app.emit("vpn://state", snapshot).is_err() {
         log::warn!("Unable to deliver connection state event");
     }
-    crate::update_tray_menu(app, state);
+    crate::app::tray::update_tray_menu(app, state);
 }
 /// A user connection waits for a short catalog or settings transaction (a rule
 /// toggle, a subscription being applied) instead of failing with BUSY.
@@ -117,7 +117,7 @@ pub async fn apply_live_rules(
     selected: &str,
     before: &crate::storage::repository::Repository,
     after: &crate::storage::repository::Repository,
-) -> Result<crate::core::LiveRoutingStatus> {
+) -> Result<crate::engine::LiveRoutingStatus> {
     let _operation = state
         .connection_operation
         .acquire()
@@ -163,7 +163,7 @@ async fn connect_with_selection(
         None
     };
     let requested_engine = state.repository.read().await.settings.core_engine;
-    if requested_engine == crate::core::CoreEngine::Xray {
+    if requested_engine == crate::engine::CoreEngine::Xray {
         publish(
             state,
             app,
@@ -187,12 +187,12 @@ async fn connect_with_selection(
     };
     // Reject unsupported Lumen profiles before changing the visible connection or
     // taking down the current backend. Best-server selection may contain mixed protocols.
-    let candidates = if requested_engine == crate::core::CoreEngine::Lumen {
+    let candidates = if requested_engine == crate::engine::CoreEngine::Lumen {
         let repo = state.repository.read().await;
         let mut supported = Vec::new();
         let mut first_error = None;
         for candidate in candidates {
-            match backend(crate::core::CoreEngine::Lumen).validate(&repo, &candidate) {
+            match backend(crate::engine::CoreEngine::Lumen).validate(&repo, &candidate) {
                 Ok(()) => supported.push(candidate),
                 Err(error) => {
                     first_error.get_or_insert(error);
@@ -209,7 +209,7 @@ async fn connect_with_selection(
     if state.connection_generation.load(Ordering::Acquire) != generation {
         return Err(cancelled());
     }
-    if requested_engine == crate::core::CoreEngine::Lumen {
+    if requested_engine == crate::engine::CoreEngine::Lumen {
         publish(
             state,
             app,
@@ -384,7 +384,7 @@ async fn connect_session_with_repository(
     let session_at = Instant::now();
     let engine = repo.settings.core_engine;
     let protocol = protocol_name(repo, &id)?;
-    let mut result = crate::core::connect(state, repo, &id, session).await;
+    let mut result = crate::engine::connect(state, repo, &id, session).await;
     let proxy_port = session.proxy_port();
     let is_tun = session.is_tun();
     #[cfg(windows)]
@@ -458,7 +458,7 @@ async fn connect_session_with_repository(
         if active.pending_live_switch.is_some() {
             if result.is_ok() {
                 active.pending_live_switch = None;
-            } else if crate::core::xray::rollback_live_server_switch(state, active)
+            } else if crate::engine::xray::rollback_live_server_switch(state, active)
                 .await
                 .is_ok()
             {
@@ -572,7 +572,7 @@ async fn release(session: &mut Session, cause: &BackendError) -> Result<()> {
 fn tun_helper_alive(session: &Session) -> bool {
     matches!(
         &session.backend,
-        crate::core::BackendSession::Xray(session)
+        crate::engine::BackendSession::Xray(session)
             if session.is_tun
                 && session
                     .helper

@@ -3,7 +3,7 @@ import { BrowserVpnService } from '../platform/browser/BrowserVpnService';
 import { TauriVpnService } from '../platform/tauri/TauriVpnService';
 import { TauriCatalogService } from '../platform/tauri/TauriCatalogService';
 import { CatalogService, type StoragePort } from './catalog';
-import { ConnectionController } from '../stores/connection';
+import { ConnectionController } from './connection';
 
 let storage: StoragePort | undefined;
 try {

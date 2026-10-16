@@ -164,9 +164,9 @@ fn default_server_selection() -> String {
 #[serde(rename_all = "camelCase")]
 pub struct Settings {
     #[serde(default)]
-    pub core_engine: crate::core::CoreEngine,
+    pub core_engine: crate::engine::CoreEngine,
     #[serde(default)]
-    pub dns_policy: crate::core::dns::DnsPolicy,
+    pub dns_policy: crate::engine::dns::DnsPolicy,
     #[serde(default = "default_subscription_transport")]
     pub subscription_transport: String,
     pub network_mode: String,

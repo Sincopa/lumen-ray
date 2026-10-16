@@ -20,7 +20,7 @@ async fn steam_reachable() -> Result<()> {
 async fn routing_rule_count(core: &std::path::Path, api_port: u16) -> Result<usize> {
     let output = tokio::time::timeout(
         Duration::from_secs(5),
-        crate::core::xray::command(core)
+        crate::engine::xray::command(core)
             .args(["api", "lsrules", &format!("--server=127.0.0.1:{api_port}")])
             .output(),
     )
@@ -113,7 +113,7 @@ pub async fn run() -> Result<()> {
         let metrics_port = port()?;
         let mut helper = super::helper::start(
             super::helper::StartTunnel {
-                core_version: crate::xray::core::VERSION.into(),
+                core_version: crate::xray::bundle::VERSION.into(),
                 repository: repo.clone(),
                 selected: id.clone(),
                 proxy_port,
@@ -195,7 +195,7 @@ pub async fn run() -> Result<()> {
                 .timeout(Duration::from_secs(2))
                 .build()
                 .map_err(|_| error())?;
-            let (up, down) = crate::core::xray::counters(&client, metrics_port).await?;
+            let (up, down) = crate::engine::xray::counters(&client, metrics_port).await?;
             if up == 0 || down == 0 {
                 return Err(error());
             }
@@ -232,10 +232,10 @@ pub async fn warm_route_cycle() -> Result<()> {
     let data = tempfile::tempdir().map_err(|_| error())?;
     let runtime = crate::runtime::resolve()?;
     crate::xray::geo::ensure_initialized(&runtime, data.path())?;
-    let (proxy_port, metrics_port) = crate::core::xray::ports()?;
+    let (proxy_port, metrics_port) = crate::engine::xray::ports()?;
     let started = std::time::Instant::now();
     let request = super::helper::StartTunnel {
-        core_version: crate::xray::core::VERSION.into(),
+        core_version: crate::xray::bundle::VERSION.into(),
         repository,
         selected,
         proxy_port,
@@ -311,10 +311,10 @@ pub async fn warm_standby_isolation() -> Result<()> {
     global.routing_mode = "global".into();
     let data = tempfile::tempdir().map_err(|_| error())?;
     let runtime = crate::runtime::resolve()?;
-    let core = crate::xray::core::prepare(&runtime, data.path())?;
-    let (proxy_port, metrics_port) = crate::core::xray::ports()?;
+    let core = crate::xray::bundle::prepare(&runtime, data.path())?;
+    let (proxy_port, metrics_port) = crate::engine::xray::ports()?;
     let request = super::helper::StartTunnel {
-        core_version: crate::xray::core::VERSION.into(),
+        core_version: crate::xray::bundle::VERSION.into(),
         repository: before.clone(),
         selected: selected.clone(),
         proxy_port,
@@ -334,7 +334,7 @@ pub async fn warm_standby_isolation() -> Result<()> {
         let old_count = routing_rule_count(&core, metrics_port + 2).await?;
         let patch = crate::xray::config::live_routing_patch(&before, &after, &selected, true)?
             .ok_or_else(error)?;
-        crate::core::xray::run_live_routing_patch(&core, metrics_port + 2, &patch).await?;
+        crate::engine::xray::run_live_routing_patch(&core, metrics_port + 2, &patch).await?;
         let updated_count = routing_rule_count(&core, metrics_port + 2).await?;
         if updated_count + 1 != old_count {
             return Err(BackendError::new(
@@ -345,7 +345,7 @@ pub async fn warm_standby_isolation() -> Result<()> {
         eprintln!("STANDBY_CHECK rules to global");
         let mode_patch = crate::xray::config::live_routing_patch(&after, &global, &selected, true)?
             .ok_or_else(error)?;
-        crate::core::xray::run_live_routing_patch(&core, metrics_port + 2, &mode_patch).await?;
+        crate::engine::xray::run_live_routing_patch(&core, metrics_port + 2, &mode_patch).await?;
         let global_count = routing_rule_count(&core, metrics_port + 2).await?;
         if global_count >= old_count {
             return Err(error());
@@ -353,7 +353,7 @@ pub async fn warm_standby_isolation() -> Result<()> {
         eprintln!("STANDBY_CHECK global to rules");
         let back_patch = crate::xray::config::live_routing_patch(&global, &after, &selected, true)?
             .ok_or_else(error)?;
-        crate::core::xray::run_live_routing_patch(&core, metrics_port + 2, &back_patch).await?;
+        crate::engine::xray::run_live_routing_patch(&core, metrics_port + 2, &back_patch).await?;
         if routing_rule_count(&core, metrics_port + 2).await? + 1 != old_count {
             return Err(error());
         }
@@ -386,7 +386,7 @@ pub async fn warm_live() -> Result<()> {
         crate::storage::repository::RepositoryStore::new(&data.join("data"))?.load()?;
     let selected = repository.selected_server_id.clone().ok_or_else(error)?;
     repository.sources.clear();
-    let (proxy_port, metrics_port) = crate::core::xray::ports()?;
+    let (proxy_port, metrics_port) = crate::engine::xray::ports()?;
     let request = super::helper::StartTunnel {
         core_version: crate::xray::updater::current(&data.join("core")),
         repository,

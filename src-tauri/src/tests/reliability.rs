@@ -25,7 +25,7 @@ async fn native_local_proxy_smoke() {
     let runtime = crate::runtime::RuntimePaths::new(
         std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("runtime"),
     );
-    let core = core::prepare(&runtime, dir.path()).unwrap();
+    let core = bundle::prepare(&runtime, dir.path()).unwrap();
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let address = listener.local_addr().unwrap();
     let origin = tokio::spawn(async move {
@@ -40,14 +40,14 @@ async fn native_local_proxy_smoke() {
             .await
             .unwrap();
     });
-    let (proxy, metrics) = crate::core::xray::ports().unwrap();
+    let (proxy, metrics) = crate::engine::xray::ports().unwrap();
     let bytes = serde_json::to_vec(&serde_json::json!({
         "log":{"loglevel":"none"},
         "inbounds":[{"listen":"127.0.0.1","port":proxy,"protocol":"socks","settings":{"auth":"noauth"}}],
         "outbounds":[{"protocol":"freedom"}]
     })).unwrap();
-    let mut session = crate::core::xray::XraySession::default();
-    crate::core::xray::start(&core, &mut session, &bytes, proxy, metrics)
+    let mut session = crate::engine::xray::XraySession::default();
+    crate::engine::xray::start(&core, &mut session, &bytes, proxy, metrics)
         .await
         .unwrap();
     let result = crate::services::health::client(Some(proxy))
@@ -60,7 +60,7 @@ async fn native_local_proxy_smoke() {
         Ok(response) => response.text().await,
         Err(error) => Err(error),
     };
-    crate::core::xray::stop(&mut session).await.unwrap();
+    crate::engine::xray::stop(&mut session).await.unwrap();
     assert_eq!(body.unwrap(), "lumen-native");
     tokio::time::timeout(std::time::Duration::from_secs(5), origin)
         .await
@@ -79,7 +79,7 @@ async fn split_dns_is_accepted_by_bundled_core() {
     let runtime = crate::runtime::RuntimePaths::new(
         std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("runtime"),
     );
-    let core = core::prepare(&runtime, dir.path()).unwrap();
+    let core = bundle::prepare(&runtime, dir.path()).unwrap();
     let node = uri::parse(VLESS, "test").unwrap();
     let mut repo = Repository {
         nodes: vec![node.clone()],
@@ -95,7 +95,7 @@ async fn split_dns_is_accepted_by_bundled_core() {
                 repo.routing_mode = mode.into();
                 repo.settings.dns_policy.ipv6 = ipv6.into();
                 let config = config::build(&repo, &node.id, 10808, 10809, tun).unwrap();
-                crate::core::xray::validate(&core, &serde_json::to_vec(&config).unwrap())
+                crate::engine::xray::validate(&core, &serde_json::to_vec(&config).unwrap())
                     .await
                     .unwrap();
             }
