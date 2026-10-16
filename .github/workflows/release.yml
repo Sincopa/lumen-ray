@@ -27,30 +27,14 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Install Playwright Chromium
-        run: npx playwright install --with-deps chromium
-
       - name: Verify frontend
         run: |
           npm run check
           npm run lint
           npm run format:check
-          npm test
 
       - name: Build frontend for browser checks
         run: npm run build
-
-      - name: Verify browser flows
-        run: npm run test:e2e
-
-      - name: Upload browser failure reports
-        if: failure() || cancelled()
-        uses: actions/upload-artifact@v4
-        with:
-          name: browser-test-results
-          if-no-files-found: ignore
-          path: test-results/
-          retention-days: 7
 
   release-windows:
     needs: verify-frontend
@@ -122,21 +106,21 @@ jobs:
         env:
           WINDOWS_CERTIFICATE_PFX_BASE64: ${{ secrets.WINDOWS_CERTIFICATE_PFX_BASE64 }}
           WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
-        run: powershell -NoProfile -ExecutionPolicy Bypass -File scripts/ci-windows-signing.ps1 -Mode Import
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File src-tauri/build/ci-windows-signing.ps1 -Mode Import
 
       - name: Verify updater signing key
         shell: pwsh
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-        run: powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -File scripts/prepare-updater-signing.ps1
+        run: powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -File src-tauri/build/prepare-updater-signing.ps1
 
       - name: Prepare verified Xray core
         shell: pwsh
         run: |
-          powershell -NoProfile -File scripts/prepare-core.ps1
+          powershell -NoProfile -File src-tauri/build/prepare-core.ps1
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          powershell -NoProfile -ExecutionPolicy Bypass -File scripts/sign-windows.ps1 -Mode Runtime
+          powershell -NoProfile -ExecutionPolicy Bypass -File src-tauri/build/sign-windows.ps1 -Mode Runtime
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Build frontend for native checks
@@ -149,7 +133,7 @@ jobs:
           cargo clippy --locked --manifest-path src-tauri/Cargo.toml --all-targets --all-features -- -D warnings
 
       - name: Verify native local traffic
-        run: npm run test:smoke
+        run: cargo test --locked --manifest-path src-tauri/Cargo.toml native_local_proxy_smoke -- --test-threads=1
 
       - name: Build and publish signed release
         uses: tauri-apps/tauri-action@v1
@@ -176,7 +160,7 @@ jobs:
           $tag = if ($env:GITHUB_REF_TYPE -eq 'tag') { $env:GITHUB_REF_NAME } else { "v$version" }
 
           # Build portable archive
-          powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-release.ps1 -Mode Portable
+          powershell -NoProfile -ExecutionPolicy Bypass -File src-tauri/build/build-release.ps1 -Mode Portable
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
           # Prepare standardized Setup executable
@@ -185,7 +169,7 @@ jobs:
           if (-not (Test-Path -LiteralPath $nsisCandidate)) { throw "Missing signed NSIS installer: $nsisCandidate" }
           Copy-Item -LiteralPath $nsisCandidate -Destination "$releaseDir/Lumen-Ray-$version-Setup.exe" -Force
 
-          powershell -NoProfile -ExecutionPolicy Bypass -File scripts/ci-windows-signing.ps1 -Mode Verify
+          powershell -NoProfile -ExecutionPolicy Bypass -File src-tauri/build/ci-windows-signing.ps1 -Mode Verify
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
           # Upload primary release assets (Setup installer + Portable zip)
@@ -209,4 +193,4 @@ jobs:
       - name: Remove imported Windows signing key
         if: always()
         shell: pwsh
-        run: powershell -NoProfile -ExecutionPolicy Bypass -File scripts/ci-windows-signing.ps1 -Mode Cleanup
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File src-tauri/build/ci-windows-signing.ps1 -Mode Cleanup

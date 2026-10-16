@@ -356,14 +356,6 @@ fn find_in_path(file_name: &str, exe_name: &str) -> Option<PathBuf> {
 }
 
 fn find_in_common_dirs(file_name: &str, exe_name: &str) -> Option<PathBuf> {
-    if let Ok(userprofile) = std::env::var("USERPROFILE") {
-        let home = Path::new(&userprofile);
-        for sub in [r".gemini\bin", r".gemini\antigravity\bin"] {
-            if let Some(found) = check_dir_pair(&home.join(sub), file_name, exe_name) {
-                return Some(found);
-            }
-        }
-    }
     if let Ok(localappdata) = std::env::var("LOCALAPPDATA") {
         let programs = Path::new(&localappdata).join("Programs");
         if let Some(found) = check_dir_pair(&programs, file_name, exe_name) {

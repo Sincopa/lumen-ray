@@ -1,16 +1,20 @@
 :root {
 	/* App dimensions — set programmatically from src/lib/constants/app.ts */
 	--app-width: 390px;
-	--app-height: 844px;
+	--app-height: 700px;
 
 	/* Figma 182:2722 — shared geometry for the redesigned screens. */
 	--design-glass: rgba(0, 0, 0, 0.2);
+	/* Same glass pills over the dimmed (#0f0f0ff2) screens. */
+	--design-glass-dark: #ffffff05;
 	--design-panel: rgba(255, 255, 255, 0.02);
 	--design-panel-open: rgba(255, 255, 255, 0.05);
 	--design-header-height: 66px;
 	--design-row-height: 56px;
 	--nav-inset: clamp(16px, 8.205vw, 32px);
-	--nav-bottom: 32px;
+	--nav-inset-end: clamp(12px, 6.154vw, 24px);
+	--nav-bottom: 24px;
+	--nav-height: 58px;
 	--ease-out: cubic-bezier(0.23, 1, 0.32, 1);
 	--ease-in-out: cubic-bezier(0.77, 0, 0.175, 1);
 
@@ -236,6 +240,21 @@ form label {
 [role='alert'],
 .danger {
 	color: #ffbcbc;
+}
+/* Figma "Component 6" — round action buttons share the bottom-nav row. */
+.design-action-bar {
+	position: absolute;
+	left: calc(var(--nav-inset) - 16px);
+	right: calc(var(--nav-inset-end) - 16px);
+	bottom: var(--nav-bottom);
+	z-index: 20;
+	display: flex;
+	justify-content: space-between;
+	align-items: center;
+	gap: 12px;
+	height: var(--nav-height);
+	margin: 0;
+	padding: 0;
 }
 .sr-only {
 	position: absolute;

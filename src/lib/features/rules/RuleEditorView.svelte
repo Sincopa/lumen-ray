@@ -1,10 +1,13 @@
 <script lang="ts">
 	import type { Rule, RuleMatcher, Server } from '../../services/catalog';
 	import { t } from '../../i18n';
+	import { screen, reveal } from '../../motion';
 	import { serverDisplayName } from '../../utils/serverDisplayName';
 	import CountryFlag from '../../components/CountryFlag.svelte';
 	import MaterialIcon from '../../components/MaterialIcon.svelte';
 	import IconButton from '../../components/IconButton.svelte';
+	import DesignTextField from '../../components/DesignTextField.svelte';
+	import backIcon from '../../../assets/back.svg';
 	import chevronIcon from '../../../assets/chevron-down.svg';
 	import checkIcon from '../../../assets/check.svg';
 
@@ -17,6 +20,10 @@
 		onSelectProcess: () => void;
 		onSelectServer: () => void;
 		onMatcherChange: (matcher: RuleMatcher) => void;
+		/** New rules start by picking a type (Figma 202:7831); edits open the form. */
+		step?: 'type' | 'form';
+		onStepChange?: (step: 'type' | 'form') => void;
+		onNameChange?: (name: string) => void;
 	}
 
 	let {
@@ -28,7 +35,22 @@
 		onSelectProcess,
 		onSelectServer,
 		onMatcherChange,
+		step = 'form',
+		onStepChange,
+		onNameChange,
 	}: Props = $props();
+
+	const ruleTypes: { id: RuleMatcher; label: string; desc: string }[] = [
+		{ id: 'domain', label: 'rules.typeDomain', desc: 'rules.typeDomainDesc' },
+		{
+			id: 'application',
+			label: 'rules.typeApplication',
+			desc: 'rules.typeApplicationDesc',
+		},
+		{ id: 'geosite', label: 'GeoSite', desc: 'rules.typeGeositeDesc' },
+		{ id: 'geoip', label: 'GeoIP', desc: 'rules.typeGeoipDesc' },
+	];
+	let pickedType = $state<RuleMatcher | null>(null);
 
 	// svelte-ignore state_referenced_locally
 	let matcher = $state<RuleMatcher>(
@@ -47,9 +69,43 @@
 	let serverId = $derived(rule.serverId);
 	let error = $state('');
 
-	const matcherIndex = $derived(
-		['application', 'domain', 'geosite', 'geoip'].indexOf(matcher),
+	$effect(() => {
+		onNameChange?.(name);
+	});
+
+	let processes = $derived(
+		name
+			.split(',')
+			.map((p) => p.trim())
+			.filter(Boolean),
 	);
+	let canSave = $derived.by(() => {
+		if (matcher === 'final') return true;
+		if (matcher === 'domain') return cleanDomain(name).length > 0;
+		if (matcher === 'application') return processes.length > 0;
+		return name.trim().length > 0;
+	});
+
+	function continueWithType() {
+		if (!pickedType) return;
+		if (pickedType !== matcher) {
+			switchMatcher(pickedType);
+			name = '';
+		}
+		onStepChange?.('form');
+	}
+
+	function goBack() {
+		if (step === 'form' && onStepChange) {
+			pickedType = matcher;
+			onStepChange('type');
+		} else {
+			onCancel();
+		}
+	}
+
+	const capitalize = (value: string) =>
+		value.charAt(0).toUpperCase() + value.slice(1);
 
 	function cleanDomain(val: string): string {
 		// Preserve IP network prefixes; the native backend validates address and prefix length.
@@ -211,478 +267,492 @@
 	function handleKeydown(e: KeyboardEvent) {
 		if (e.key === 'Enter' && !e.shiftKey) {
 			e.preventDefault();
-			handleSave();
+			if (step === 'type') continueWithType();
+			else handleSave();
 		} else if (e.key === 'Escape') {
 			e.preventDefault();
-			onCancel();
+			goBack();
 		}
 	}
 </script>
 
 <svelte:window onkeydown={handleKeydown} />
 
+{#snippet serverField()}
+	<div class="field-group">
+		<span class="field-label">{t('rules.server')}</span>
+		<button
+			type="button"
+			class="selector-pill"
+			onclick={onSelectServer}
+			aria-label={t('rules.selectServer')}
+		>
+			<span class="server-info">
+				{#if serverId === 'direct'}
+					<span class="server-badge">
+						<MaterialIcon name="alt_route" size={20} />
+					</span>
+					<span class="selector-value">{t('rules.direct')}</span>
+				{:else if serverId === 'block'}
+					<span class="server-badge">
+						<MaterialIcon name="block" size={20} />
+					</span>
+					<span class="selector-value">{t('rules.block')}</span>
+				{:else if serverId === 'subscription' || (subscriptionName && serverId === subscriptionName)}
+					<span class="server-badge">
+						<MaterialIcon name="sync_alt" size={20} />
+					</span>
+					<span class="selector-value">
+						{subscriptionName ?? t('rules.subscriptionServer')}
+					</span>
+				{:else if server}
+					<CountryFlag countryCode={server.countryCode} size={32} />
+					<span class="selector-value">{serverDisplayName(server)}</span>
+				{:else}
+					<span class="selector-value placeholder-val">
+						{t('rules.selectServer')}
+					</span>
+				{/if}
+			</span>
+			<img src={chevronIcon} alt="" class="chevron-right" />
+		</button>
+	</div>
+{/snippet}
+
 <section class="rule-editor-view" aria-label={t('rules.editTitle')}>
-	<div class="form-container">
-		<!-- Section 1: Rule Type (Application / Domain / GeoSite / GeoIP) -->
-		<div class="field-group">
-			<span class="field-label">{t('rules.kind')}</span>
-			{#if matcher === 'final'}
-				<p class="field-hint">
-					{t('rules.everythingElse') || 'Всё остальное'}.
-					{t('rules.finalDetails') || 'Если правило выше не подошло'}
-				</p>
+	{#key step}
+		<div class="editor-step" in:screen={{ dir: step === 'form' ? 1 : -1 }}>
+			{#if step === 'type'}
+				<!-- Figma 202:7831 — choose what the rule matches. -->
+				<div class="type-list" role="radiogroup" aria-label={t('rules.kind')}>
+					{#each ruleTypes as type (type.id)}
+						{@const selected = pickedType === type.id}
+						<button
+							type="button"
+							role="radio"
+							class="type-row"
+							class:selected
+							aria-checked={selected}
+							onclick={() => (pickedType = type.id)}
+							ondblclick={() => {
+								pickedType = type.id;
+								continueWithType();
+							}}
+						>
+							<span class="type-head">
+								<span class="type-label">
+									{type.label.startsWith('rules.') ? t(type.label) : type.label}
+								</span>
+								<span class="type-radio" aria-hidden="true">
+									{#if selected}<span class="type-dot"></span>{/if}
+								</span>
+							</span>
+							{#if selected}
+								<span class="type-desc" transition:reveal>{t(type.desc)}</span>
+							{/if}
+						</button>
+					{/each}
+				</div>
+
+				<div class="design-action-bar">
+					<IconButton
+						design
+						icon={backIcon}
+						ariaLabel={t('common.back')}
+						size="lg"
+						variant="surface"
+						onclick={onCancel}
+					/>
+					<button
+						type="button"
+						class="continue-btn"
+						disabled={!pickedType}
+						onclick={continueWithType}
+					>
+						<span>{t('common.continue')}</span>
+						<svg
+							width="34"
+							height="34"
+							viewBox="0 0 34 34"
+							fill="none"
+							aria-hidden="true"
+						>
+							<path
+								d="m13.25 9.5 7.1 7.1a.6.6 0 0 1 0 .8l-7.1 7.1"
+								stroke="currentColor"
+								stroke-width="1.7"
+								stroke-linecap="round"
+							/>
+						</svg>
+					</button>
+				</div>
 			{:else}
-				<div
-					class="type-segmented-pill"
-					role="tablist"
-					aria-label={t('rules.kind')}
-				>
-					<div
-						class="slider-thumb"
-						style:width="calc((100% - 12px - 18px) / 4)"
-						style:transform="translateX(calc({matcherIndex} * (100% + 6px)))"
-					></div>
-					<button
-						type="button"
-						role="tab"
-						class="segment-btn"
-						class:active-segment={matcher === 'application'}
-						aria-selected={matcher === 'application'}
-						onclick={() => switchMatcher('application')}
-					>
-						{t('rules.applicationTab') || 'Программа'}
-					</button>
-					<button
-						type="button"
-						role="tab"
-						class="segment-btn"
-						class:active-segment={matcher === 'domain'}
-						aria-selected={matcher === 'domain'}
-						onclick={() => switchMatcher('domain')}
-					>
-						{t('rules.domainTab') || 'Домен'}
-					</button>
-					<button
-						type="button"
-						role="tab"
-						class="segment-btn"
-						class:active-segment={matcher === 'geosite'}
-						aria-selected={matcher === 'geosite'}
-						onclick={() => switchMatcher('geosite')}
-					>
-						GeoSite
-					</button>
-					<button
-						type="button"
-						role="tab"
-						class="segment-btn"
-						class:active-segment={matcher === 'geoip'}
-						aria-selected={matcher === 'geoip'}
-						onclick={() => switchMatcher('geoip')}
-					>
-						GeoIP
-					</button>
+				<div class="form-container">
+					{#if matcher === 'final'}
+						<p class="field-hint">
+							{t('rules.everythingElse')}. {t('rules.finalDetails')}
+						</p>
+						{@render serverField()}
+					{:else if matcher === 'domain'}
+						<DesignTextField
+							id="domain-input"
+							label={t('rules.domainLink')}
+							prefix="https://"
+							placeholder="example.com"
+							bind:value={name}
+							invalid={!!error}
+							oninput={() => (error = '')}
+							onpaste={handleDomainPaste}
+						/>
+						{@render serverField()}
+					{:else if matcher === 'application'}
+						<div class="field-group">
+							<span class="field-label">{t('rules.applicationField')}</span>
+							<button
+								type="button"
+								class="selector-pill"
+								onclick={onSelectProcess}
+								aria-label={t('rules.selectProcess')}
+							>
+								<span
+									class="selector-value small"
+									class:placeholder-val={!processes.length}
+								>
+									{#if processes.length > 1}
+										<strong>{processes.length}</strong>
+										<span class="muted">{t('rules.selectedCount')}</span>
+									{:else}
+										{processes[0] ?? t('rules.selectProcess')}
+									{/if}
+								</span>
+								<img src={chevronIcon} alt="" class="chevron-right" />
+							</button>
+						</div>
+						{@render serverField()}
+					{:else}
+						{@render serverField()}
+						<DesignTextField
+							id="geo-input"
+							label={t('rules.geoCategory', {
+								type: matcher === 'geosite' ? 'GeoSite' : 'GeoIP',
+							})}
+							prefix={matcher === 'geosite' ? 'geosite:' : 'geoip:'}
+							placeholder={matcher === 'geosite' ? 'category-ru' : 'ru'}
+							bind:value={name}
+							invalid={!!error}
+							oninput={() => (error = '')}
+							onpaste={handleGeoPaste}
+						/>
+						<div class="geo-examples">
+							<span class="example-label">{t('rules.examplesLabel')}</span>
+							<div class="example-chips">
+								{#each matcher === 'geosite' ? ['category-ru', 'antifilter', 'antifilter-community'] : ['ru', 'private', 'antifilter'] as ex (ex)}
+									<button
+										type="button"
+										class="example-tag"
+										class:active={name.trim().toLowerCase() === ex}
+										onclick={() => {
+											name = ex;
+											error = '';
+										}}
+									>
+										{capitalize(ex)}
+									</button>
+								{/each}
+							</div>
+						</div>
+					{/if}
+
+					{#if error}
+						<p class="error-msg" role="alert">{error}</p>
+					{/if}
+				</div>
+
+				<div class="design-action-bar">
+					<IconButton
+						design
+						icon={backIcon}
+						ariaLabel={t('common.back')}
+						size="lg"
+						variant="surface"
+						onclick={goBack}
+					/>
+					<IconButton
+						design
+						icon={checkIcon}
+						ariaLabel={t('common.save')}
+						size="lg"
+						variant="primary"
+						disabled={!canSave}
+						onclick={handleSave}
+					/>
 				</div>
 			{/if}
 		</div>
-
-		<!-- Section 2: Input Field based on Matcher -->
-		{#if matcher === 'final'}
-			<!-- The server picker below chooses where unmatched traffic goes. -->
-		{:else if matcher === 'domain'}
-			<div class="field-group">
-				<label class="field-label" for="domain-input">
-					{t('rules.domain')}
-				</label>
-				<div class="input-pill" class:active-pill={name.length > 0}>
-					<span class="domain-prefix">https://</span>
-					<input
-						id="domain-input"
-						class="text-input"
-						type="text"
-						bind:value={name}
-						onpaste={handleDomainPaste}
-						placeholder="example.com"
-						autocomplete="off"
-						spellcheck="false"
-						required
-					/>
-				</div>
-			</div>
-		{:else if matcher === 'application'}
-			<div class="field-group">
-				<span class="field-label">
-					{t('rules.applicationField') || 'Приложение'}
-				</span>
-				<button
-					type="button"
-					class="selector-pill"
-					onclick={() => {
-						onSelectProcess();
-					}}
-					aria-label={t('rules.selectProcess') || 'Выбрать процесс'}
-				>
-					<span class="selector-value" class:placeholder-val={!name}>
-						{name || t('rules.selectProcess') || 'Выбрать процесс'}
-					</span>
-					<img src={chevronIcon} alt="" class="chevron-right" />
-				</button>
-			</div>
-		{:else}
-			<div class="field-group">
-				<label class="field-label" for="geo-input">
-					{matcher === 'geosite' ? 'GeoSite' : 'GeoIP'} ({t('rules.category') ||
-						'Категория'})
-				</label>
-				<div class="input-pill" class:active-pill={name.length > 0}>
-					<span class="domain-prefix">
-						{matcher === 'geosite' ? 'geosite:' : 'geoip:'}
-					</span>
-					<input
-						id="geo-input"
-						class="text-input"
-						type="text"
-						bind:value={name}
-						onpaste={handleGeoPaste}
-						placeholder={matcher === 'geosite' ? 'category-ru' : 'ru'}
-						autocomplete="off"
-						spellcheck="false"
-						required
-					/>
-				</div>
-				<div class="geo-examples">
-					<span class="example-label">{t('rules.examples') || 'Примеры'}:</span>
-					<div class="example-chips">
-						{#each matcher === 'geosite' ? ['category-ru', 'antifilter', 'antifilter-community'] : ['ru', 'private', 'antifilter'] as ex (ex)}
-							<button
-								type="button"
-								class="example-tag"
-								onclick={() => {
-									name = ex;
-									error = '';
-								}}
-							>
-								{ex}
-							</button>
-						{/each}
-					</div>
-				</div>
-			</div>
-		{/if}
-
-		<!-- Section 3: Server Selection Field -->
-		<div class="field-group">
-			<span class="field-label">{t('rules.server') || 'Сервер'}</span>
-			<button
-				type="button"
-				class="selector-pill"
-				onclick={onSelectServer}
-				aria-label={t('rules.selectServer') || 'Выбрать сервер'}
-			>
-				<div class="server-info">
-					{#if serverId === 'direct'}
-						<MaterialIcon name="alt_route" size={20} />
-						<span class="selector-value">{t('rules.direct')}</span>
-					{:else if serverId === 'block'}
-						<MaterialIcon name="block" size={20} />
-						<span class="selector-value">
-							{t('rules.block') || 'Блокировать'}
-						</span>
-					{:else if serverId === 'subscription' || (subscriptionName && serverId === subscriptionName)}
-						<MaterialIcon name="sync_alt" size={20} />
-						<span class="selector-value">
-							{subscriptionName ?? t('rules.subscriptionServer')}
-						</span>
-					{:else if server}
-						<CountryFlag countryCode={server.countryCode} size={20} />
-						<span class="selector-value">
-							{serverDisplayName(server)}
-						</span>
-					{:else}
-						<span class="selector-value placeholder-val">
-							{t('rules.selectServer') || 'Выбрать сервер'}
-						</span>
-					{/if}
-				</div>
-				<img src={chevronIcon} alt="" class="chevron-right" />
-			</button>
-		</div>
-
-		{#if error}
-			<p class="error-msg" role="alert">{error}</p>
-		{/if}
-	</div>
-
-	<div class="action-bar">
-		<IconButton
-			icon={chevronIcon}
-			ariaLabel={t('common.close')}
-			size="lg"
-			variant="surface"
-			class="back-round"
-			onclick={onCancel}
-		/>
-		<IconButton
-			icon={checkIcon}
-			ariaLabel={t('common.save')}
-			size="lg"
-			variant="primary"
-			onclick={handleSave}
-		/>
-	</div>
+	{/key}
 </section>
 
 <style>
-	.rule-editor-view {
+	.editor-step {
 		display: flex;
 		flex-direction: column;
+		flex: 1;
+		width: 100%;
+		min-height: 0;
+	}
+	.rule-editor-view {
+		position: relative;
+		display: flex;
+		flex-direction: column;
+		flex: 1;
 		width: 100%;
 		height: 100%;
-		flex: 1;
 		min-height: 0;
-		justify-content: space-between;
-		box-sizing: border-box;
 		padding-top: 12px;
-		position: relative;
+		box-sizing: border-box;
 	}
 
+	/* Step 1 — rule type list (Figma 202:7831, "Component 27"). */
+	.type-list {
+		display: flex;
+		flex-direction: column;
+		gap: 6px;
+		width: 100%;
+		padding-bottom: 96px;
+		overflow-y: auto;
+	}
+	.type-row {
+		display: flex;
+		flex-direction: column;
+		flex-shrink: 0;
+		width: 100%;
+		min-height: 60px;
+		padding: 16px 16px 16px 24px;
+		border: 0;
+		border-radius: 24px;
+		background: var(--design-panel);
+		color: #fff;
+		text-align: left;
+		transition:
+			background-color 180ms ease,
+			transform 160ms var(--ease-spring);
+	}
+	.type-row.selected {
+		background: var(--design-panel-open);
+	}
+	.type-row:active {
+		transform: scale(0.99);
+	}
+	.type-head {
+		display: flex;
+		justify-content: space-between;
+		align-items: center;
+		width: 100%;
+		height: 28px;
+	}
+	.type-label {
+		font-family: 'Satoshi', var(--font-family-base);
+		font-size: 16px;
+		font-weight: 500;
+		line-height: 21.6px;
+		letter-spacing: -0.3px;
+	}
+	.type-radio {
+		display: grid;
+		place-items: center;
+		width: 28px;
+		height: 28px;
+		border-radius: 50%;
+		background: #ffffff0a;
+		-webkit-backdrop-filter: blur(25px);
+		backdrop-filter: blur(25px);
+	}
+	.type-dot {
+		width: 24px;
+		height: 24px;
+		border-radius: 50%;
+		background: #fff;
+		box-shadow: 0 2px 7.7px #00000040;
+	}
+	.type-desc {
+		padding: 10px 8px 8px 0;
+		color: #ffffff80;
+		font-size: 16px;
+		line-height: 20px;
+		letter-spacing: 0.2px;
+	}
+
+	.continue-btn {
+		display: flex;
+		justify-content: space-between;
+		align-items: center;
+		flex: 1;
+		max-width: 272px;
+		height: 50px;
+		padding: 8px 8px 8px 24px;
+		border: 0;
+		border-radius: 123px;
+		background: #fff;
+		color: #262626;
+		font-size: 16px;
+		font-weight: 500;
+		line-height: 20.8px;
+		-webkit-backdrop-filter: blur(25px);
+		backdrop-filter: blur(25px);
+		transition:
+			background-color 180ms ease,
+			color 180ms ease,
+			transform 160ms var(--ease-spring);
+	}
+	.continue-btn:disabled {
+		background: #262626;
+		color: #ffffff4d;
+		opacity: 1;
+	}
+	.continue-btn:active:not(:disabled) {
+		transform: scale(0.97);
+	}
+
+	/* Step 2 — form (Figma 202:8809, 202:8852, 202:9107). */
 	.form-container {
 		display: flex;
 		flex-direction: column;
-		gap: 20px;
+		gap: 24px;
 		width: 100%;
+		padding: 0 9px 96px;
+		overflow-y: auto;
+		box-sizing: border-box;
 	}
-
 	.field-group {
 		display: flex;
 		flex-direction: column;
-		gap: 10px;
+		gap: 12px;
 		width: 100%;
 	}
-
 	.field-label {
+		padding: 0 8px;
+		color: #fff;
 		font-size: 14px;
 		font-weight: 500;
-		color: #ffffff;
-		letter-spacing: -0.2px;
+		line-height: 18.2px;
+		letter-spacing: -0.3px;
 	}
-
 	.field-hint {
 		margin: 0;
+		padding: 0 8px;
+		color: #ffffffb8;
 		font-size: 13px;
 		line-height: 1.4;
-		color: rgba(255, 255, 255, 0.72);
 	}
 
-	/* Segmented switcher */
-	.type-segmented-pill {
-		position: relative;
-		width: 100%;
-		height: 52px;
-		border-radius: 24px;
-		background: rgba(0, 0, 0, 0.22);
-		border: none;
-		-webkit-backdrop-filter: blur(14px);
-		backdrop-filter: blur(14px);
-		padding: 6px;
-		box-sizing: border-box;
+	.selector-pill {
 		display: flex;
 		align-items: center;
 		gap: 6px;
-	}
-
-	.slider-thumb {
-		position: absolute;
-		top: 6px;
-		bottom: 6px;
-		left: 6px;
-		border-radius: 18px;
-		background: #ffffff;
-		box-shadow: 0 2px 10px rgba(0, 0, 0, 0.25);
-		transition: transform 0.28s cubic-bezier(0.22, 1, 0.36, 1);
-		z-index: 1;
-		pointer-events: none;
-	}
-
-	.segment-btn {
-		position: relative;
-		z-index: 2;
-		flex: 1;
-		height: 100%;
-		border-radius: 18px;
-		background: transparent !important;
-		border: none;
-		color: rgba(255, 255, 255, 0.7);
-		font-size: 13px;
-		font-weight: 500;
-		cursor: pointer;
-		transition:
-			color 200ms ease,
-			font-weight 200ms ease;
-		display: flex;
-		align-items: center;
-		justify-content: center;
-		padding: 0 4px;
-		white-space: nowrap;
-	}
-
-	.segment-btn:hover:not(.active-segment) {
-		color: #ffffff;
-	}
-
-	.segment-btn.active-segment {
-		color: #000000;
-		font-weight: 600;
-	}
-
-	/* Input and Selector Pills */
-	.input-pill,
-	.selector-pill {
 		width: 100%;
-		height: 56px;
+		height: 60px;
+		border: 0;
 		border-radius: 24px;
-		background: rgba(0, 0, 0, 0.2);
-		border: 1px solid transparent;
-		-webkit-backdrop-filter: blur(14px);
-		backdrop-filter: blur(14px);
+		background: var(--design-panel-open);
+		color: #fff;
+		-webkit-backdrop-filter: blur(25px);
+		backdrop-filter: blur(25px);
 		box-sizing: border-box;
-		padding: 0 20px;
-		display: flex;
-		align-items: center;
-		transition:
-			border-color 180ms ease,
-			box-shadow 180ms ease,
-			background-color 180ms ease;
-	}
-
-	.selector-pill {
-		cursor: pointer;
-		text-align: left;
+		transition: background-color 180ms ease;
 		justify-content: space-between;
-		font: inherit;
-		color: inherit;
+		padding: 0 18px 0 14px;
+		text-align: left;
 	}
-
 	.selector-pill:hover {
-		background: rgba(255, 255, 255, 0.08);
-	}
-
-	.input-pill:focus-within {
-		border-color: rgba(255, 255, 255, 0.35);
-		box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.12);
+		background: #ffffff14;
 	}
 
 	.server-info {
 		display: flex;
 		align-items: center;
-		gap: 10px;
+		gap: 6px;
+		min-width: 0;
 	}
-
-	.domain-prefix {
+	.server-badge {
+		display: grid;
+		place-items: center;
+		flex: 0 0 32px;
+		width: 32px;
+		height: 32px;
+		border-radius: 50%;
+		background: #ffffff1a;
+	}
+	.selector-value {
+		overflow: hidden;
+		color: #fff;
 		font-size: 14px;
-		color: rgba(255, 255, 255, 0.45);
-		user-select: none;
-		flex-shrink: 0;
+		line-height: 18.2px;
+		text-overflow: ellipsis;
+		white-space: nowrap;
 	}
-
-	.text-input {
-		width: 100%;
-		height: 100%;
-		background: transparent !important;
-		border: none !important;
-		outline: none !important;
-		box-shadow: none !important;
-		border-radius: 0 !important;
-		font-size: 14px;
-		font-family: inherit;
-		color: #ffffff;
-		padding: 0 !important;
-		-webkit-appearance: none;
-		appearance: none;
-		flex: 1;
+	.selector-value.small,
+	.selector-value.placeholder-val {
+		padding-left: 2px;
+		font-size: 12px;
+		line-height: 15.6px;
+		letter-spacing: -0.2px;
 	}
-
-	.text-input::placeholder {
-		color: rgba(255, 255, 255, 0.45);
+	.selector-value strong {
+		margin-right: 4px;
+		font-weight: 600;
+	}
+	.muted {
+		color: #ffffff80;
+	}
+	.chevron-right {
+		width: 24px;
+		height: 24px;
+		transform: rotate(-90deg);
+		filter: brightness(0) invert(1);
 	}
 
 	.geo-examples {
 		display: flex;
-		align-items: center;
-		gap: 8px;
-		flex-wrap: wrap;
-		padding: 0 4px;
+		flex-direction: column;
+		gap: 16px;
 	}
-
 	.example-label {
-		font-size: 12px;
-		color: rgba(255, 255, 255, 0.5);
+		padding: 0 8px;
+		color: #ffffff80;
+		font-size: 14px;
+		line-height: 18.2px;
+		letter-spacing: -0.3px;
 	}
-
 	.example-chips {
 		display: flex;
-		align-items: center;
-		gap: 6px;
 		flex-wrap: wrap;
+		gap: 10px;
 	}
-
 	.example-tag {
-		background: rgba(255, 255, 255, 0.08);
-		border: 1px solid rgba(255, 255, 255, 0.12);
-		border-radius: 12px;
-		padding: 2px 8px;
-		font-size: 11px;
-		color: rgba(255, 255, 255, 0.85);
-		cursor: pointer;
-		transition:
-			background 150ms ease,
-			color 150ms ease;
-	}
-
-	.example-tag:hover {
-		background: rgba(255, 255, 255, 0.18);
-		color: #ffffff;
-	}
-
-	.selector-value {
+		height: 42px;
+		padding: 0 18px;
+		border: 0;
+		border-radius: 123px;
+		background: #ffffff08;
+		color: #ffffff80;
 		font-size: 14px;
-		color: #ffffff;
+		line-height: 18.2px;
+		transition:
+			background-color 160ms ease,
+			color 160ms ease;
 	}
-
-	.selector-value.placeholder-val {
-		color: rgba(255, 255, 255, 0.45);
-	}
-
-	.chevron-right {
-		width: 18px;
-		height: 18px;
-		transform: rotate(-90deg);
-		filter: brightness(0) invert(1);
-		opacity: 0.6;
+	.example-tag:hover,
+	.example-tag.active {
+		background: #ffffff1a;
+		color: #fff;
 	}
 
 	.error-msg {
-		margin: 0;
-		padding: 8px 12px;
-		background: rgba(212, 42, 42, 0.2);
-		border: none;
-		border-radius: 16px;
-		color: #ff8e8e;
-		font-size: 13px;
-		text-align: center;
-	}
-
-	.action-bar {
-		display: flex;
-		width: 100%;
-		justify-content: space-between;
-		align-items: center;
-		flex-shrink: 0;
-		padding: 0 4px;
-		margin-bottom: 33px;
-	}
-
-	:global(.back-round .btn-icon) {
-		transform: rotate(90deg) !important;
+		margin: -12px 0 0;
+		padding: 0 8px;
+		color: #ff6c67;
+		font-size: 12px;
+		line-height: 15.6px;
+		letter-spacing: -0.2px;
 	}
 </style>

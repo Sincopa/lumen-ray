@@ -1,8 +1,9 @@
 <script lang="ts">
 	import { onDestroy } from 'svelte';
-	import { MediaQuery, SvelteSet } from 'svelte/reactivity';
+	import { SvelteSet } from 'svelte/reactivity';
 	import { createDeferredTask } from '../../utils/deferredTask';
-	import { slide } from 'svelte/transition';
+	import { flip } from 'svelte/animate';
+	import { reveal, rise, pop, swap, easeOut } from '../../motion';
 	import { catalog, connection } from '../../services';
 	import { errorCode } from '../../services/errors';
 	import {
@@ -11,7 +12,7 @@
 	} from '../../services/maintenance';
 	import { t, i18n } from '../../i18n';
 	import type { Subscription } from '../../services/catalog';
-	import Dialog from '../../components/Dialog.svelte';
+	import DesignOverlay from '../../components/DesignOverlay.svelte';
 	import ConfirmDialog from '../../components/ConfirmDialog.svelte';
 	import StatusDot from '../../components/StatusDot.svelte';
 	import IconButton from '../../components/IconButton.svelte';
@@ -24,6 +25,7 @@
 	import trashIcon from '../../../assets/trash.svg';
 	import shareIcon from '../../../assets/share-link.svg';
 	import chevronIcon from '../../../assets/chevron-up.svg';
+	import backIcon from '../../../assets/back.svg';
 	import checkIcon from '../../../assets/check.svg';
 	import crossIcon from '../../../assets/close.svg';
 	import { formatSubscriptionUpdatedAgo } from '../../utils/time';
@@ -41,7 +43,6 @@
 
 	// Local state
 	const expanded = new SvelteSet<string>();
-	const reducedMotion = new MediaQuery('(prefers-reduced-motion: reduce)');
 	let editingId = $state<string | null>(null);
 	let editName = $state('');
 	let editInputEl = $state<HTMLInputElement | null>(null);
@@ -231,14 +232,20 @@
 	bind:this={viewEl}
 	aria-label={t('subscriptions.title')}
 >
-	{#if error}<p role="alert">{error}</p>{/if}
+	{#if error}<p role="alert" transition:rise>{error}</p>{/if}
 	<div class="cards-list" onscroll={() => (menu = null)}>
 		{#each $catalogStore.subscriptions as sub (sub.id)}
-			<div class="sub-card-wrapper" class:has-open-menu={menu === sub.id}>
+			<div
+				class="sub-card-wrapper"
+				class:has-open-menu={menu === sub.id}
+				animate:flip={{ duration: 280, easing: easeOut }}
+				out:pop={{ start: 0.96, duration: 180 }}
+			>
 				<article class="sub-card" class:expanded={expanded.has(sub.id)}>
 					<div class="card-header" class:is-editing={editingId === sub.id}>
 						{#if editingId === sub.id}
 							<div
+								in:swap
 								class="card-rename-inline"
 								role="presentation"
 								onclick={(e) => e.stopPropagation()}
@@ -282,13 +289,16 @@
 							</div>
 						{:else}
 							<button
+								in:swap
 								class="title-group"
 								aria-expanded={expanded.has(sub.id)}
 								onclick={() => toggleSubscription(sub.id)}
 							>
 								<span class="sub-name">{sub.name}</span>
 								{#if activeSubId === sub.id}
-									<StatusDot variant="active" />
+									<span class="dot-pop" in:pop={{ start: 0.6 }}>
+										<StatusDot variant="active" />
+									</span>
 								{/if}
 							</button>
 							<div class="actions-group">
@@ -326,10 +336,7 @@
 						onclick={() => toggleSubscription(sub.id)}
 					>
 						{#if expanded.has(sub.id)}
-							<div
-								class="card-details"
-								transition:slide={{ duration: reducedMotion.current ? 0 : 220 }}
-							>
+							<div class="card-details" transition:reveal>
 								<div class="metrics-row">
 									<div class="metric-item">
 										<span class="metric-label">
@@ -403,24 +410,33 @@
 		onCancel={() => (deleting = null)}
 		onConfirm={remove}
 		busy={deleteBusy}
+		destructive
 	/>
 {/if}
 
 {#if sharing}
-	<Dialog
-		title={t('subscriptions.shareTitle', { name: sharing.name })}
-		onClose={() => (sharing = null)}
-		variant="immersive"
+	<DesignOverlay
+		labelledby="share-title"
+		describedby="share-hint"
+		onDismiss={() => (sharing = null)}
 	>
 		<div class="share-content">
-			<p class="share-hint">{t('subscriptions.shareHint')}</p>
+			<div class="share-copy">
+				<h2 id="share-title">
+					{t('subscriptions.shareTitle', { name: sharing.name })}
+				</h2>
+				<p id="share-hint" class="share-hint">
+					{t('subscriptions.shareHint')}
+				</p>
+			</div>
 			{#if sharedSource}
 				<div class="source-field">
-					<textarea
+					<input
 						readonly
 						value={sharedSource}
 						aria-label={t('subscriptions.source')}
-						rows="3"></textarea>
+						onfocus={(event) => event.currentTarget.select()}
+					/>
 					<button
 						class="copy-icon-button"
 						class:copied={copyState === 'copied'}
@@ -434,10 +450,35 @@
 							: t('common.copy')}
 					>
 						<span class="copy-icon">
-							<MaterialIcon
-								name={copyState === 'copied' ? 'check' : 'content_copy'}
-								size={20}
-							/>
+							{#if copyState === 'copied'}
+								<MaterialIcon name="check" size={20} />
+							{:else}
+								<svg
+									width="34"
+									height="34"
+									viewBox="0 0 34 34"
+									fill="none"
+									aria-hidden="true"
+								>
+									<rect
+										x="8.5"
+										y="11.9"
+										width="13.6"
+										height="13.6"
+										rx="1.36"
+										stroke="#fff"
+										stroke-width="0.68"
+									/>
+									<rect
+										x="11.9"
+										y="8.5"
+										width="13.6"
+										height="13.6"
+										rx="1.36"
+										fill="#fff"
+									/>
+								</svg>
+							{/if}
 						</span>
 					</button>
 				</div>
@@ -450,7 +491,17 @@
 				<p class="share-loading">{t('common.loading')}</p>
 			{/if}
 		</div>
-	</Dialog>
+		{#snippet footer()}
+			<IconButton
+				design
+				icon={backIcon}
+				ariaLabel={t('common.back')}
+				size="lg"
+				variant="surface"
+				onclick={() => (sharing = null)}
+			/>
+		{/snippet}
+	</DesignOverlay>
 {/if}
 
 <style>
@@ -478,6 +529,10 @@
 	}
 	.cards-list::-webkit-scrollbar {
 		display: none;
+	}
+	.dot-pop {
+		display: inline-flex;
+		flex-shrink: 0;
 	}
 	.sub-card-wrapper {
 		position: relative;
@@ -674,72 +729,79 @@
 		color: #ffb4aa;
 		text-align: right;
 	}
+	/* Figma 202:6372 */
 	.share-content {
 		display: flex;
 		flex-direction: column;
-		align-items: center;
-		gap: 24px;
+		gap: 48px;
+		text-align: center;
+	}
+	.share-copy {
+		display: flex;
+		flex-direction: column;
+		gap: 16px;
+	}
+	.share-copy h2 {
+		margin: 0;
+		font-size: 28px;
+		font-weight: 500;
+		line-height: 28px;
 	}
 	.share-hint,
 	.share-loading {
 		margin: 0;
-		color: rgba(255, 255, 255, 0.75);
+		color: #ffffff80;
 		font-size: 14px;
-		line-height: 1.4;
+		line-height: 18.2px;
+		letter-spacing: -0.3px;
 		text-align: center;
 	}
 	.source-field {
-		position: relative;
+		display: flex;
+		align-items: center;
+		gap: 24px;
 		width: 100%;
-		min-height: 96px;
-		border-radius: 24px;
-		background: rgba(255, 255, 255, 0.15);
-		overflow: hidden;
-		transition: background-color 180ms ease;
+		height: 64px;
+		padding: 7px 7px 7px 32px;
+		border-radius: 123px;
+		background: #ffffff0d;
+		box-sizing: border-box;
 	}
-	.source-field textarea {
-		width: 100%;
-		height: 96px;
-		min-height: 96px;
-		resize: none;
+	.source-field input {
+		flex: 1;
+		min-width: 0;
+		padding: 0;
 		border: 0;
-		border-radius: 24px;
 		background: transparent;
-		padding: 18px 68px 18px 18px;
-		color: rgba(255, 255, 255, 0.9);
-		font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
-		font-size: 11px;
-		line-height: 1.45;
-		word-break: break-all;
+		color: #fff;
+		font-size: 18px;
+		line-height: 18px;
+		letter-spacing: -0.4px;
+		text-overflow: ellipsis;
 		outline: none;
 	}
 	.copy-icon-button {
-		position: absolute;
-		right: 12px;
-		top: 50%;
-		width: 44px;
-		height: 44px;
-		min-height: 44px;
 		display: grid;
 		place-items: center;
-		transform: translateY(-50%);
+		flex: 0 0 50px;
+		width: 50px;
+		height: 50px;
+		min-height: 0;
+		padding: 0;
 		border: 0;
 		border-radius: 50%;
-		background: #fff;
-		color: rgba(0, 0, 0, 0.82);
-		padding: 0;
-		box-shadow: 0 8px 24px rgba(0, 0, 0, 0.22);
+		background: #ffffff0d;
+		color: #fff;
 		transition:
 			transform 180ms var(--ease-spring),
 			background-color 220ms ease,
 			color 220ms ease;
 	}
 	.copy-icon-button:hover {
-		background: #f0f0f0;
-		transform: translateY(-50%) scale(1.06);
+		background: #ffffff1a;
 	}
 	.copy-icon-button:active {
-		transform: translateY(-50%) scale(0.92);
+		transform: scale(0.92);
 	}
 	.copy-icon-button.copied {
 		background: var(--color-success);

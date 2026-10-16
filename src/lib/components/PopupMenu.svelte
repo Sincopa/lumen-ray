@@ -1,5 +1,6 @@
 <script lang="ts">
 	import type { Snippet } from 'svelte';
+	import { pop } from '../motion';
 
 	interface Props {
 		top?: string;
@@ -10,7 +11,13 @@
 	let { top = '68px', right = '8px', children }: Props = $props();
 </script>
 
-<div class="popup-menu" style="top: {top}; right: {right};">
+<!-- Grows from its trigger (top right) and leaves faster than it arrives. -->
+<div
+	class="popup-menu"
+	style="top: {top}; right: {right};"
+	in:pop={{ start: 0.94, duration: 200 }}
+	out:pop={{ start: 0.97, duration: 120 }}
+>
 	{@render children?.()}
 </div>
 
@@ -18,31 +25,19 @@
 	.popup-menu {
 		position: absolute;
 		width: 197px;
-		background: rgba(0, 0, 0, 0.2);
-		/* border: 1px solid rgba(255, 255, 255, 0.08); */
+		/* Figma 202:5680 */
+		background: #ffffff0a;
 		outline: none;
 		border-radius: 24px;
-		padding: 10px;
-		-webkit-backdrop-filter: blur(25px);
-		backdrop-filter: blur(25px);
+		padding: 10px 12px;
+		-webkit-backdrop-filter: blur(55px);
+		backdrop-filter: blur(55px);
 		/* box-shadow: 0 16px 40px rgba(0, 0, 0, 0.5); */
 		display: flex;
 		flex-direction: column;
-		gap: 4px;
+		gap: 6px;
 		z-index: 100;
 		transform-origin: top right;
-		animation: menu-in 180ms var(--ease-spring);
 		box-sizing: border-box;
-	}
-
-	@keyframes menu-in {
-		from {
-			opacity: 0;
-			transform: translateY(-4px) scale(0.96);
-		}
-		to {
-			opacity: 1;
-			transform: none;
-		}
 	}
 </style>

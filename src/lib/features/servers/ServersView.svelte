@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { onDestroy } from 'svelte';
 	import { fade } from 'svelte/transition';
+	import { pop, rise } from '../../motion';
 	import { createDeferredTask } from '../../utils/deferredTask';
 	import CountryFlag from '../../components/CountryFlag.svelte';
 	import IconButton from '../../components/IconButton.svelte';
@@ -226,7 +227,7 @@
 />
 
 <section class="servers-view" class:compact aria-label={t('servers.title')}>
-	<div class="header-wrapper">
+	<div class="header-wrapper" class:open={searching || editingSub}>
 		<div class="header-pill">
 			<!-- Standard header content -->
 			<div class="header-normal" class:header-hidden={searching || editingSub}>
@@ -352,7 +353,7 @@
 		{/if}
 	</div>
 
-	{#if error}<p role="alert">{error}</p>{/if}
+	{#if error}<p role="alert" transition:rise>{error}</p>{/if}
 
 	<div class="servers-list">
 		{#if compact}
@@ -377,7 +378,9 @@
 				</span>
 				<span class="ping">
 					{#if (selectedId === 'subscription' || (activeSubscription && selectedId === activeSubscription.id)) && !busy}
-						<StatusDot size={8} />
+						<span class="dot-pop" in:pop={{ start: 0.5 }}>
+							<StatusDot size={8} />
+						</span>
 					{/if}
 				</span>
 			</button>
@@ -399,7 +402,9 @@
 				</span>
 				<span class="ping">
 					{#if selectedId === 'direct' && !busy}
-						<StatusDot size={8} />
+						<span class="dot-pop" in:pop={{ start: 0.5 }}>
+							<StatusDot size={8} />
+						</span>
 					{/if}
 				</span>
 			</button>
@@ -421,7 +426,9 @@
 				</span>
 				<span class="ping">
 					{#if selectedId === 'block' && !busy}
-						<StatusDot size={8} />
+						<span class="dot-pop" in:pop={{ start: 0.5 }}>
+							<StatusDot size={8} />
+						</span>
 					{/if}
 				</span>
 			</button>
@@ -444,7 +451,9 @@
 				</span>
 				<span class="ping">
 					{#if server.id === selectedId && !$pingingServers.has(server.id)}
-						<StatusDot size={8} />
+						<span class="dot-pop" in:pop={{ start: 0.5 }}>
+							<StatusDot size={8} />
+						</span>
 					{/if}
 					{#key $pingingServers.has(server.id)}
 						<span class="ping-reading" transition:fade={{ duration: 140 }}>
@@ -468,6 +477,14 @@
 </section>
 
 <style>
+	.dot-pop {
+		display: inline-flex;
+		flex-shrink: 0;
+	}
+	/* Figma 202:8173 — the compact picker is a bare list; search reuses the header. */
+	.compact .header-wrapper:not(.open) {
+		display: none;
+	}
 	.servers-view {
 		display: flex;
 		flex-direction: column;

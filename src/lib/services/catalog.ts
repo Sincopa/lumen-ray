@@ -201,7 +201,7 @@ export function initialCatalog(): Catalog {
 		subscriptions: [
 			{
 				id: 'demo',
-				name: 'BlessedVPN',
+				name: 'Demo subscription',
 				updatedAt: 0,
 			},
 		],

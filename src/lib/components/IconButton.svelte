@@ -197,7 +197,7 @@
 		opacity: 1;
 	}
 	.design.variant-surface {
-		background: var(--design-glass);
+		background: var(--design-glass-dark);
 		box-shadow: none;
 		backdrop-filter: blur(25px);
 	}
@@ -206,5 +206,14 @@
 	}
 	.design.variant-primary .btn-icon {
 		filter: brightness(0);
+	}
+	/* Figma 202:8960 — an unavailable confirm keeps its shape, dimmed. */
+	.design.variant-primary:disabled {
+		background: #262626;
+		opacity: 1;
+	}
+	.design.variant-primary:disabled .btn-icon {
+		filter: brightness(0) invert(1);
+		opacity: 0.5;
 	}
 </style>

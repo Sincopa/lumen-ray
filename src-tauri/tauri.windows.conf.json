@@ -1,6 +1,6 @@
 {
   "build": {
-    "beforeBuildCommand": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/prepare-windows-build.ps1"
+    "beforeBuildCommand": "powershell -NoProfile -ExecutionPolicy Bypass -File src-tauri/build/prepare-windows-build.ps1"
   },
   "bundle": {
     "windows": {
@@ -12,7 +12,7 @@
           "-ExecutionPolicy",
           "Bypass",
           "-File",
-          "../scripts/sign-windows.ps1",
+          "build/sign-windows.ps1",
           "-Mode",
           "Sign",
           "-Path",

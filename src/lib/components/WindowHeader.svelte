@@ -2,12 +2,10 @@
 	import { getCurrentWindow } from '@tauri-apps/api/window';
 	import { runtime } from '../runtime';
 	import { t } from '../i18n';
-	import PopupMenu from './PopupMenu.svelte';
 	import minimizeIcon from '../../assets/minimize.svg';
 	import maximizeIcon from '../../assets/maximize.svg';
 	import crossIcon from '../../assets/close.svg';
 	import settingsIcon from '../../assets/settings.svg';
-	import bellIcon from '../../assets/bell-ring.svg';
 
 	interface Props {
 		title?: string;
@@ -16,8 +14,6 @@
 		showQuickActions?: boolean;
 		isSettingsOpen?: boolean;
 		onOpenSettings?: () => void;
-		updateVersion?: string | null;
-		onOpenUpdate?: () => void;
 	}
 
 	let {
@@ -27,12 +23,9 @@
 		showQuickActions = true,
 		isSettingsOpen = false,
 		onOpenSettings,
-		updateVersion = null,
-		onOpenUpdate,
 	}: Props = $props();
 
 	let failure = $state(false);
-	let notificationOpen = $state(false);
 
 	async function control(action: 'minimize' | 'toggleMaximize' | 'close') {
 		if (!runtime.isTauri) return;
@@ -44,16 +37,6 @@
 	}
 </script>
 
-<svelte:window
-	onclick={(event) => {
-		const target = event.target as HTMLElement | null;
-		if (!target?.closest('.update-btn, .popup-menu')) notificationOpen = false;
-	}}
-	onkeydown={(event) => {
-		if (event.key === 'Escape') notificationOpen = false;
-	}}
-/>
-
 <header
 	class="window-header"
 	class:dark-surface={darkSurface}
@@ -62,24 +45,6 @@
 	<div class="logo">{title}</div>
 
 	<div class="header-right">
-		{#if showQuickActions && (!isSettingsOpen || updateVersion)}
-			<button
-				class="header-circle-btn update-btn"
-				onclick={() => {
-					if (updateVersion && onOpenUpdate) onOpenUpdate();
-					else notificationOpen = !notificationOpen;
-				}}
-				aria-label={t('settings.notifications')}
-				aria-expanded={notificationOpen}
-			>
-				<img src={bellIcon} alt="" width="32" height="32" />
-				{#if updateVersion}<span
-						class="update-dot"
-						aria-hidden="true"
-					></span>{/if}
-			</button>
-		{/if}
-
 		{#if onOpenSettings && showQuickActions}
 			<button
 				class="header-circle-btn settings-btn"
@@ -125,11 +90,6 @@
 			</div>
 		{/if}
 	</div>
-	{#if notificationOpen}
-		<PopupMenu top="48px" right="clamp(0px, calc(100% - 197px), 124px)">
-			<p class="notification-empty">{t('settings.noNotifications')}</p>
-		</PopupMenu>
-	{/if}
 </header>
 
 {#if failure}
@@ -186,24 +146,9 @@
 	.settings-btn.active {
 		background: #ffffff20;
 	}
-	.update-btn {
-		position: relative;
-		background: #fff;
-	}
-	.update-dot {
-		position: absolute;
-		top: 2px;
-		right: 2px;
-		width: 6px;
-		height: 6px;
-		border-radius: 50%;
-		background: var(--color-accent);
-	}
-	.notification-empty {
-		padding: 8px;
-		margin: 0;
-		color: #ffffff80;
-		font-size: 13px;
+	.dark-surface .controls-pill,
+	.dark-surface .header-circle-btn {
+		background: var(--design-glass-dark);
 	}
 	.controls-pill {
 		display: flex;

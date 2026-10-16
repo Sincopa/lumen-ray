@@ -174,7 +174,7 @@ rules:
     );
     assert_eq!(parsed.rules[4].server_id, parsed.nodes[0].id);
 
-    let profile = r#"{"Name":"RoscomVPN","GlobalProxy":"true","DirectSites":["geosite:category-ru"],"DirectIp":["geoip:ru"],"BlockSites":["geosite:category-ads-all"],"ProxySites":["gemini.google.com"]}"#;
+    let profile = r#"{"Name":"Example VPN","GlobalProxy":"true","DirectSites":["geosite:category-ru"],"DirectIp":["geoip:ru"],"BlockSites":["geosite:category-ads-all"],"ProxySites":["example.org"]}"#;
     let link = format!(
         "incy://routing/onadd/{}",
         base64::engine::general_purpose::STANDARD.encode(profile)
@@ -191,10 +191,7 @@ rules:
         .rules
         .iter()
         .any(|rule| rule.name == "category-ads-all" && rule.server_id == "block"));
-    assert!(parsed
-        .rules
-        .iter()
-        .any(|rule| rule.name == "gemini.google.com"));
+    assert!(parsed.rules.iter().any(|rule| rule.name == "example.org"));
     assert_eq!(
         parsed.rules.last().unwrap().matcher,
         crate::storage::repository::RuleMatcher::Final
