@@ -201,7 +201,7 @@
 </section>
 
 <style>
-	/* Figma 202:8344 — preset radio list with a back / continue bar. */
+	/* Preset radio list with a back and continue bar. */
 	.presets-view {
 		position: relative;
 		display: flex;

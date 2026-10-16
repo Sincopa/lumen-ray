@@ -1,10 +1,8 @@
 <script lang="ts">
 	/**
-	 * Rolling digits without NumberFlow. NumberFlow builds accumulate-composited
-	 * animations on registered CSS properties for every change, and WebView2 never
-	 * frees their native memory: the connection clock alone leaked several MB per
-	 * second. Here each digit is a 0–9 strip moved by a plain transform transition,
-	 * which runs on the compositor and allocates nothing per tick.
+	 * Digit strips, not NumberFlow. NumberFlow kept composited CSS animations
+	 * that WebView2 never freed, and the connection clock leaked several MB a second.
+	 * Each digit is a 0-9 strip moved with a transform. Nothing is allocated per tick.
 	 */
 	let { value, minDigits = 1 }: { value: number; minDigits?: number } =
 		$props();

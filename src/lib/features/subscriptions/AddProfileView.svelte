@@ -70,7 +70,6 @@
 <svelte:window onkeydown={handleKeydown} />
 
 <section class="add-profile-view" aria-label={t('subscriptions.addProfile')}>
-	<!-- Figma 202:8261 / 202:8303 / 202:8387 -->
 	<div class="form-container">
 		<DesignTextField
 			id="profile-name"
@@ -136,7 +135,7 @@
 		overflow-y: auto;
 		box-sizing: border-box;
 	}
-	/* Figma 202:8387 — provider errors read as red text under the field. */
+	/* Provider errors are red text under the field. */
 	.error-msg {
 		margin: -6px 0 0;
 		padding: 0 8px;

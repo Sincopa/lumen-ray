@@ -413,8 +413,8 @@ async fn connect_session_with_repository(
         "engine={engine:?} local startup completed {} ms",
         session_at.elapsed().as_millis()
     );
-    // Traffic already uses the new path. Show it now, like other clients do, and
-    // verify end to end below: a failure still restores or tears down the session.
+    // The new path is already carrying traffic. Show connected, then verify.
+    // A failed check still restores the previous session or tears this one down.
     let connected_at = super::catalog_service::now();
     let connected = |ip: String| Snapshot {
         status: "connected".into(),

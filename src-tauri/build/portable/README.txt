@@ -1,4 +1,4 @@
-Lumen Portable — Windows 10/11 x64
+Lumen Portable, Windows 10/11 x64
 
 Распакуйте ВЕСЬ архив в отдельную папку. Не запускайте EXE прямо из ZIP.
 Lumen.exe и папка runtime должны оставаться рядом.

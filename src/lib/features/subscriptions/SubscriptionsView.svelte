@@ -729,7 +729,6 @@
 		color: #ffb4aa;
 		text-align: right;
 	}
-	/* Figma 202:6372 */
 	.share-content {
 		display: flex;
 		flex-direction: column;

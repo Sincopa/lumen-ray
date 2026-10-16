@@ -6,7 +6,7 @@
 	interface Props {
 		labelledby: string;
 		describedby?: string;
-		/** Figma 202:7009 draws a faint inner panel behind the content. */
+		/** Draw a faint inner panel behind the content. */
 		panel?: boolean;
 		dismissible?: boolean;
 		onDismiss: () => void;
@@ -34,7 +34,7 @@
 
 <svelte:window onkeydown={handleKeydown} />
 
-<!-- Figma 202:7009 / 202:6372 — full-window dim with the header left on top. -->
+<!-- Full-window dim. The header stays above it. -->
 <div
 	class="design-overlay"
 	role="presentation"
@@ -82,7 +82,7 @@
 		border-radius: var(--radius-window) var(--radius-window)
 			var(--radius-window-bottom) var(--radius-window-bottom);
 		background: #000000bf;
-		/* Figma's background blur radius is twice the CSS blur value. */
+		/* The source blur radius is twice the CSS blur value. */
 		-webkit-backdrop-filter: blur(12.5px);
 		backdrop-filter: blur(12.5px);
 		transform: translate(-50%, -50%);

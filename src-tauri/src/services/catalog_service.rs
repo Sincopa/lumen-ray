@@ -133,9 +133,7 @@ fn clean_name(name: &str) -> String {
     String::new()
 }
 fn country(name: &str) -> String {
-    // Look for the LAST pair of Regional Indicator Symbols (country flag emoji).
-    // Some names start with 🏳️ (white flag) before the real country flag,
-    // or contain multiple flags — prefer the last actual country flag found.
+    // Last regional-indicator pair. A white flag or a second flag can sit in front.
     let mut last_pair: Option<(char, char)> = None;
     let mut prev: Option<char> = None;
     for c in name.chars() {

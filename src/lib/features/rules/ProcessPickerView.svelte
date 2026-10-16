@@ -312,7 +312,7 @@
 		position: relative;
 	}
 
-	/* Figma 202:8003 — "Select all" sits in the header slot. */
+	/* "Select all" sits in the header slot. */
 	.top-row {
 		display: flex;
 		justify-content: flex-end;
@@ -454,7 +454,7 @@
 		padding-left: 8px;
 	}
 
-	/* Figma "Component 26" — glass well with a white knob when selected. */
+	/* Glass well with a white knob when selected. */
 	.round-indicator {
 		display: grid;
 		place-items: center;

@@ -521,7 +521,7 @@
 				aria-label={t('rules.title')}
 			>
 				{#if selectMode}
-					<!-- Figma 202:7708 — selection replaces the header with "Select all". -->
+					<!-- Selection replaces the header with "Select all". -->
 					<div class="select-all-row" transition:rise={{ y: -8 }}>
 						<button
 							type="button"
@@ -1133,7 +1133,7 @@
 		align-items: center;
 		justify-content: center;
 	}
-	/* Figma 202:7414 — generic rules use a light disc with a grey glyph. */
+	/* Generic rules use a light disc with a grey glyph. */
 	.domain-icon {
 		background: #efefef;
 		border-radius: 50%;
@@ -1246,7 +1246,7 @@
 		font-weight: 500;
 		line-height: 16.2px;
 	}
-	/* Figma 202:7708 — red delete sits where the nav pill was. */
+	/* Red delete sits where the nav pill was. */
 	.delete-selected {
 		display: grid;
 		place-items: center;

@@ -209,6 +209,17 @@ if ($Mode -eq 'Runtime') {
     $manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
     $originalHash = (Get-FileHash -LiteralPath $binaryPath -Algorithm SHA256).Hash.ToLowerInvariant()
     if ($originalHash -ne $manifest.files.'xray.exe') { throw 'Xray does not match the current runtime manifest. Run prepare-core.ps1 to restore the verified runtime.' }
+    $runtimeSignature = Get-AuthenticodeSignature -LiteralPath $binaryPath
+    if ($runtimeSignature.SignerCertificate -and $runtimeSignature.SignerCertificate.Thumbprint -ne $signingCertificate.Thumbprint) {
+        Write-Host 'Preparing pinned upstream Xray for this signing identity.'
+        Backup-Artifact $binaryPath
+        Backup-Artifact $manifestPath
+        & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'prepare-core.ps1')
+        if ($LASTEXITCODE -ne 0) { throw 'Could not prepare verified upstream Xray for local signing.' }
+        $manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
+        $originalHash = (Get-FileHash -LiteralPath $binaryPath -Algorithm SHA256).Hash.ToLowerInvariant()
+        if ($originalHash -ne $manifest.files.'xray.exe') { throw 'Prepared Xray does not match its runtime manifest.' }
+    }
     Invoke-FileSigning $binaryPath
     $signedHash = (Get-FileHash -LiteralPath $binaryPath -Algorithm SHA256).Hash.ToLowerInvariant()
     if ($signedHash -ne $manifest.files.'xray.exe') {

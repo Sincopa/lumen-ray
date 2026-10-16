@@ -4,8 +4,8 @@ import { shaderSettings } from '../stores/shaderSettings.svelte';
  * Svelte action that renders a custom tooltip above the element on hover/focus.
  * Usage: <button use:tooltip={label}>
  *
- * Respects shaderSettings.tooltipsEnabled — when false, nothing is shown.
- * Tail is a pure CSS border-triangle so body+tail fade as one seamless unit.
+ * Hidden when shaderSettings.tooltipsEnabled is false.
+ * The tail is a CSS border triangle, so it fades with the body.
  */
 export function tooltip(node: HTMLElement, text: string) {
 	let tip: HTMLDivElement | null = null;

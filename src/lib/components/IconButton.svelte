@@ -34,7 +34,7 @@
 		children,
 	}: Props = $props();
 
-	// The label shown in the tooltip — prefer explicit title, fall back to ariaLabel
+	// Tooltip text. `title` wins, then `ariaLabel`.
 	let tipLabel = $derived(title ?? ariaLabel ?? '');
 </script>
 
@@ -207,7 +207,7 @@
 	.design.variant-primary .btn-icon {
 		filter: brightness(0);
 	}
-	/* Figma 202:8960 — an unavailable confirm keeps its shape, dimmed. */
+	/* An unavailable confirm keeps its shape, dimmed. */
 	.design.variant-primary:disabled {
 		background: #262626;
 		opacity: 1;

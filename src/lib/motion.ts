@@ -49,7 +49,7 @@ export function rise(
 	};
 }
 
-/** Scale-in for menus, badges and checkmarks — never from scale(0). */
+/** Scale-in for menus, badges and checkmarks. Does not start at scale(0). */
 export function pop(
 	_node: Element,
 	{ start = 0.94, duration = 180, delay = 0 } = {},

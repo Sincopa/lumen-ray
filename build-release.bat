@@ -25,18 +25,12 @@ if errorlevel 1 (
 
 if not exist "node_modules\" (
     echo [INFO] Installing npm dependencies...
-    call npm install
+    call npm ci
     if errorlevel 1 goto :error
 )
 
-taskkill /F /IM app.exe >nul 2>&1
-taskkill /F /IM lumen.exe >nul 2>&1
-taskkill /F /IM misc-vpn.exe >nul 2>&1
-
 echo [1/2] Building release application...
 powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0src-tauri\build\build-release.ps1" -Mode Portable
-if errorlevel 1 goto :error
-powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0src-tauri\build\sign-windows.ps1" -Mode Sign -Path "%~dp0src-tauri\target\release\app.exe"
 if errorlevel 1 goto :error
 
 echo.
@@ -60,10 +54,12 @@ echo Output file:
 echo    %~dp0release\lumen.exe
 echo.
 
-start "" explorer.exe "%~dp0release"
+if not defined LUMEN_BUILD_NONINTERACTIVE start "" explorer.exe "%~dp0release"
 
-echo Press any key to exit...
-pause >nul
+if not defined LUMEN_BUILD_NONINTERACTIVE (
+    echo Press any key to exit...
+    pause >nul
+)
 exit /b 0
 
 :error
@@ -72,5 +68,5 @@ echo ============================================================
 echo    [FAILED] Build failed. Check errors above.
 echo ============================================================
 echo.
-pause
+if not defined LUMEN_BUILD_NONINTERACTIVE pause
 exit /b 1

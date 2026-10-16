@@ -18,7 +18,7 @@ pub struct FetchedSubscription {
     pub body: String,
     pub user_info: Option<SubscriptionUserInfo>,
     pub suggested_name: Option<String>,
-    /// Incy `routing` response header, when the provider sent one.
+    /// Incy `routing` header, when the response included one.
     pub routing: Option<String>,
 }
 
@@ -319,7 +319,7 @@ impl SubscriptionClient {
 
         let is_http = url_candidate.starts_with("https://") || url_candidate.starts_with("http://");
 
-        // Never send HTTP requests or HWID headers to inline/pasted subscriptions
+        // Pasted keys are not fetched, and they do not get device headers.
         if !is_http {
             return Ok(FetchedSubscription {
                 body: source.to_owned(),
@@ -367,7 +367,7 @@ impl SubscriptionClient {
                 .map_err(|_| BackendError::invalid())?;
             request_builder = request_builder.header(reqwest::header::USER_AGENT, ua_val);
 
-            // Forward HWID and device headers ONLY to the original target origin
+            // Device headers stay on the subscription host. Another origin does not get them.
             if is_same_origin {
                 let hwid_val = reqwest::header::HeaderValue::from_str(&identity.hwid)
                     .map_err(|_| BackendError::invalid())?;
@@ -407,7 +407,7 @@ impl SubscriptionClient {
 
                 let next_url = current_url.join(location).map_err(|_| error())?;
 
-                // Enforce HTTPS security: disallow downgrade to HTTP
+                // Do not follow an HTTPS URL onto plain HTTP.
                 if current_url.scheme() == "https" && next_url.scheme() != "https" {
                     return Err(BackendError::new(
                         "SUBSCRIPTION_FETCH_FAILED",
@@ -424,7 +424,7 @@ impl SubscriptionClient {
             break;
         }
 
-        // Case-insensitively inspect response headers for Remnawave error flags before checking HTTP status or body
+        // Device-limit headers are checked before the HTTP status.
         let headers = response.headers();
         if has_header_flag(headers, "x-hwid-not-supported") {
             return Err(BackendError::new(
@@ -442,7 +442,7 @@ impl SubscriptionClient {
             ));
         }
 
-        // If no Remnawave HWID error headers were received, verify standard HTTP status
+        // Other client errors, except 429.
         if response.status().is_client_error() && response.status().as_u16() != 429 {
             return Err(BackendError::new(
                 "SUBSCRIPTION_ACCESS_DENIED",

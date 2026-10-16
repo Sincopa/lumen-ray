@@ -38,6 +38,7 @@ $wintunDll = Join-Path $runtimeRoot 'drivers/wintun.dll'
 if (-not (Test-Path -LiteralPath $xrayExe) -or -not (Test-Path -LiteralPath $wintunDll)) {
     Write-Host '[INFO] Preparing verified runtime...' -ForegroundColor Yellow
     powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'prepare-core.ps1')
+    if ($LASTEXITCODE -ne 0) { throw 'Verified runtime preparation failed.' }
 }
 
 # Keep running applications and unrelated release artifacts intact.
@@ -74,12 +75,11 @@ Copy-Item -LiteralPath (Join-Path $root 'artifacts/code-signing/Lumen-SelfSigned
 if ($Mode -eq 'All' -or $Mode -eq 'Installer') {
     Write-Host '[2/3] Preparing Windows Setup installer (.exe)...' -ForegroundColor Green
     $nsisDir = Join-Path $root 'src-tauri/target/release/bundle/nsis'
-    $setupCandidates = Get-ChildItem -LiteralPath $nsisDir -Filter '*.exe' | Where-Object { $_.Name -notmatch '(?i)uninst' }
-    if (-not $setupCandidates -or $setupCandidates.Count -eq 0) {
-        throw "No NSIS setup installer found in $nsisDir"
+    $setupSource = Join-Path $nsisDir "Lumen_${version}_x64-setup.exe"
+    if (-not (Test-Path -LiteralPath $setupSource -PathType Leaf)) {
+        throw "Expected installer for the current version was not produced: $setupSource"
     }
 
-    $setupSource = $setupCandidates[0].FullName
     $setupTarget = Join-Path $releaseDir "Lumen-Ray-$version-Setup.exe"
     Copy-Item -LiteralPath $setupSource -Destination $setupTarget -Force
     Write-Host "  -> Created Setup: $setupTarget ($( [math]::Round((Get-Item $setupTarget).Length / 1MB, 2) ) MB)" -ForegroundColor Cyan

@@ -9,16 +9,14 @@ use std::{
     sync::RwLock,
 };
 
-/// Domain separation salt for Lumen device identity hashing.
-/// This is not a secret; it ensures the resulting SHA-256 digest is uniquely scoped
-/// to Lumen on Windows, preventing cross-application correlation of machine GUIDs.
+/// Mixed into the device-id hash so the digest is specific to Lumen.
+/// The salt is public. Changing it gives existing installs a new id.
 pub const LUMEN_HWID_SALT: &[u8] = b"lumen-ray-device-identity-v1";
 
-/// Maximum allowed file size for the encrypted DPAPI identity file.
-/// Protects against malformed, corrupted, or hostile files on disk.
+/// Cap for the DPAPI identity file. Larger files are rejected.
 pub const MAX_IDENTITY_FILE_SIZE: usize = 4096;
 
-/// Minimum and maximum length constraints for valid HWID strings.
+/// Accepted length of an `x-hwid` value.
 pub const MIN_HWID_LEN: usize = 10;
 pub const MAX_HWID_LEN: usize = 64;
 
@@ -26,10 +24,7 @@ fn hwid_error(message: impl Into<String>) -> BackendError {
     BackendError::new("HWID_UNAVAILABLE", message)
 }
 
-/// Checks whether an HWID string conforms to the required specification:
-/// - between 10 and 64 characters;
-/// - starts with "win-";
-/// - limited to Latin letters, digits, '=', and '-'.
+/// `win-` plus 10 to 64 characters from `[A-Za-z0-9=-]`.
 pub fn is_valid_hwid(hwid: &str) -> bool {
     let len = hwid.len();
     if !(MIN_HWID_LEN..=MAX_HWID_LEN).contains(&len) {
@@ -42,8 +37,7 @@ pub fn is_valid_hwid(hwid: &str) -> bool {
         .all(|c| c.is_ascii_alphanumeric() || c == '=' || c == '-')
 }
 
-/// Masks an HWID for routine logging and diagnostics (e.g. "win-abcd...1234").
-/// Never reveals the full identifier.
+/// Short form for logs, for example `win-abcd...1234`.
 pub fn mask_hwid(hwid: &str) -> String {
     if hwid.len() <= 12 {
         "win-***".to_string()
@@ -52,7 +46,7 @@ pub fn mask_hwid(hwid: &str) -> String {
     }
 }
 
-/// Verifies whether a string value is safe to use in an HTTP header (no CRLF, only printable ASCII).
+/// Printable ASCII, no control characters, at most 256 bytes.
 pub fn is_safe_header_value(s: &str) -> bool {
     let trimmed = s.trim();
     !trimmed.is_empty()
@@ -62,8 +56,7 @@ pub fn is_safe_header_value(s: &str) -> bool {
             .all(|c| c.is_ascii() && !c.is_ascii_control())
 }
 
-/// Generates an opaque HWID from a seed string using SHA-256 and the domain separation salt.
-/// Returns "win-" followed by the first 16 digest bytes formatted as 32 lowercase hex characters.
+/// `win-` and 32 hex chars from the first 16 bytes of SHA-256(salt || seed).
 pub fn generate_hwid_from_seed(seed: &str) -> String {
     let mut hasher = Sha256::new();
     hasher.update(LUMEN_HWID_SALT);
@@ -78,7 +71,7 @@ pub fn generate_hwid_from_seed(seed: &str) -> String {
     format!("win-{hex}")
 }
 
-/// Reads the Windows MachineGuid from the registry without executing any shell commands.
+/// `HKLM\SOFTWARE\Microsoft\Cryptography\MachineGuid`.
 #[cfg(windows)]
 pub fn read_machine_seed() -> Option<String> {
     use winreg::enums::*;
@@ -107,8 +100,7 @@ pub fn read_machine_seed() -> Option<String> {
     None
 }
 
-/// Reads the Windows operating system version from the registry (e.g. "10.0.26200").
-/// Never invokes any shell or external processes.
+/// Registry version, for example `10.0.26200`. Falls back to `10.0`.
 #[cfg(windows)]
 pub fn read_os_version() -> String {
     use winreg::enums::*;
@@ -155,8 +147,7 @@ pub fn read_os_version() -> String {
     "10.0".to_string()
 }
 
-/// Safely inspects the BIOS / system information in the Windows registry to retrieve
-/// the hardware device model if available, filtering out meaningless vendor placeholders.
+/// BIOS product name, when the registry value is usable as a header.
 #[cfg(windows)]
 pub fn read_device_model() -> Option<String> {
     use winreg::enums::*;
@@ -222,7 +213,7 @@ pub fn read_device_model() -> Option<String> {
     None
 }
 
-/// Handles secure persistence of the HWID in an isolated identity file using DPAPI.
+/// DPAPI file that stores the device id for this Windows user.
 pub struct DeviceIdentityStore {
     path: PathBuf,
     secret_store: Box<dyn SecretStore>,
@@ -318,7 +309,7 @@ impl DeviceIdentityStore {
     }
 }
 
-/// Device identity data sent in subscription requests.
+/// Values sent to the subscription host.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct DeviceIdentity {
     pub hwid: String,
@@ -327,7 +318,7 @@ pub struct DeviceIdentity {
     pub device_model: Option<String>,
 }
 
-/// Thread-safe manager that loads or generates the device identity once and caches it.
+/// Loads the device id once and keeps it for the process.
 pub struct DeviceIdentityManager {
     store: DeviceIdentityStore,
     cached: RwLock<Option<DeviceIdentity>>,

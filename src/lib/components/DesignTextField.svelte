@@ -30,7 +30,7 @@
 	let input = $state<HTMLInputElement>();
 </script>
 
-<!-- Figma "Component 26" (202:8809, 202:8303, 202:8387) — labelled input pill. -->
+<!-- Labelled input pill. -->
 <div class="design-field">
 	<label class="field-label" for={id}>{label}</label>
 	<div class="input-pill" class:invalid>
@@ -113,7 +113,7 @@
 	.input-pill:focus-within {
 		box-shadow: inset 0 0 0 1px #ffffff1f;
 	}
-	/* Figma 202:8387 — an invalid value tints the whole pill red. */
+	/* An invalid value tints the whole pill red. */
 	.input-pill.invalid {
 		background: #ff6c6726;
 	}

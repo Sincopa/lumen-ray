@@ -25,7 +25,6 @@
 	.popup-menu {
 		position: absolute;
 		width: 197px;
-		/* Figma 202:5680 */
 		background: #ffffff0a;
 		outline: none;
 		border-radius: 24px;
