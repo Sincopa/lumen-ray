@@ -24,7 +24,7 @@
 	}}
 />
 
-<!-- Figma 202:4917 — brightness of the background shader over the idle face. -->
+<!-- Brightness of the background shader over the idle face. -->
 <div
 	class="brightness-view"
 	data-tauri-drag-region
@@ -143,7 +143,7 @@
 		transform: scale(0.94);
 	}
 
-	/* Same face geometry as the connection screen (Figma 202:4868). */
+	/* Same face geometry as the connection screen. */
 	.face {
 		position: absolute;
 		top: calc(72px + (100% - 72px) * 0.3764 - 87.5px);

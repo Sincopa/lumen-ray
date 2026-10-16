@@ -10,7 +10,7 @@
 		onCancel: () => void;
 		onConfirm: () => void | Promise<void>;
 		busy?: boolean;
-		/** Deletions use the round back / trash pair from Figma 202:7009. */
+		/** Deletions use the round back and trash buttons. */
 		destructive?: boolean;
 	}
 

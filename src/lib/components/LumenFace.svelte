@@ -253,9 +253,9 @@
 		}
 		const before = lastExpression;
 		lastExpression = name;
-		// Disconnecting is a little performance — an "oh", a slump, a nap, a wake-up. The
-		// status can move on to "disconnected" a moment after it starts, but once begun
-		// the performance plays out (until the user does something else).
+		// Disconnecting plays out as an "oh", a slump, a nap, then a wake-up.
+		// The status can move on to "disconnected" a moment after it starts, but once
+		// begun the sequence finishes unless the user does something else.
 		const finishing =
 			before === 'disconnecting' &&
 			(name === 'idle' || name === 'wink') &&

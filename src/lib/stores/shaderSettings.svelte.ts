@@ -69,11 +69,7 @@ class ShaderSettingsManager {
 	colorB = $state<string>('#06b6d4');
 	exposure = $state<number>(1.6);
 	selectedPreset = $state<string>('aurora');
-	/**
-	 * UI scale multiplier (0.75 – 1.5).
-	 * In Tauri: resizes the native window proportionally from the configured base size.
-	 * In browser dev-mode: applies CSS zoom on the root element.
-	 */
+	/** UI scale, from 0.75 to 1.5. Tauri resizes the window. The browser zooms the page. */
 	uiScale = $state<number>(1.0);
 
 	// Compatibility getter/setter for idleColor

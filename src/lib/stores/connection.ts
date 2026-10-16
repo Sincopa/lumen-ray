@@ -175,7 +175,7 @@ export class ConnectionController {
 				try {
 					await withTimeout(this.vpn.disconnect(), this.timeoutMs);
 				} catch {
-					// Ignore disconnect error during seamless switch
+					// A failed disconnect during a server switch is ignored.
 				}
 			}
 

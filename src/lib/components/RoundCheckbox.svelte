@@ -38,7 +38,7 @@
 {/if}
 
 <style>
-	/* Figma "Component 26" — glass well with a white knob when checked. */
+	/* Glass well with a white knob when checked. */
 	.select-checkbox {
 		display: inline-grid;
 		place-items: center;

@@ -18,7 +18,7 @@
 	}: Props = $props();
 </script>
 
-<!-- Figma 202:4868 / 202:4966 — "Component 31" notice pill under the header. -->
+<!-- Notice pill under the header. -->
 <div class="home-notice" class:has-action={!!actionLabel} role="status">
 	<span class="notice-icon" aria-hidden="true">
 		{#if icon === 'update'}

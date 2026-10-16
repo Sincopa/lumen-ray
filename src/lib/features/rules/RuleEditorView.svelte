@@ -20,7 +20,7 @@
 		onSelectProcess: () => void;
 		onSelectServer: () => void;
 		onMatcherChange: (matcher: RuleMatcher) => void;
-		/** New rules start by picking a type (Figma 202:7831); edits open the form. */
+		/** New rules start by picking a type. Edits open the form. */
 		step?: 'type' | 'form';
 		onStepChange?: (step: 'type' | 'form') => void;
 		onNameChange?: (name: string) => void;
@@ -323,7 +323,7 @@
 	{#key step}
 		<div class="editor-step" in:screen={{ dir: step === 'form' ? 1 : -1 }}>
 			{#if step === 'type'}
-				<!-- Figma 202:7831 — choose what the rule matches. -->
+				<!-- Choose what the rule matches. -->
 				<div class="type-list" role="radiogroup" aria-label={t('rules.kind')}>
 					{#each ruleTypes as type (type.id)}
 						{@const selected = pickedType === type.id}
@@ -512,7 +512,7 @@
 		box-sizing: border-box;
 	}
 
-	/* Step 1 — rule type list (Figma 202:7831, "Component 27"). */
+	/* Step 1: rule type list. */
 	.type-list {
 		display: flex;
 		flex-direction: column;
@@ -613,7 +613,7 @@
 		transform: scale(0.97);
 	}
 
-	/* Step 2 — form (Figma 202:8809, 202:8852, 202:9107). */
+	/* Step 2: form. */
 	.form-container {
 		display: flex;
 		flex-direction: column;

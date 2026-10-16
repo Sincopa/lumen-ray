@@ -481,7 +481,7 @@
 		display: inline-flex;
 		flex-shrink: 0;
 	}
-	/* Figma 202:8173 — the compact picker is a bare list; search reuses the header. */
+	/* The compact picker is a bare list. Search reuses the header. */
 	.compact .header-wrapper:not(.open) {
 		display: none;
 	}

@@ -78,30 +78,16 @@
 				selectedSubscription.daysRemaining <= 0),
 	);
 
-	/**
-	 * Applies the current uiScale:
-	 * - Tauri: resizes the native window (base width × scale, base height × scale).
-	 *   The CSS width/height stay at 100vw/100vh so the UI fills the window.
-	 *   CSS custom properties --app-width/--app-height are updated so
-	 *   border-radius and clamp() calculations remain correct.
-	 * - Browser dev-mode: CSS zoom on the app viewport.
-	 */
+	/** Resize the native window to the UI scale. In the browser, zoom the viewport instead. */
 	async function applyScale(scale: number) {
 		const w = Math.round(APP_WIDTH * scale);
 		const h = Math.round(APP_HEIGHT * scale);
 
-		// Set CSS zoom on .app-viewport — scales ALL UI elements proportionally
-		// (text, padding, border-radius, icons — everything).
-		// The base dimensions stay unchanged; zoom scales the rendered UI.
 		document.documentElement.style.setProperty('--ui-zoom', String(scale));
 
 		if (runtime.isTauri) {
-			// Resize the native window to match the zoomed dimensions so the
-			// scaled content fits perfectly without clipping or empty space.
 			try {
-				console.log(`[scale] setSize → ${w}×${h} (scale=${scale})`);
 				await getCurrentWindow().setSize(new LogicalSize(w, h));
-				console.log(`[scale] setSize OK`);
 			} catch (e) {
 				console.error('[scale] Failed to resize Tauri window:', e);
 			}
@@ -497,7 +483,7 @@
 			var(--radius-window-bottom) var(--radius-window-bottom);
 		transition: background-color 0.3s ease;
 	}
-	/* Figma trims text to its cap height; Edge/WebView2 support the same geometry. */
+	/* Trim text to cap height. Edge and WebView2 support the same geometry. */
 	.design-screen
 		:global(
 			:is(

@@ -183,7 +183,7 @@
 		</div>
 	</div>
 
-	<!-- Server Selector Card (hidden while the subscription is expired, Figma 202:4966) -->
+	<!-- Server card. Hidden while the subscription is expired. -->
 	{#if !subscriptionExpired}
 		<button
 			transition:rise={{ y: 12 }}
@@ -231,7 +231,7 @@
 		min-height: 0;
 	}
 
-	/* Figma 202:4868 — notices sit right under the header, centred. */
+	/* Notices sit under the header, centred. */
 	.notice-slot {
 		position: absolute;
 		top: 0;
@@ -243,7 +243,7 @@
 		padding: 0 26.5px;
 	}
 
-	/* Figma 202:4868 — the face starts 149px into the 628px content area. */
+	/* The face starts 149px into the 628px content area. */
 	.center-container {
 		position: absolute;
 		top: calc(37.64% - 87.5px);
