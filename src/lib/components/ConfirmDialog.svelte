@@ -1,7 +1,6 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
-	import { cubicOut } from 'svelte/easing';
-	import { fade, scale } from 'svelte/transition';
+	import DesignOverlay from './DesignOverlay.svelte';
 
 	interface Props {
 		title: string;
@@ -11,6 +10,8 @@
 		onCancel: () => void;
 		onConfirm: () => void | Promise<void>;
 		busy?: boolean;
+		/** Deletions use the round back / trash pair from Figma 202:7009. */
+		destructive?: boolean;
 	}
 
 	let {
@@ -21,100 +22,110 @@
 		onCancel,
 		onConfirm,
 		busy = false,
+		destructive = false,
 	}: Props = $props();
 
-	let cancelButton: HTMLButtonElement;
+	let cancelButton = $state<HTMLButtonElement>();
 
 	onMount(() => {
 		const previous = document.activeElement as HTMLElement | null;
-		cancelButton.focus();
+		cancelButton?.focus();
 		return () => previous?.focus();
 	});
-
-	function handleKeydown(event: KeyboardEvent) {
-		if (event.key === 'Escape' && !busy) {
-			event.preventDefault();
-			onCancel();
-		}
-	}
 </script>
 
-<svelte:window onkeydown={handleKeydown} />
-
-<div
-	class="confirm-backdrop"
-	role="presentation"
-	transition:fade={{ duration: 180 }}
-	onclick={(event) => {
-		if (event.currentTarget === event.target && !busy) onCancel();
-	}}
+<DesignOverlay
+	labelledby="confirm-dialog-title"
+	describedby="confirm-dialog-description"
+	panel
+	dismissible={!busy}
+	onDismiss={onCancel}
 >
-	<div
-		class="confirm-dialog"
-		role="dialog"
-		aria-modal="true"
-		aria-labelledby="confirm-dialog-title"
-		aria-describedby="confirm-dialog-description"
-		transition:scale={{ start: 0.96, duration: 260, easing: cubicOut }}
-	>
+	<div class="confirm-dialog">
 		<div class="confirm-copy">
 			<h2 id="confirm-dialog-title">{title}</h2>
 			<p id="confirm-dialog-description">{description}</p>
 		</div>
 
-		<div class="confirm-actions">
-			<button
-				bind:this={cancelButton}
-				type="button"
-				class="confirm-button cancel"
-				disabled={busy}
-				onclick={onCancel}
-			>
-				{cancelLabel}
-			</button>
-			<button
-				type="button"
-				class="confirm-button continue"
-				disabled={busy}
-				onclick={onConfirm}
-			>
-				{confirmLabel}
-			</button>
-		</div>
+		{#if destructive}
+			<div class="confirm-actions round">
+				<button
+					bind:this={cancelButton}
+					type="button"
+					class="round-button cancel"
+					aria-label={cancelLabel}
+					disabled={busy}
+					onclick={onCancel}
+				>
+					<svg
+						width="32"
+						height="32"
+						viewBox="0 0 32 32"
+						fill="none"
+						aria-hidden="true"
+					>
+						<path
+							d="M18.6 9.2 12.4 15.4a.85.85 0 0 0 0 1.2l6.2 6.2"
+							stroke="#fff"
+							stroke-width="1.6"
+							stroke-linecap="round"
+						/>
+					</svg>
+				</button>
+				<button
+					type="button"
+					class="round-button delete"
+					aria-label={confirmLabel}
+					disabled={busy}
+					onclick={onConfirm}
+				>
+					<svg
+						width="32"
+						height="32"
+						viewBox="0 0 24 24"
+						fill="none"
+						aria-hidden="true"
+					>
+						<path
+							d="M7.28 10.26a.38.38 0 0 1 .38-.44h8.79c.23 0 .41.2.38.44l-.98 7.59a1.55 1.55 0 0 1-1.53 1.35H9.79a1.55 1.55 0 0 1-1.53-1.35l-.98-7.59Z"
+							fill="#b1313b"
+						/>
+						<path
+							d="M7.88 6.04a.38.38 0 0 0 .22.57l8.31 2.4a.38.38 0 0 0 .49-.37l.01-.71a.78.78 0 0 0-.56-.75L9.13 5.1a.78.78 0 0 0-.87.34l-.38.6Z"
+							fill="#b1313b"
+						/>
+					</svg>
+				</button>
+			</div>
+		{:else}
+			<div class="confirm-actions">
+				<button
+					bind:this={cancelButton}
+					type="button"
+					class="confirm-button cancel"
+					disabled={busy}
+					onclick={onCancel}
+				>
+					{cancelLabel}
+				</button>
+				<button
+					type="button"
+					class="confirm-button continue"
+					disabled={busy}
+					onclick={onConfirm}
+				>
+					{confirmLabel}
+				</button>
+			</div>
+		{/if}
 	</div>
-</div>
+</DesignOverlay>
 
 <style>
-	.confirm-backdrop {
-		position: fixed;
-		left: 50%;
-		top: 50%;
-		width: min(var(--app-width), 100vw);
-		height: min(var(--app-height), 100dvh);
-		transform: translate(-50%, -50%);
-		z-index: 80;
-		display: grid;
-		place-items: center;
-		padding: 32px;
-		overflow: hidden;
-		border-radius: var(--radius-window) var(--radius-window)
-			var(--radius-window-bottom) var(--radius-window-bottom);
-		background: rgba(54, 54, 54, 0.75);
-		-webkit-backdrop-filter: blur(25px);
-		backdrop-filter: blur(25px);
-	}
-
-	:global(body:has(.confirm-backdrop) .window-header) {
-		pointer-events: none;
-	}
-
 	.confirm-dialog {
-		width: min(326px, 100%);
 		display: flex;
 		flex-direction: column;
 		gap: 48px;
-		color: #fff;
-		transform-origin: 50% 54%;
 	}
 
 	.confirm-copy {
@@ -122,6 +133,7 @@
 		flex-direction: column;
 		align-items: center;
 		gap: 16px;
+		padding: 0 12px;
 		text-align: center;
 	}
 
@@ -130,23 +142,55 @@
 		margin: 0;
 		font-size: 32px;
 		font-weight: 500;
-		line-height: 1;
+		line-height: 32px;
 		letter-spacing: 0;
 	}
 
 	p {
 		width: 100%;
 		margin: 0;
-		color: rgba(255, 255, 255, 0.75);
+		color: #ffffff80;
 		font-size: 14px;
 		font-weight: 400;
-		line-height: 1.4;
+		line-height: 18.2px;
+		letter-spacing: -0.3px;
 	}
 
 	.confirm-actions {
 		display: flex;
 		flex-direction: column;
 		gap: 16px;
+	}
+	.confirm-actions.round {
+		flex-direction: row;
+		justify-content: center;
+		gap: 30px;
+	}
+
+	.round-button {
+		display: grid;
+		place-items: center;
+		width: 64px;
+		height: 64px;
+		min-height: 0;
+		padding: 0;
+		border: 0;
+		border-radius: 50%;
+		-webkit-backdrop-filter: blur(25px);
+		backdrop-filter: blur(25px);
+		transition:
+			transform 180ms var(--ease-spring),
+			background-color 180ms ease,
+			opacity 180ms ease;
+	}
+	.round-button.cancel {
+		background: #ffffff0d;
+	}
+	.round-button.delete {
+		background: #d0344126;
+	}
+	.round-button:active:not(:disabled) {
+		transform: scale(0.94);
 	}
 
 	.confirm-button {
@@ -157,41 +201,41 @@
 		border-radius: 123px;
 		font-size: 18px;
 		font-weight: 600;
-		letter-spacing: -0.36px;
+		line-height: 18px;
+		letter-spacing: -0.4px;
 		transition:
 			transform 180ms var(--ease-spring),
 			background-color 180ms ease,
 			opacity 180ms ease;
 	}
-
-	.confirm-button:hover {
-		transform: scale(1.015);
-	}
-
-	.confirm-button:active {
+	.confirm-button:active:not(:disabled) {
 		transform: scale(0.985);
 	}
-
 	.confirm-button.cancel {
-		background: rgba(255, 255, 255, 0.15);
-		color: rgba(255, 255, 255, 0.8);
+		background: #ffffff0d;
+		color: #ffffffcc;
 	}
-
-	.confirm-button.cancel:hover {
-		background: rgba(255, 255, 255, 0.2);
-	}
-
 	.confirm-button.continue {
 		background: #fff;
-		color: rgba(0, 0, 0, 0.8);
+		color: #000000cc;
 	}
 
-	.confirm-button.continue:hover {
-		background: #f4f4f4;
-	}
-
+	.round-button:disabled,
 	.confirm-button:disabled {
 		opacity: 0.55;
 		transform: none;
+	}
+
+	@media (hover: hover) and (pointer: fine) {
+		.round-button.cancel:hover:not(:disabled),
+		.confirm-button.cancel:hover:not(:disabled) {
+			background: #ffffff1a;
+		}
+		.round-button.delete:hover:not(:disabled) {
+			background: #d0344140;
+		}
+		.confirm-button.continue:hover:not(:disabled) {
+			background: #f4f4f4;
+		}
 	}
 </style>

@@ -2,14 +2,14 @@
 	import { onMount } from 'svelte';
 	import AdvancedTools from '../lib/features/settings/AdvancedTools.svelte';
 	let pendingImport = $state('');
-	import { fly } from 'svelte/transition';
-	import { cubicOut } from 'svelte/easing';
-	import { MediaQuery } from 'svelte/reactivity';
+	import { fade } from 'svelte/transition';
+	import { screen, rise } from '../lib/motion';
 	import BackgroundShader from '../lib/components/BackgroundShader.svelte';
 	import WindowHeader from '../lib/components/WindowHeader.svelte';
 	import BottomNav from '../lib/components/BottomNav.svelte';
 	import ConnectionView from '../lib/features/connection/ConnectionView.svelte';
 	import EmptyHomeView from '../lib/features/connection/EmptyHomeView.svelte';
+	import BrightnessView from '../lib/features/connection/BrightnessView.svelte';
 	import SubscriptionsView from '../lib/features/subscriptions/SubscriptionsView.svelte';
 	import ServersView from '../lib/features/servers/ServersView.svelte';
 	import SettingsView from '../lib/features/settings/SettingsView.svelte';
@@ -54,7 +54,7 @@
 	let importing = $state(false);
 	let actionError = $state('');
 	let ruleChrome = $state<'default' | 'selection' | 'picker'>('default');
-	const reducedMotion = new MediaQuery('(prefers-reduced-motion: reduce)');
+	let brightnessOpen = $state(false);
 
 	// Derived state
 	let connectionState = $derived($connectionStore.status);
@@ -67,6 +67,16 @@
 		),
 	);
 	let selectedCountry = $derived(selectedServer?.countryCode ?? 'fi');
+	let selectedSubscription = $derived(
+		$catalogStore.subscriptions.find(
+			(s) => s.id === selectedServer?.subscriptionId,
+		),
+	);
+	let subscriptionExpired = $derived(
+		selectedSubscription?.status === 'expired' ||
+			(typeof selectedSubscription?.daysRemaining === 'number' &&
+				selectedSubscription.daysRemaining <= 0),
+	);
 
 	/**
 	 * Applies the current uiScale:
@@ -318,9 +328,17 @@
 	<!-- Native WebGL2 Background Fluid Light Shader -->
 	<BackgroundShader active={connectionState === 'connected'} />
 
+	{#if brightnessOpen}
+		<BrightnessView
+			{connectionState}
+			onClose={() => (brightnessOpen = false)}
+		/>
+	{/if}
+
 	<div
 		class="app-ui"
-		class:design-screen={currentTab !== 'settings' && !importing}
+		class:brightness-hidden={brightnessOpen}
+		class:design-screen={currentTab !== 'settings' || importing}
 		class:dim-backdrop={currentTab !== 'home' || !hasSubscriptions || importing}
 	>
 		<!-- Top Desktop Window Bar -->
@@ -335,48 +353,42 @@
 			onOpenSettings={() => {
 				goToTab(currentTab === 'settings' ? 'home' : 'settings');
 			}}
-			updateVersion={$applicationUpdateState.version}
-			onOpenUpdate={() => {
-				goToTab('settings');
-			}}
 		/>
 
 		<p class="demo-notice sr-only">{runtime.isTauri ? '' : t('demo.notice')}</p>
 
 		{#if $persistenceError}
-			<p role="alert">{t('errors.storage')}</p>
+			<p role="alert" transition:rise>{t('errors.storage')}</p>
 		{/if}
 
 		{#if actionError}
-			<p role="alert">{actionError}</p>
+			<p role="alert" transition:rise>{actionError}</p>
 		{/if}
 
 		<!-- Tab Views with directional fly transitions -->
 		<div class="view-content">
 			{#if importing}
-				<AddProfileView
-					onClose={() => (importing = false)}
-					onSuccess={() => {
-						importing = false;
-						goToTab('home');
-					}}
-				/>
+				<div
+					class="tab-view"
+					in:screen={{ dir: 1 }}
+					out:fade={{ duration: 120 }}
+				>
+					<AddProfileView
+						onClose={() => (importing = false)}
+						onSuccess={() => {
+							importing = false;
+							goToTab('home');
+						}}
+					/>
+				</div>
 			{:else}
 				{#key currentTab}
 					<div
 						class="tab-view"
-						in:fly={{
-							x: getDir(currentTab, prevTab) * 24,
-							duration: reducedMotion.current ? 0 : 220,
-							easing: cubicOut,
-							opacity: 0,
+						in:screen|global={{
+							dir: getDir(currentTab, prevTab),
 						}}
-						out:fly={{
-							x: -getDir(currentTab, prevTab) * 24,
-							duration: reducedMotion.current ? 0 : 220,
-							easing: cubicOut,
-							opacity: 0,
-						}}
+						out:fade|global={{ duration: 120 }}
 					>
 						{#if currentTab === 'home'}
 							{#if !hasSubscriptions}
@@ -392,6 +404,10 @@
 									onRetry={() => connection.initialize()}
 									onToggle={toggleConnection}
 									onSelectServer={() => goToTab('servers')}
+									updateVersion={$applicationUpdateState.version}
+									updating={$applicationUpdateState.status === 'downloading'}
+									onInstallUpdate={() => void applicationUpdate.install()}
+									{subscriptionExpired}
 								/>
 							{/if}
 						{:else if currentTab === 'subscriptions'}
@@ -404,7 +420,12 @@
 								onManageSubscription={() => goToTab('subscriptions')}
 							/>
 						{:else if currentTab === 'settings'}
-							<SettingsView />
+							<SettingsView
+								onOpenBrightness={() => {
+									brightnessOpen = true;
+									goToTab('home');
+								}}
+							/>
 						{:else if currentTab === 'rules'}
 							<RulesView onChromeChange={(mode) => (ruleChrome = mode)} />
 						{/if}
@@ -419,6 +440,8 @@
 				{currentTab}
 				{routingMode}
 				{hasSubscriptions}
+				showAdd={currentTab === 'subscriptions' ||
+					(currentTab === 'home' && subscriptionExpired)}
 				onTabChange={goToTab}
 				onModeChange={changeMode}
 				onActionClick={() => (importing = true)}
@@ -519,6 +542,10 @@
 	.app-ui.design-screen::before {
 		background: rgba(15, 15, 15, 0.95);
 		backdrop-filter: none;
+	}
+
+	.app-ui.brightness-hidden {
+		visibility: hidden;
 	}
 
 	.view-content {

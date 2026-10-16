@@ -18,6 +18,7 @@
 	import IconButton from '../../components/IconButton.svelte';
 	import PopupMenu from '../../components/PopupMenu.svelte';
 	import MenuItem from '../../components/MenuItem.svelte';
+	import backIcon from '../../../assets/back.svg';
 	import menuIcon from '../../../assets/menu.svg';
 	import tunIcon from '../../../assets/mode-rules.svg';
 	import StatusDot from '../../components/StatusDot.svelte';
@@ -26,7 +27,9 @@
 	import ServersView from '../servers/ServersView.svelte';
 	import RuleEditorView from './RuleEditorView.svelte';
 	import ProcessPickerView from './ProcessPickerView.svelte';
-	import PresetsModal from './PresetsModal.svelte';
+	import PresetsView from './PresetsView.svelte';
+	import { flip } from 'svelte/animate';
+	import { screen, rise, pop, easeOut } from '../../motion';
 	import searchIcon from '../../../assets/search.svg';
 	import reloadIcon from '../../../assets/reload.svg';
 	import addIcon from '../../../assets/plus.svg';
@@ -75,12 +78,13 @@
 	let pendingServerId = $state('');
 	let pickerSearchSignal = $state(0);
 	let editing = $state<Rule | null>(null);
+	let editorStep = $state<'type' | 'form'>('form');
 	let choosingProcess = $state(false);
 	let choosingServer = $state(false);
 	let deleting = $state(false);
 	let selected = $state<string[]>([]);
 	let error = $state('');
-	let showPresetsModal = $state(false);
+	let showPresets = $state(false);
 	let menu = $state(false);
 	let confirmSwitchToRules = $state(false);
 
@@ -233,13 +237,43 @@
 
 	$effect(() => {
 		onChromeChange?.(
-			selectingRule || editing
+			selectingRule || editing || showPresets
 				? 'picker'
 				: selectMode
 					? 'selection'
 					: 'default',
 		);
 	});
+
+	// Sub-screens push in from the side they logically live on.
+	const screenDepth: Record<string, number> = {
+		list: 0,
+		presets: 1,
+		pick: 1,
+		editor: 1,
+		server: 2,
+		process: 2,
+	};
+	const rulesScreen = $derived(
+		editing
+			? choosingProcess
+				? 'process'
+				: choosingServer
+					? 'server'
+					: 'editor'
+			: selectingRule
+				? 'pick'
+				: showPresets
+					? 'presets'
+					: 'list',
+	);
+	let lastScreen = 'list';
+	function screenDir(next: string) {
+		const dir =
+			(screenDepth[next] ?? 0) >= (screenDepth[lastScreen] ?? 0) ? 1 : -1;
+		lastScreen = next;
+		return dir;
+	}
 
 	// Action handlers
 	async function refresh() {
@@ -273,6 +307,7 @@
 
 	function add() {
 		error = '';
+		editorStep = 'type';
 		editing = {
 			id: crypto.randomUUID(),
 			name: '',
@@ -287,7 +322,7 @@
 		try {
 			await catalog.applyPreset(presetId);
 			if ($catalogStore.routingMode === 'global') {
-				showPresetsModal = false;
+				showPresets = false;
 				confirmSwitchToRules = true;
 			}
 			error = '';
@@ -338,407 +373,466 @@
 	}}
 />
 
-{#if editing}
-	{#if choosingProcess}
-		<ProcessPickerView
-			selectedProcess={editing.name}
-			onSelect={(procs: string[]) => {
-				if (editing) {
-					editing.name = procs.join(', ');
-					editing.matcher = 'application';
-					editing.isDomain = false;
-				}
-				choosingProcess = false;
-			}}
-			onCancel={() => {
-				choosingProcess = false;
-			}}
-		/>
-	{:else if choosingServer}
-		<div class="server-picker-view">
-			<ServersView
-				searchSignal={pickerSearchSignal}
-				selectedId={editing.serverId}
-				onSelect={(server) => {
-					if (editing) editing.serverId = server.id;
-					choosingServer = false;
-				}}
-				compact
-			/>
-			<div class="picker-bar">
-				<IconButton
-					design
-					icon={searchIcon}
-					ariaLabel={t('common.search')}
-					size="lg"
-					variant="surface"
-					onclick={() => pickerSearchSignal++}
-				/>
-				<IconButton
-					design
-					icon={checkIcon}
-					ariaLabel={t('common.save')}
-					size="lg"
-					variant="primary"
-					onclick={() => {
-						choosingServer = false;
+{#key rulesScreen}
+	<div class="rules-screen" in:screen={{ dir: screenDir(rulesScreen) }}>
+		{#if editing}
+			{#if choosingProcess}
+				<ProcessPickerView
+					selectedProcess={editing.name}
+					onSelect={(procs: string[]) => {
+						if (editing) {
+							editing.name = procs.join(', ');
+							editing.matcher = 'application';
+							editing.isDomain = false;
+						}
+						choosingProcess = false;
+					}}
+					onCancel={() => {
+						choosingProcess = false;
 					}}
 				/>
-			</div>
-		</div>
-	{:else}
-		{@const currentServer = serversById.get(editing.serverId)}
-		<RuleEditorView
-			rule={editing}
-			server={currentServer}
-			subscriptionName={activeSub?.name}
-			onSave={async (updated: Rule | Rule[]) => {
-				try {
-					if (Array.isArray(updated)) {
-						await catalog.saveRules(updated);
-					} else {
-						await catalog.saveRule(updated);
-					}
-					editing = null;
-					choosingProcess = false;
-					choosingServer = false;
-					error = '';
-				} catch (e) {
-					error = t('errors.' + errorCode(e));
-				}
-			}}
-			onCancel={() => {
-				editing = null;
-				choosingProcess = false;
-				choosingServer = false;
-			}}
-			onSelectProcess={() => {
-				choosingProcess = true;
-			}}
-			onSelectServer={() => {
-				pickerSearchSignal = 0;
-				choosingServer = true;
-			}}
-			onMatcherChange={(matcher) => {
-				if (editing) {
-					editing.matcher = matcher;
-					editing.isDomain = matcher === 'domain';
-				}
-			}}
-		/>
-	{/if}
-{:else if selectingRule}
-	<div class="server-picker-view">
-		<ServersView
-			selectedId={pendingServerId}
-			searchSignal={pickerSearchSignal}
-			onSelect={pickServer}
-			compact
-		/>
-		<div class="picker-bar">
-			<IconButton
-				design
-				icon={searchIcon}
-				ariaLabel={t('common.search')}
-				size="lg"
-				variant="surface"
-				onclick={() => pickerSearchSignal++}
-			/>
-			<IconButton
-				design
-				icon={checkIcon}
-				ariaLabel={t('common.save')}
-				size="lg"
-				variant="primary"
-				onclick={confirmServer}
-			/>
-		</div>
-	</div>
-{:else}
-	<section
-		class="rules-view"
-		class:empty={!$catalogStore.rules.length}
-		aria-label={t('rules.title')}
-	>
-		<div class="header-card-wrapper" class:selection={selectMode}>
-			<div class="header-row">
-				<div class="header-pill">
-					<!-- Normal header content -->
-					<div class="header-normal" class:header-hidden={searching}>
-						<div class="header-card-title">
-							<span class="title-text">
-								{activeSub?.name ?? t('rules.title')}
-							</span>
-							<StatusDot variant="active" />
-						</div>
-						<div class="header-card-actions">
-							<IconButton
-								design
-								icon={searchIcon}
-								ariaLabel={t('common.search')}
-								onclick={handleOpenSearch}
-							/>
-							<IconButton
-								design
-								icon={reloadIcon}
-								ariaLabel={t('common.reload')}
-								onclick={refresh}
-							/>
-
-							{#if !selectMode}
-								<IconButton
-									design
-									icon={pencilIcon}
-									ariaLabel={t('rules.selectMode')}
-									onclick={() => {
-										menu = false;
-										selectMode = true;
-									}}
-								/>
-								<IconButton
-									design
-									icon={menuIcon}
-									ariaLabel={t('common.menu')}
-									expanded={menu}
-									onclick={() => (menu = !menu)}
-								/>
-							{/if}
-						</div>
-					</div>
-
-					<!-- Search bar inside header pill (identical to ServersView) -->
-					<div
-						class="header-search"
-						class:search-open={searching && !searchClosing}
-						class:search-closing={searchClosing}
-					>
-						<img src={searchIcon} alt="" class="search-header-icon" />
-						<input
-							bind:this={searchInputEl}
-							type="text"
-							class="search-header-input"
-							placeholder={t('rules.searchPlaceholder') || 'Поиск правил...'}
-							bind:value={query}
-							autocomplete="off"
-							spellcheck="false"
+			{:else if choosingServer}
+				<div class="server-picker-view">
+					<ServersView
+						searchSignal={pickerSearchSignal}
+						selectedId={editing.serverId}
+						onSelect={(server) => {
+							if (editing) editing.serverId = server.id;
+							choosingServer = false;
+						}}
+						compact
+					/>
+					<div class="design-action-bar picker-bar">
+						<IconButton
+							design
+							icon={backIcon}
+							ariaLabel={t('common.back')}
+							size="lg"
+							variant="surface"
+							onclick={() => {
+								choosingServer = false;
+							}}
 						/>
-						<button
-							type="button"
-							class="close-search-btn"
-							onclick={handleCloseSearch}
-							aria-label={t('common.close')}
-						>
-							<img src={crossIcon} alt="" class="close-icon" />
-						</button>
+						<IconButton
+							design
+							icon={searchIcon}
+							ariaLabel={t('common.search')}
+							size="lg"
+							variant="surface"
+							onclick={() => pickerSearchSignal++}
+						/>
+						<IconButton
+							design
+							icon={checkIcon}
+							ariaLabel={t('common.save')}
+							size="lg"
+							variant="primary"
+							onclick={() => {
+								choosingServer = false;
+							}}
+						/>
 					</div>
 				</div>
-
-				{#if !selectMode}
+			{:else}
+				{@const currentServer = serversById.get(editing.serverId)}
+				<RuleEditorView
+					rule={editing}
+					server={currentServer}
+					subscriptionName={activeSub?.name}
+					step={editorStep}
+					onStepChange={(next) => (editorStep = next)}
+					onNameChange={(name) => {
+						if (editing) editing.name = name;
+					}}
+					onSave={async (updated: Rule | Rule[]) => {
+						try {
+							if (Array.isArray(updated)) {
+								await catalog.saveRules(updated);
+							} else {
+								await catalog.saveRule(updated);
+							}
+							editing = null;
+							choosingProcess = false;
+							choosingServer = false;
+							error = '';
+						} catch (e) {
+							error = t('errors.' + errorCode(e));
+						}
+					}}
+					onCancel={() => {
+						editing = null;
+						choosingProcess = false;
+						choosingServer = false;
+					}}
+					onSelectProcess={() => {
+						choosingProcess = true;
+					}}
+					onSelectServer={() => {
+						pickerSearchSignal = 0;
+						choosingServer = true;
+					}}
+					onMatcherChange={(matcher) => {
+						if (editing) {
+							editing.matcher = matcher;
+							editing.isDomain = matcher === 'domain';
+						}
+					}}
+				/>
+			{/if}
+		{:else if selectingRule}
+			<div class="server-picker-view">
+				<ServersView
+					selectedId={pendingServerId}
+					searchSignal={pickerSearchSignal}
+					onSelect={pickServer}
+					compact
+				/>
+				<div class="design-action-bar picker-bar">
 					<IconButton
 						design
-						icon={addIcon}
-						ariaLabel={t('common.add')}
+						icon={searchIcon}
+						ariaLabel={t('common.search')}
 						size="lg"
 						variant="surface"
-						class="add-rule-btn"
-						disabled={!$catalogStore.servers.length}
-						onclick={add}
+						onclick={() => pickerSearchSignal++}
 					/>
-				{/if}
+					<IconButton
+						design
+						icon={checkIcon}
+						ariaLabel={t('common.save')}
+						size="lg"
+						variant="primary"
+						onclick={confirmServer}
+					/>
+				</div>
 			</div>
-		</div>
-		{#if error}<p role="alert">{error}</p>{/if}
-		<div class="rules-list">
-			{#each filtered as rule (rule.id)}
-				{@const server = serversById.get(rule.serverId)}
-				{@const isDirect = rule.serverId === 'direct'}
-				{@const isBlock = rule.serverId === 'block'}
-				{@const ruleSubscription = subscriptionsById.get(rule.serverId)}
-				{@const isSub =
-					rule.serverId === 'subscription' || Boolean(ruleSubscription)}
-				{@const serverName = isDirect
-					? t('rules.direct')
-					: isBlock
-						? t('rules.block') || 'Блокировать'
-						: isSub
-							? (ruleSubscription?.name ??
-								activeSub?.name ??
-								t('rules.subscriptionServer'))
-							: server
-								? serverDisplayName(server)
-								: '—'}
-				{@const matcher =
-					rule.matcher ?? (rule.isDomain ? 'domain' : 'application')}
-				{@const isGeo = matcher === 'geosite' || matcher === 'geoip'}
-				{@const ruleIcon = getRuleIcon(rule)}
-				<article
-					class="rule-row"
-					class:application-rule={matcher === 'application'}
-				>
-					<div class="rule-left">
-						<div class="app-icon-wrapper" class:domain-icon={!ruleIcon}>
-							{#if ruleIcon}
-								<img class="app-icon" src={ruleIcon} alt="" />
-							{:else if matcher === 'geosite'}
-								<span class="globe-text" aria-hidden="true">
-									<MaterialIcon name="travel_explore" size={24} />
-								</span>
-							{:else if matcher === 'geoip'}
-								<span class="globe-text" aria-hidden="true">
-									<MaterialIcon name="pin_drop" size={20} />
-								</span>
-							{:else if matcher === 'final'}
-								<span class="globe-text" aria-hidden="true">
-									<MaterialIcon name="alt_route" size={20} />
-								</span>
-							{:else}
-								<span class="globe-text" aria-hidden="true">
-									<MaterialIcon name="description" size={20} />
-								</span>
-							{/if}
-						</div>
+		{:else if showPresets}
+			<PresetsView
+				{appliedPresetIds}
+				{hasActiveProxy}
+				onApply={handleApplyPreset}
+				onRemove={handleRemovePreset}
+				onClose={() => (showPresets = false)}
+			/>
+		{:else}
+			<section
+				class="rules-view"
+				class:empty={!$catalogStore.rules.length}
+				aria-label={t('rules.title')}
+			>
+				{#if selectMode}
+					<!-- Figma 202:7708 — selection replaces the header with "Select all". -->
+					<div class="select-all-row" transition:rise={{ y: -8 }}>
 						<button
-							class="rule-text"
-							onclick={() => {
-								error = '';
-								editing = { ...rule };
-							}}
-							aria-label={t('rules.edit', { name: rule.name })}
+							type="button"
+							class="select-all-btn"
+							onclick={() =>
+								(selected =
+									selected.length === filtered.length
+										? []
+										: filtered.map((rule) => rule.id))}
 						>
-							<span class="rule-name" title={formatRuleDisplayName(rule.name)}>
-								{matcher === 'final'
-									? t('rules.everythingElse') || 'Всё остальное'
-									: formatRuleDisplayName(rule.name)}
-							</span>
-							<span
-								class="rule-details"
-								class:domain-details={matcher === 'domain'}
-							>
-								{matcher === 'final'
-									? t('rules.finalDetails') || 'MATCH'
-									: isGeo
-										? matcher === 'geosite'
-											? 'GeoSite'
-											: 'GeoIP'
-										: serverName}
-							</span>
+							<span>Select all</span>
+							<RoundCheckbox
+								asSpan
+								checked={filtered.length > 0 &&
+									selected.length === filtered.length}
+							/>
 						</button>
 					</div>
-					<div class="rule-right">
-						<button
-							class="server-pill"
-							title={serverName}
-							onclick={() => {
-								pickerSearchSignal = 0;
-								selectingRule = rule;
-								pendingServerId = rule.serverId;
-							}}
-							aria-label={rule.name +
-								': ' +
-								t('servers.title') +
-								' — ' +
-								serverName}
-						>
-							{#if isDirect}
-								<span class="flag-sm">
-									<MaterialIcon name="alt_route" size={16} />
-								</span>
-							{:else if isBlock}
-								<span class="flag-sm">
-									<MaterialIcon name="block" size={16} />
-								</span>
-							{:else if isSub}
-								<span class="flag-sm">
-									<img src={tunIcon} alt="" width="24" height="24" />
-								</span>
-							{:else if server}
-								<span class="flag-sm">
-									<CountryFlag countryCode={server.countryCode} size={24} />
-								</span>
-							{/if}
-							<span class="server-pill-name">
-								{isSub && matcher !== 'application' ? 'Tun' : serverName}
-							</span>
-						</button>
-						{#if selectMode}
-							<RoundCheckbox
-								checked={selectedNames.has(rule.id)}
-								ariaLabel={t('rules.select', { name: rule.name })}
-								onclick={() =>
-									(selected = selectedNames.has(rule.id)
-										? selected.filter((id) => id !== rule.id)
-										: [...selected, rule.id])}
-							/>
-						{:else}
-							<ToggleSwitch
-								checked={rule.enabled}
-								mode="switch"
-								appearance={matcher === 'application' ? 'pill' : 'dot'}
-								ariaLabel={t('rules.toggle', { name: rule.name })}
-								onchange={() => toggle(rule)}
+				{/if}
+				<div
+					class="header-card-wrapper"
+					class:selection={selectMode}
+					hidden={selectMode}
+				>
+					<div class="header-row">
+						<div class="header-pill">
+							<!-- Normal header content -->
+							<div class="header-normal" class:header-hidden={searching}>
+								<div class="header-card-title">
+									<span class="title-text">
+										{activeSub?.name ?? t('rules.title')}
+									</span>
+									<StatusDot variant="active" />
+								</div>
+								<div class="header-card-actions">
+									<IconButton
+										design
+										icon={searchIcon}
+										ariaLabel={t('common.search')}
+										onclick={handleOpenSearch}
+									/>
+									<IconButton
+										design
+										icon={reloadIcon}
+										ariaLabel={t('common.reload')}
+										onclick={refresh}
+									/>
+
+									{#if !selectMode}
+										<IconButton
+											design
+											icon={pencilIcon}
+											ariaLabel={t('rules.selectMode')}
+											onclick={() => {
+												menu = false;
+												selectMode = true;
+											}}
+										/>
+										<IconButton
+											design
+											icon={menuIcon}
+											ariaLabel={t('common.menu')}
+											expanded={menu}
+											onclick={() => (menu = !menu)}
+										/>
+									{/if}
+								</div>
+							</div>
+
+							<!-- Search bar inside header pill (identical to ServersView) -->
+							<div
+								class="header-search"
+								class:search-open={searching && !searchClosing}
+								class:search-closing={searchClosing}
+							>
+								<img src={searchIcon} alt="" class="search-header-icon" />
+								<input
+									bind:this={searchInputEl}
+									type="text"
+									class="search-header-input"
+									placeholder={t('rules.searchPlaceholder') ||
+										'Поиск правил...'}
+									bind:value={query}
+									autocomplete="off"
+									spellcheck="false"
+								/>
+								<button
+									type="button"
+									class="close-search-btn"
+									onclick={handleCloseSearch}
+									aria-label={t('common.close')}
+								>
+									<img src={crossIcon} alt="" class="close-icon" />
+								</button>
+							</div>
+						</div>
+
+						{#if !selectMode}
+							<IconButton
+								design
+								icon={addIcon}
+								ariaLabel={t('common.add')}
+								size="lg"
+								variant="surface"
+								class="add-rule-btn"
+								disabled={!$catalogStore.servers.length}
+								onclick={add}
 							/>
 						{/if}
 					</div>
-				</article>
-			{:else}
-				<div class="empty-rules-container">
-					<p class="rules-empty">{t('rules.empty')}</p>
 				</div>
-			{/each}
-		</div>
-		{#if selectMode}
-			<div class="select-bar">
-				<IconButton
-					design
-					icon={selected.length ? trashIcon : searchIcon}
-					ariaLabel={selected.length
-						? t('rules.deleteSelected')
-						: t('common.search')}
-					size="lg"
-					variant="surface"
-					onclick={() => {
-						if (selected.length) deleting = true;
-						else handleOpenSearch();
-					}}
-				/>
-				<IconButton
-					design
-					icon={checkIcon}
-					ariaLabel={t('common.close')}
-					size="lg"
-					variant="primary"
-					onclick={() => {
-						selectMode = false;
-						selected = [];
-					}}
-				/>
-			</div>
+				{#if error}<p role="alert" transition:rise>{error}</p>{/if}
+				<div class="rules-list">
+					{#each filtered as rule (rule.id)}
+						{@const server = serversById.get(rule.serverId)}
+						{@const isDirect = rule.serverId === 'direct'}
+						{@const isBlock = rule.serverId === 'block'}
+						{@const ruleSubscription = subscriptionsById.get(rule.serverId)}
+						{@const isSub =
+							rule.serverId === 'subscription' || Boolean(ruleSubscription)}
+						{@const serverName = isDirect
+							? t('rules.direct')
+							: isBlock
+								? t('rules.block') || 'Блокировать'
+								: isSub
+									? (ruleSubscription?.name ??
+										activeSub?.name ??
+										t('rules.subscriptionServer'))
+									: server
+										? serverDisplayName(server)
+										: '—'}
+						{@const matcher =
+							rule.matcher ?? (rule.isDomain ? 'domain' : 'application')}
+						{@const isGeo = matcher === 'geosite' || matcher === 'geoip'}
+						{@const ruleIcon = getRuleIcon(rule)}
+						<article
+							class="rule-row"
+							class:application-rule={matcher === 'application'}
+							animate:flip={{ duration: 260, easing: easeOut }}
+							out:pop={{ start: 0.96, duration: 160 }}
+						>
+							<div class="rule-left">
+								<div class="app-icon-wrapper" class:domain-icon={!ruleIcon}>
+									{#if ruleIcon}
+										<img class="app-icon" src={ruleIcon} alt="" />
+									{:else if matcher === 'geosite'}
+										<span class="globe-text" aria-hidden="true">
+											<MaterialIcon name="travel_explore" size={24} />
+										</span>
+									{:else if matcher === 'geoip'}
+										<span class="globe-text" aria-hidden="true">
+											<MaterialIcon name="pin_drop" size={20} />
+										</span>
+									{:else if matcher === 'final'}
+										<span class="globe-text" aria-hidden="true">
+											<MaterialIcon name="alt_route" size={20} />
+										</span>
+									{:else}
+										<span class="globe-text" aria-hidden="true">
+											<MaterialIcon name="description" size={20} />
+										</span>
+									{/if}
+								</div>
+								<button
+									class="rule-text"
+									onclick={() => {
+										error = '';
+										editorStep = 'form';
+										editing = { ...rule };
+									}}
+									aria-label={t('rules.edit', { name: rule.name })}
+								>
+									<span
+										class="rule-name"
+										title={formatRuleDisplayName(rule.name)}
+									>
+										{matcher === 'final'
+											? t('rules.everythingElse') || 'Всё остальное'
+											: formatRuleDisplayName(rule.name)}
+									</span>
+									<span
+										class="rule-details"
+										class:domain-details={matcher === 'domain'}
+									>
+										{matcher === 'final'
+											? t('rules.finalDetails') || 'MATCH'
+											: isGeo
+												? matcher === 'geosite'
+													? 'GeoSite'
+													: 'GeoIP'
+												: serverName}
+									</span>
+								</button>
+							</div>
+							<div class="rule-right">
+								<button
+									class="server-pill"
+									title={serverName}
+									onclick={() => {
+										pickerSearchSignal = 0;
+										selectingRule = rule;
+										pendingServerId = rule.serverId;
+									}}
+									aria-label={rule.name +
+										': ' +
+										t('servers.title') +
+										' — ' +
+										serverName}
+								>
+									{#if isDirect}
+										<span class="flag-sm">
+											<MaterialIcon name="alt_route" size={16} />
+										</span>
+									{:else if isBlock}
+										<span class="flag-sm">
+											<MaterialIcon name="block" size={16} />
+										</span>
+									{:else if isSub}
+										<span class="flag-sm">
+											<img src={tunIcon} alt="" width="24" height="24" />
+										</span>
+									{:else if server}
+										<span class="flag-sm">
+											<CountryFlag countryCode={server.countryCode} size={24} />
+										</span>
+									{/if}
+									<span class="server-pill-name">
+										{isSub && matcher !== 'application' ? 'Tun' : serverName}
+									</span>
+								</button>
+								{#if selectMode}
+									<span class="row-control" in:pop>
+										<RoundCheckbox
+											checked={selectedNames.has(rule.id)}
+											ariaLabel={t('rules.select', { name: rule.name })}
+											onclick={() =>
+												(selected = selectedNames.has(rule.id)
+													? selected.filter((id) => id !== rule.id)
+													: [...selected, rule.id])}
+										/>
+									</span>
+								{:else}
+									<span class="row-control" in:pop>
+										<ToggleSwitch
+											checked={rule.enabled}
+											mode="switch"
+											appearance={matcher === 'application' ? 'pill' : 'dot'}
+											ariaLabel={t('rules.toggle', { name: rule.name })}
+											onchange={() => toggle(rule)}
+										/>
+									</span>
+								{/if}
+							</div>
+						</article>
+					{:else}
+						<div class="empty-rules-container">
+							<p class="rules-empty">{t('rules.empty')}</p>
+						</div>
+					{/each}
+				</div>
+				{#if selectMode}
+					<div class="design-action-bar select-bar" transition:rise>
+						<button
+							type="button"
+							class="delete-selected"
+							aria-label={t('rules.deleteSelected')}
+							disabled={!selected.length}
+							onclick={() => (deleting = true)}
+						>
+							<img src={trashIcon} alt="" width="34" height="34" />
+						</button>
+						<IconButton
+							design
+							icon={checkIcon}
+							ariaLabel={t('common.close')}
+							size="lg"
+							variant="primary"
+							onclick={() => {
+								selectMode = false;
+								selected = [];
+							}}
+						/>
+					</div>
+				{/if}
+				{#if menu}
+					<PopupMenu top="70px" right="58px">
+						<button
+							class="rules-menu-item"
+							type="button"
+							onclick={() => {
+								menu = false;
+								showPresets = true;
+							}}
+						>
+							<MaterialIcon name="tune" size={18} />{t('rules.presets')}
+						</button>
+						<MenuItem
+							icon={checkIcon}
+							label={t('rules.selectAll')}
+							onclick={() => {
+								menu = false;
+								selectMode = true;
+								selected = filtered.map((rule) => rule.id);
+							}}
+						/>
+					</PopupMenu>
+				{/if}
+			</section>
 		{/if}
-		{#if menu}
-			<PopupMenu top="70px" right="58px">
-				<button
-					class="rules-menu-item"
-					type="button"
-					onclick={() => {
-						menu = false;
-						showPresetsModal = true;
-					}}
-				>
-					<MaterialIcon name="tune" size={18} />{t('rules.presets')}
-				</button>
-				<MenuItem
-					icon={checkIcon}
-					label={t('rules.selectAll')}
-					onclick={() => {
-						menu = false;
-						selectMode = true;
-						selected = filtered.map((rule) => rule.id);
-					}}
-				/>
-			</PopupMenu>
-		{/if}
-	</section>
-{/if}
+	</div>
+{/key}
 
 {#if deleting}
 	<ConfirmDialog
@@ -748,16 +842,7 @@
 		confirmLabel={t('common.continue')}
 		onCancel={() => (deleting = false)}
 		onConfirm={remove}
-	/>
-{/if}
-
-{#if showPresetsModal}
-	<PresetsModal
-		{appliedPresetIds}
-		{hasActiveProxy}
-		onApply={handleApplyPreset}
-		onRemove={handleRemovePreset}
-		onClose={() => (showPresetsModal = false)}
+		destructive
 	/>
 {/if}
 
@@ -777,6 +862,19 @@
 {/if}
 
 <style>
+	.rules-screen {
+		position: relative;
+		display: flex;
+		flex-direction: column;
+		flex: 1;
+		width: 100%;
+		min-height: 0;
+	}
+	.row-control {
+		display: inline-flex;
+		flex-shrink: 0;
+		align-items: center;
+	}
 	.empty-rules-container {
 		display: flex;
 		flex-direction: column;
@@ -806,19 +904,6 @@
 		flex: 1;
 		gap: 10px;
 		overflow: hidden;
-	}
-	.picker-bar {
-		position: absolute;
-		bottom: var(--nav-bottom);
-		left: 16px;
-		right: 16px;
-		display: flex;
-		width: auto;
-		justify-content: space-between;
-		align-items: center;
-		flex-shrink: 0;
-		padding: 0;
-		margin: 0;
 	}
 	.header-card-wrapper {
 		position: relative;
@@ -1048,9 +1133,11 @@
 		align-items: center;
 		justify-content: center;
 	}
+	/* Figma 202:7414 — generic rules use a light disc with a grey glyph. */
 	.domain-icon {
-		background: #767676;
+		background: #efefef;
 		border-radius: 50%;
+		color: #00000080;
 	}
 	.app-icon {
 		width: 32px;
@@ -1103,7 +1190,7 @@
 		gap: 6px;
 		height: 32px;
 		min-height: 0;
-		background: #00000047;
+		background: var(--design-panel);
 		border: none;
 		outline: none;
 		box-shadow: none;
@@ -1130,27 +1217,66 @@
 	}
 	.server-pill-name {
 		font-size: 12px;
-		line-height: 20px;
-		font-weight: 500;
-		color: #ffffffe6;
+		line-height: 15.6px;
+		font-weight: 400;
+		color: #fff;
 		white-space: nowrap;
 		max-width: 80px;
 		overflow: hidden;
 		text-overflow: ellipsis;
 	}
-	.select-bar {
-		position: absolute;
-		bottom: var(--nav-bottom);
-		left: 16px;
-		right: 16px;
-		z-index: 20;
+	.select-all-row {
 		display: flex;
-		justify-content: space-between;
-		align-items: center;
-		width: auto;
-		padding: 0;
-		margin: 0;
+		justify-content: flex-end;
 		flex-shrink: 0;
+		height: 28px;
+		margin-bottom: 16px;
+		padding-right: 16px;
+	}
+	.select-all-btn {
+		display: flex;
+		align-items: center;
+		gap: 16px;
+		padding: 0;
+		border: 0;
+		background: transparent;
+		color: #fff;
+		font-family: 'Satoshi', var(--font-family-base);
+		font-size: 12px;
+		font-weight: 500;
+		line-height: 16.2px;
+	}
+	/* Figma 202:7708 — red delete sits where the nav pill was. */
+	.delete-selected {
+		display: grid;
+		place-items: center;
+		width: 42px;
+		height: 42px;
+		margin-left: 0;
+		padding: 0;
+		border: 1px solid #ffffff26;
+		border-radius: 50%;
+		background: #d03441;
+		-webkit-backdrop-filter: blur(25px);
+		backdrop-filter: blur(25px);
+		transition:
+			background-color 160ms ease,
+			opacity 160ms ease,
+			transform 160ms var(--ease-spring);
+	}
+	.delete-selected img {
+		filter: brightness(0) invert(1);
+	}
+	.delete-selected:disabled {
+		opacity: 0.5;
+	}
+	.delete-selected:active:not(:disabled) {
+		transform: scale(0.94);
+	}
+	@media (hover: hover) and (pointer: fine) {
+		.delete-selected:hover:not(:disabled) {
+			background: #e03d4b;
+		}
 	}
 
 	.domain-details {

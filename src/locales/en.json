@@ -48,7 +48,10 @@
 		"initializing": "Initializing…",
 		"disconnecting": "Disconnecting…",
 		"error": "Connection error",
-		"reconnecting": "Reconnecting…"
+		"reconnecting": "Reconnecting…",
+		"updateAvailable": "New version available",
+		"updateAction": "Update",
+		"subscriptionExpired": "Subscription expired"
 	},
 	"subscriptions": {
 		"title": "My Subscriptions",
@@ -72,10 +75,11 @@
 		"updatedAt": "Updated: {time}",
 		"refreshFailed": "Refresh failed",
 		"deleteConfirm": "Do you want to delete “{name}”, its servers and associated rules?",
-		"shareTitle": "Link to “{name}”",
+		"shareTitle": "Share link",
 		"shareHint": "Copy the link to import this subscription on another device.",
 		"sourceUnavailable": "The link is unavailable in this demo session.",
-		"copyFailed": "Automatic copying failed. Select the link manually."
+		"copyFailed": "Automatic copying failed. Select the link manually.",
+		"profileLink": "Profile link"
 	},
 	"servers": {
 		"title": "Servers",
@@ -209,6 +213,7 @@
 		"shaderColorADesc": "First gradient accent when connected",
 		"shaderColorB": "Color B (Active)",
 		"shaderColorBDesc": "Second gradient accent when connected",
+		"brightness": "Brightness",
 		"shaderExposure": "Brightness & Exposure",
 		"shaderExposureDesc": "Intensity of light filaments and radiance",
 		"shaderReset": "Reset to Default",
@@ -317,6 +322,17 @@
 		"subscriptionServer": "Subscription default",
 		"subscriptionServerDesc": "Current server in this subscription",
 		"everythingElse": "Everything else",
-		"finalDetails": "Used when no rule above matches"
+		"finalDetails": "Used when no rule above matches",
+		"typeDomain": "Link",
+		"typeApplication": "Application",
+		"typeDomainDesc": "Traffic of the site and all its subdomains goes through the chosen server.",
+		"typeApplicationDesc": "All traffic of the chosen programs on this computer goes through the chosen server.",
+		"typeGeositeDesc": "Ready-made domain lists by category: services, countries, blocklists.",
+		"typeGeoipDesc": "Location by IP address: country, region, city, coordinates, provider, ASN.",
+		"domainLink": "Domain link",
+		"geoCategory": "{type} category",
+		"examplesLabel": "For example:",
+		"selectedCount": "selected",
+		"clear": "Clear"
 	}
 }

@@ -520,7 +520,7 @@ pub fn build(
     })
 }
 /// Xray compares a process name case-sensitively with the executable on disk,
-/// while Windows names are not: a `claude.exe` rule never matched `Claude.exe`.
+/// while Windows names are not: an `example.exe` rule must also match `Example.exe`.
 /// Emit the spellings Windows applications use. Paths are matched as written.
 pub(crate) fn process_names(value: &str) -> Vec<String> {
     let mut names: Vec<String> = Vec::new();

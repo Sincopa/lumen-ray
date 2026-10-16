@@ -1,9 +1,7 @@
 dist
 node_modules
 src-tauri
-background shader.html
 package-lock.json
 test-results
 playwright-report
-task.md
 src/assets/lumen-expressions.json

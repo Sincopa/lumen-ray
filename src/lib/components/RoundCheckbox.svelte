@@ -1,6 +1,4 @@
 <script lang="ts">
-	import checkIcon from '../../assets/check.svg';
-
 	interface Props {
 		checked: boolean;
 		ariaLabel?: string;
@@ -21,11 +19,11 @@
 </script>
 
 {#if asSpan}
-	<span class="select-checkbox {className}" class:checked aria-hidden="true">
-		{#if checked}
-			<img src={checkIcon} alt="" />
-		{/if}
-	</span>
+	<span
+		class="select-checkbox {className}"
+		class:checked
+		aria-hidden="true"
+	></span>
 {:else}
 	<button
 		type="button"
@@ -36,52 +34,46 @@
 		aria-label={ariaLabel}
 		{disabled}
 		{onclick}
-	>
-		{#if checked}
-			<img src={checkIcon} alt="" />
-		{/if}
-	</button>
+	></button>
 {/if}
 
 <style>
+	/* Figma "Component 26" — glass well with a white knob when checked. */
 	.select-checkbox {
-		width: 26px;
-		height: 26px;
-		min-width: 26px;
-		min-height: 0;
-		border-radius: 50%;
-		background: transparent;
-		border: 2px solid #ffffff40;
-		display: inline-flex;
-		align-items: center;
-		justify-content: center;
-		padding: 0;
+		display: inline-grid;
+		place-items: center;
 		flex-shrink: 0;
+		width: 28px;
+		height: 28px;
+		min-width: 28px;
+		min-height: 0;
+		padding: 0;
+		border: 0;
+		border-radius: 50%;
+		background: #ffffff0a;
+		-webkit-backdrop-filter: blur(25px);
+		backdrop-filter: blur(25px);
 		cursor: pointer;
-		box-sizing: border-box;
-		transition:
-			background-color 160ms ease,
-			border-color 160ms ease;
+		transition: background-color 160ms ease;
 	}
-
+	.select-checkbox::after {
+		content: '';
+		width: 24px;
+		height: 24px;
+		border-radius: 50%;
+		background: #fff;
+		box-shadow: 0 2px 7.7px #00000040;
+		transform: scale(0);
+		transition: transform 180ms var(--ease-spring);
+	}
+	.select-checkbox.checked::after {
+		transform: scale(1);
+	}
 	.select-checkbox:hover:not(:disabled) {
-		border-color: #ffffff70;
+		background: #ffffff14;
 	}
-
-	.select-checkbox.checked {
-		background: white;
-		border-color: white;
-	}
-
 	.select-checkbox:disabled {
 		opacity: 0.5;
 		cursor: not-allowed;
-	}
-
-	.select-checkbox img {
-		width: 16px;
-		height: 16px;
-		object-fit: contain;
-		filter: brightness(0);
 	}
 </style>

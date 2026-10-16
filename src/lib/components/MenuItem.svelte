@@ -34,16 +34,19 @@
 		width: 100%;
 		height: 40px;
 		min-height: 0;
-		border-radius: 14px;
-		background: rgba(255, 255, 255, 0.04);
+		border-radius: 16px;
+		background: #00000026;
 		border: 0;
 		display: flex;
 		align-items: center;
-		gap: 10px;
-		padding: 0 12px 0 8px;
+		gap: 6px;
+		padding: 0 10px 0 8px;
 		text-align: left;
-		font-size: 13.5px;
+		font-family: 'Satoshi', var(--font-family-base);
+		font-size: 12px;
 		font-weight: 500;
+		line-height: 16.2px;
+		letter-spacing: -0.2px;
 		color: #ffffff;
 		cursor: pointer;
 		transition: background 0.18s ease;
@@ -51,7 +54,7 @@
 	}
 
 	.menu-item:hover:not(:disabled) {
-		background: rgba(255, 255, 255, 0.12);
+		background: #00000040;
 	}
 
 	.menu-item.danger:hover:not(:disabled) {
@@ -68,7 +71,7 @@
 		width: 24px;
 		height: 24px;
 		border-radius: 50%;
-		background: rgba(255, 255, 255, 0.1);
+		background: #ffffff0d;
 		display: flex;
 		align-items: center;
 		justify-content: center;

@@ -34,9 +34,9 @@ taskkill /F /IM lumen.exe >nul 2>&1
 taskkill /F /IM misc-vpn.exe >nul 2>&1
 
 echo [1/2] Building release application...
-powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0scripts\build-release.ps1" -Mode Portable
+powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0src-tauri\build\build-release.ps1" -Mode Portable
 if errorlevel 1 goto :error
-powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0scripts\sign-windows.ps1" -Mode Sign -Path "%~dp0src-tauri\target\release\app.exe"
+powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0src-tauri\build\sign-windows.ps1" -Mode Sign -Path "%~dp0src-tauri\target\release\app.exe"
 if errorlevel 1 goto :error
 
 echo.

@@ -35,7 +35,7 @@ if not exist "node_modules\" (
     )
 )
 
-powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0scripts\build-release.ps1" -Mode Portable
+powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0src-tauri\build\build-release.ps1" -Mode Portable
 if errorlevel 1 (
     echo.
     echo ============================================================

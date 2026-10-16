@@ -6,4 +6,4 @@
  * Keep the CSS fallback dimensions in styles/tokens.css in sync.
  */
 export const APP_WIDTH = 390;
-export const APP_HEIGHT = 844;
+export const APP_HEIGHT = 700;

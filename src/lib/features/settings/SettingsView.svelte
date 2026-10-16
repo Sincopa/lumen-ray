@@ -1,5 +1,10 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
+
+	interface Props {
+		onOpenBrightness?: () => void;
+	}
+	let { onOpenBrightness }: Props = $props();
 	import AdvancedTools from './AdvancedTools.svelte';
 	let toolsOpen = $state(false);
 	import { invoke } from '@tauri-apps/api/core';
@@ -277,927 +282,971 @@
 		{ value: '24', label: t('settings.update24h') },
 		{ value: '0', label: t('settings.updateManual') },
 	]);
+	import { screen, reveal } from '../../motion';
 </script>
 
 <div class="settings-view">
-	{#if currentSubView === 'main'}
-		<!-- Section 1: General Settings -->
-		<div class="settings-section">
-			<div class="section-header">
-				<span class="section-title">{t('settings.generalSection')}</span>
-			</div>
-			<div class="settings-group">
-				<!-- Language Switcher -->
-				<SettingRow label={t('settings.language')}>
-					<Dropdown
-						label={t('settings.language')}
-						options={languageOptions}
-						value={i18n.currentLanguage}
-						onChange={(value) => i18n.setLanguage(value as SupportedLanguage)}
-						compact
-					/>
-				</SettingRow>
-
-				<!-- Animated Background -->
-				<SettingRow label={t('settings.animation')}>
-					<ToggleSwitch
-						mode="checkbox"
-						ariaLabel={t('settings.animation')}
-						checked={shaderSettings.enabled}
-						onchange={(val) => shaderSettings.setEnabled(val)}
-					/>
-				</SettingRow>
-
-				<!-- Tooltips toggle -->
-				<SettingRow label={t('settings.tooltips')}>
-					<ToggleSwitch
-						mode="checkbox"
-						ariaLabel={t('settings.tooltips')}
-						checked={shaderSettings.tooltipsEnabled}
-						onchange={(val) => shaderSettings.setTooltipsEnabled(val)}
-					/>
-				</SettingRow>
-
-				<!-- UI Scale Slider & Input -->
-				<SettingRow label={t('settings.uiScale')}>
-					<div class="range-control">
-						<input
-							type="range"
-							min="0.75"
-							max="1.5"
-							step="0.05"
-							aria-label={t('settings.uiScale')}
-							value={uiScaleDraft}
-							oninput={(e) => {
-								const val = parseFloat((e.target as HTMLInputElement).value);
-								uiScaleDraft = val;
-								if (!isEditingUiScale) {
-									uiScaleText = Math.round(val * 100).toString();
-								}
-							}}
-							onchange={commitUiScaleSlider}
-							class="range-slider"
-						/>
-						<div class="range-input-wrapper">
-							<input
-								type="text"
-								inputmode="numeric"
-								pattern="[0-9]*"
-								class="range-text-input"
-								aria-label="{t('settings.uiScale')} (%)"
-								bind:value={uiScaleText}
-								onfocus={() => (isEditingUiScale = true)}
-								onblur={commitUiScale}
-								onkeydown={(e) => {
-									if (e.key === 'Enter') {
-										(e.target as HTMLInputElement).blur();
-									}
-								}}
+	{#key currentSubView}
+		<div
+			class="settings-page"
+			in:screen={{ dir: currentSubView === 'main' ? -1 : 1 }}
+		>
+			{#if currentSubView === 'main'}
+				<!-- Section 1: General Settings -->
+				<div class="settings-section">
+					<div class="section-header">
+						<span class="section-title">{t('settings.generalSection')}</span>
+					</div>
+					<div class="settings-group">
+						<!-- Language Switcher -->
+						<SettingRow label={t('settings.language')}>
+							<Dropdown
+								label={t('settings.language')}
+								options={languageOptions}
+								value={i18n.currentLanguage}
+								onChange={(value) =>
+									i18n.setLanguage(value as SupportedLanguage)}
+								compact
 							/>
-							<span class="range-unit">%</span>
-						</div>
-					</div>
-				</SettingRow>
+						</SettingRow>
 
-				<!-- App Version & Updates -->
-				<SettingRow label={t('settings.appVersion')}>
-					<div class="version-badge-container">
-						<span class="badge version-badge">
-							v{$applicationUpdateState.currentVersion}
-						</span>
-						<button
-							type="button"
-							class="action-btn"
-							class:success={$applicationUpdateState.status === 'latest'}
-							disabled={['checking', 'downloading'].includes(
-								$applicationUpdateState.status,
-							)}
-							onclick={handleUpdateAction}
+						<!-- Animated Background -->
+						<SettingRow label={t('settings.animation')}>
+							<ToggleSwitch
+								mode="checkbox"
+								ariaLabel={t('settings.animation')}
+								checked={shaderSettings.enabled}
+								onchange={(val) => shaderSettings.setEnabled(val)}
+							/>
+						</SettingRow>
+
+						<!-- Tooltips toggle -->
+						<SettingRow label={t('settings.tooltips')}>
+							<ToggleSwitch
+								mode="checkbox"
+								ariaLabel={t('settings.tooltips')}
+								checked={shaderSettings.tooltipsEnabled}
+								onchange={(val) => shaderSettings.setTooltipsEnabled(val)}
+							/>
+						</SettingRow>
+
+						<!-- UI Scale Slider & Input -->
+						<SettingRow label={t('settings.uiScale')}>
+							<div class="range-control">
+								<input
+									type="range"
+									min="0.75"
+									max="1.5"
+									step="0.05"
+									aria-label={t('settings.uiScale')}
+									value={uiScaleDraft}
+									oninput={(e) => {
+										const val = parseFloat(
+											(e.target as HTMLInputElement).value,
+										);
+										uiScaleDraft = val;
+										if (!isEditingUiScale) {
+											uiScaleText = Math.round(val * 100).toString();
+										}
+									}}
+									onchange={commitUiScaleSlider}
+									class="range-slider"
+								/>
+								<div class="range-input-wrapper">
+									<input
+										type="text"
+										inputmode="numeric"
+										pattern="[0-9]*"
+										class="range-text-input"
+										aria-label="{t('settings.uiScale')} (%)"
+										bind:value={uiScaleText}
+										onfocus={() => (isEditingUiScale = true)}
+										onblur={commitUiScale}
+										onkeydown={(e) => {
+											if (e.key === 'Enter') {
+												(e.target as HTMLInputElement).blur();
+											}
+										}}
+									/>
+									<span class="range-unit">%</span>
+								</div>
+							</div>
+						</SettingRow>
+
+						<!-- App Version & Updates -->
+						<SettingRow label={t('settings.appVersion')}>
+							<div class="version-badge-container">
+								<span class="badge version-badge">
+									v{$applicationUpdateState.currentVersion}
+								</span>
+								<button
+									type="button"
+									class="action-btn"
+									class:success={$applicationUpdateState.status === 'latest'}
+									disabled={['checking', 'downloading'].includes(
+										$applicationUpdateState.status,
+									)}
+									onclick={handleUpdateAction}
+								>
+									{#if $applicationUpdateState.status === 'checking'}
+										<span class="loading-spinner"></span>
+										<span>{t('settings.checkingUpdates')}</span>
+									{:else if $applicationUpdateState.status === 'downloading'}
+										<span class="loading-spinner"></span>
+										<span>{t('settings.downloadingUpdate')}</span>
+									{:else if $applicationUpdateState.status === 'available'}
+										<span>
+											{t('settings.downloadUpdate', {
+												version: $applicationUpdateState.version ?? '',
+											})}
+										</span>
+									{:else if $applicationUpdateState.status === 'latest'}
+										<span class="success-text">
+											✓ {t('settings.latestVersionInstalled')}
+										</span>
+									{:else if $applicationUpdateState.status === 'error'}
+										<span>{t('common.retry')}</span>
+									{:else}
+										<span>{t('settings.checkUpdates')}</span>
+									{/if}
+								</button>
+							</div>
+						</SettingRow>
+					</div>
+				</div>
+
+				<!-- Section 2: System & Startup -->
+				<div class="settings-section">
+					<div class="section-header">
+						<span class="section-title">{t('settings.systemSection')}</span>
+					</div>
+					<div class="settings-group">
+						<!-- Auto Start with Windows -->
+						<SettingRow label={t('settings.autoStart')}>
+							<ToggleSwitch
+								mode="checkbox"
+								disabled={!runtime.isTauri}
+								ariaLabel={t('settings.autoStart')}
+								checked={runtime.isTauri ? $nativeSettings.autoStart : false}
+								onchange={(val) => updateNativeSettings({ autoStart: val })}
+							/>
+						</SettingRow>
+
+						<!-- Close to Tray -->
+						<SettingRow label={t('settings.closeToTray')}>
+							<ToggleSwitch
+								mode="checkbox"
+								disabled={!runtime.isTauri}
+								ariaLabel={t('settings.closeToTray')}
+								checked={runtime.isTauri ? $nativeSettings.closeToTray : true}
+								onchange={(val) => updateNativeSettings({ closeToTray: val })}
+							/>
+						</SettingRow>
+
+						<!-- Start Minimized -->
+						<SettingRow label={t('settings.startMinimized')}>
+							<ToggleSwitch
+								mode="checkbox"
+								disabled={!runtime.isTauri}
+								ariaLabel={t('settings.startMinimized')}
+								checked={runtime.isTauri
+									? $nativeSettings.startMinimized
+									: false}
+								onchange={(val) =>
+									updateNativeSettings({ startMinimized: val })}
+							/>
+						</SettingRow>
+						<SettingRow
+							label={t('settings.notifications')}
+							showChevron
+							onclick={() => (currentSubView = 'notifications')}
+						/>
+					</div>
+				</div>
+
+				<!-- Section 3: Network / Core Settings -->
+				<div class="settings-section">
+					<div class="section-header">
+						<span class="section-title">{t('settings.networkSection')}</span>
+					</div>
+					<div class="settings-group">
+						<SettingRow
+							label={t('settings.coreEngine')}
+							description={t('settings.coreEngineDesc')}
 						>
-							{#if $applicationUpdateState.status === 'checking'}
-								<span class="loading-spinner"></span>
-								<span>{t('settings.checkingUpdates')}</span>
-							{:else if $applicationUpdateState.status === 'downloading'}
-								<span class="loading-spinner"></span>
-								<span>{t('settings.downloadingUpdate')}</span>
-							{:else if $applicationUpdateState.status === 'available'}
-								<span>
-									{t('settings.downloadUpdate', {
-										version: $applicationUpdateState.version ?? '',
+							<Dropdown
+								label={t('settings.coreEngine')}
+								options={[
+									{
+										value: 'lumen',
+										label: 'Lumen Core',
+									},
+									{ value: 'xray', label: 'Xray Core' },
+								]}
+								value={$nativeSettings.coreEngine}
+								disabled={!runtime.isTauri}
+								onChange={(value) =>
+									updateNativeSettings({
+										coreEngine: value as 'lumen' | 'xray',
 									})}
+								compact
+							/>
+						</SettingRow>
+						{#if $nativeSettings.coreEngine === 'lumen'}
+							<SettingRow
+								label={$nativeSettings.coreEngines.find(
+									(engine) => engine.engine === 'lumen',
+								)?.experimental
+									? t('settings.experimental')
+									: 'Lumen Core'}
+								description={t('settings.lumenCoreSupport')}
+							/>
+						{/if}
+						<!-- Routing Mode -->
+						<SettingRow label={t('settings.routingMode')}>
+							<Dropdown
+								label={t('settings.routingMode')}
+								options={routingOptions}
+								value={runtime.isTauri ? $nativeSettings.networkMode : 'proxy'}
+								disabled={!runtime.isTauri}
+								onChange={(value) =>
+									updateNativeSettings({
+										networkMode: value as 'proxy' | 'tun',
+									})}
+								compact
+							/>
+						</SettingRow>
+
+						<!-- Auto Connect -->
+						<SettingRow label={t('settings.autoConnect')}>
+							<ToggleSwitch
+								mode="checkbox"
+								disabled={!runtime.isTauri}
+								ariaLabel={t('settings.autoConnect')}
+								checked={runtime.isTauri
+									? $nativeSettings.autoConnect
+									: autoConnect}
+								onchange={(value) =>
+									updateNativeSettings({ autoConnect: value })}
+							/>
+						</SettingRow>
+
+						<SettingRow
+							label={t('settings.autoReconnect')}
+							description={t('settings.autoReconnectDesc')}
+						>
+							<ToggleSwitch
+								mode="checkbox"
+								disabled={!runtime.isTauri}
+								ariaLabel={t('settings.autoReconnect')}
+								checked={$nativeSettings.autoReconnect}
+								onchange={(value) =>
+									updateNativeSettings({ autoReconnect: value })}
+							/>
+						</SettingRow>
+
+						<SettingRow
+							label={t('settings.serverSelection')}
+							description={t('settings.serverSelectionDesc')}
+						>
+							<Dropdown
+								label={t('settings.serverSelection')}
+								options={serverSelectionOptions}
+								value={$nativeSettings.serverSelection}
+								disabled={!runtime.isTauri}
+								onChange={(value) =>
+									updateNativeSettings({
+										serverSelection: value as 'manual' | 'best',
+									})}
+								compact
+							/>
+						</SettingRow>
+
+						<!-- DNS Server -->
+						<SettingRow
+							label={t('settings.dnsServer')}
+							description={t('settings.dnsTunOnly')}
+						>
+							<Dropdown
+								label={t('settings.dnsServer')}
+								options={dnsOptions}
+								value={runtime.isTauri
+									? customDnsOpen
+										? 'custom'
+										: dnsSelection
+									: 'system'}
+								disabled={!runtime.isTauri}
+								onChange={(value) => {
+									customDnsOpen = value === 'custom';
+									customDnsInvalid = false;
+									if (value !== 'custom')
+										void updateNativeSettings({ dnsServer: value });
+								}}
+								compact
+							/>
+						</SettingRow>
+						{#if customDnsOpen || dnsSelection === 'custom'}
+							<div class="reveal-row" transition:reveal>
+								<SettingRow
+									label={t('settings.dnsCustomAddress')}
+									description={customDnsInvalid
+										? t('settings.dnsInvalid')
+										: t('settings.dnsCustomHint')}
+								>
+									<input
+										class="ping-url-input custom-dns-input"
+										type="text"
+										inputmode="decimal"
+										placeholder="9.9.9.9"
+										aria-label={t('settings.dnsCustomAddress')}
+										bind:value={customDnsDraft}
+										onchange={commitCustomDns}
+										onkeydown={(event) => {
+											if (event.key === 'Enter')
+												(event.target as HTMLInputElement).blur();
+										}}
+									/>
+								</SettingRow>
+							</div>
+						{/if}
+
+						<!-- Bypass LAN -->
+						<SettingRow label={t('settings.bypassLan')}>
+							<ToggleSwitch
+								mode="checkbox"
+								disabled={!runtime.isTauri}
+								ariaLabel={t('settings.bypassLan')}
+								checked={runtime.isTauri
+									? ($nativeSettings.bypassLan ?? true)
+									: true}
+								onchange={(val) => updateNativeSettings({ bypassLan: val })}
+							/>
+						</SettingRow>
+
+						<!-- Update Interval -->
+						<SettingRow label={t('settings.updateInterval')}>
+							<Dropdown
+								label={t('settings.updateInterval')}
+								options={updateIntervalOptions}
+								value={runtime.isTauri
+									? ($nativeSettings.updateIntervalHours?.toString() ?? '24')
+									: '24'}
+								disabled={!runtime.isTauri}
+								onChange={(value) =>
+									updateNativeSettings({
+										updateIntervalHours: parseInt(value, 10),
+									})}
+								compact
+							/>
+						</SettingRow>
+						<SettingRow label={t('settings.pingPolicy')}>
+							<Dropdown
+								label={t('settings.pingPolicy')}
+								options={pingPolicyOptions}
+								value={$nativeSettings.pingPolicy}
+								disabled={!runtime.isTauri}
+								onChange={(value) =>
+									updateNativeSettings({
+										pingPolicy: value as 'startup' | 'list' | 'manual',
+									})}
+								compact
+							/>
+						</SettingRow>
+
+						<!-- Ping Test URL -->
+						<SettingRow
+							label={t('settings.pingUrl')}
+							description={t('settings.pingUrlDesc')}
+						>
+							<div class="ping-url-wrapper">
+								<input
+									type="text"
+									class="ping-url-input"
+									placeholder="http://www.google.com/generate_204"
+									value={$nativeSettings.pingUrl || ''}
+									onchange={(e) =>
+										updateNativeSettings({
+											pingUrl: (e.target as HTMLInputElement).value.trim(),
+										})}
+								/>
+							</div>
+						</SettingRow>
+
+						<!-- Reset System Proxy -->
+						<SettingRow
+							label={t('settings.resetProxy')}
+							description={t('settings.resetProxyDesc')}
+						>
+							<button
+								type="button"
+								class="action-btn"
+								class:success={resetSuccess}
+								disabled={!runtime.isTauri || resettingProxy}
+								onclick={handleResetProxy}
+							>
+								{resetSuccess
+									? t('settings.proxyResetSuccess')
+									: i18n.currentLanguage === 'ru'
+										? 'Сбросить'
+										: 'Reset'}
+							</button>
+						</SettingRow>
+
+						<!-- Xray Core Status -->
+						<SettingRow label={t('settings.xrayCore')}>
+							<div class="version-badge-container">
+								<span class="badge version-badge">
+									{runtime.isTauri
+										? $nativeSettings.coreVersion
+										: t('settings.mockReady')}
 								</span>
-							{:else if $applicationUpdateState.status === 'latest'}
-								<span class="success-text">
-									✓ {t('settings.latestVersionInstalled')}
+								<button
+									type="button"
+									class="action-btn"
+									class:success={$coreUpdateState.status === 'latest'}
+									disabled={!runtime.isTauri ||
+										['checking', 'installing'].includes(
+											$coreUpdateState.status,
+										)}
+									onclick={handleCoreUpdateAction}
+								>
+									{#if $coreUpdateState.status === 'checking'}{t(
+											'settings.checkingUpdates',
+										)}
+									{:else if $coreUpdateState.status === 'installing'}{t(
+											'settings.downloadingUpdate',
+										)}
+									{:else if $coreUpdateState.status === 'available'}{t(
+											'settings.downloadUpdate',
+											{ version: $coreUpdateState.version ?? '' },
+										)}
+									{:else if $coreUpdateState.status === 'latest'}{t(
+											'settings.latestVersionInstalled',
+										)}
+									{:else if $coreUpdateState.status === 'error'}{t(
+											'common.retry',
+										)}
+									{:else}{t('settings.checkUpdates')}{/if}
+								</button>
+							</div>
+						</SettingRow>
+						<!-- GeoIP / GeoSite Database Status -->
+						<SettingRow
+							label={t('settings.geoDatabases') || 'Базы GeoIP / GeoSite'}
+							description={geoError
+								? t('errors.' + geoError) ||
+									t('settings.geoDataCorrupted') ||
+									'Базы GeoIP/GeoSite отсутствуют или повреждены'
+								: geoInfo
+									? `${geoInfo.source}${geoInfo.updatedAt ? ' · ' + new Date(geoInfo.updatedAt).toLocaleDateString() : ''}`
+									: undefined}
+						>
+							<div class="version-badge-container">
+								<span
+									class="badge version-badge"
+									class:error-badge={geoError || (geoInfo && !geoInfo.valid)}
+								>
+									{geoInfo?.version || '202410152325'}
 								</span>
-							{:else if $applicationUpdateState.status === 'error'}
-								<span>{t('common.retry')}</span>
-							{:else}
-								<span>{t('settings.checkUpdates')}</span>
-							{/if}
-						</button>
-					</div>
-				</SettingRow>
-			</div>
-		</div>
-
-		<!-- Section 2: System & Startup -->
-		<div class="settings-section">
-			<div class="section-header">
-				<span class="section-title">{t('settings.systemSection')}</span>
-			</div>
-			<div class="settings-group">
-				<!-- Auto Start with Windows -->
-				<SettingRow label={t('settings.autoStart')}>
-					<ToggleSwitch
-						mode="checkbox"
-						disabled={!runtime.isTauri}
-						ariaLabel={t('settings.autoStart')}
-						checked={runtime.isTauri ? $nativeSettings.autoStart : false}
-						onchange={(val) => updateNativeSettings({ autoStart: val })}
-					/>
-				</SettingRow>
-
-				<!-- Close to Tray -->
-				<SettingRow label={t('settings.closeToTray')}>
-					<ToggleSwitch
-						mode="checkbox"
-						disabled={!runtime.isTauri}
-						ariaLabel={t('settings.closeToTray')}
-						checked={runtime.isTauri ? $nativeSettings.closeToTray : true}
-						onchange={(val) => updateNativeSettings({ closeToTray: val })}
-					/>
-				</SettingRow>
-
-				<!-- Start Minimized -->
-				<SettingRow label={t('settings.startMinimized')}>
-					<ToggleSwitch
-						mode="checkbox"
-						disabled={!runtime.isTauri}
-						ariaLabel={t('settings.startMinimized')}
-						checked={runtime.isTauri ? $nativeSettings.startMinimized : false}
-						onchange={(val) => updateNativeSettings({ startMinimized: val })}
-					/>
-				</SettingRow>
-				<SettingRow
-					label={t('settings.notifications')}
-					showChevron
-					onclick={() => (currentSubView = 'notifications')}
-				/>
-			</div>
-		</div>
-
-		<!-- Section 3: Network / Core Settings -->
-		<div class="settings-section">
-			<div class="section-header">
-				<span class="section-title">{t('settings.networkSection')}</span>
-			</div>
-			<div class="settings-group">
-				<SettingRow
-					label={t('settings.coreEngine')}
-					description={t('settings.coreEngineDesc')}
-				>
-					<Dropdown
-						label={t('settings.coreEngine')}
-						options={[
-							{
-								value: 'lumen',
-								label: 'Lumen Core',
-							},
-							{ value: 'xray', label: 'Xray Core' },
-						]}
-						value={$nativeSettings.coreEngine}
-						disabled={!runtime.isTauri}
-						onChange={(value) =>
-							updateNativeSettings({ coreEngine: value as 'lumen' | 'xray' })}
-						compact
-					/>
-				</SettingRow>
-				{#if $nativeSettings.coreEngine === 'lumen'}
-					<SettingRow
-						label={$nativeSettings.coreEngines.find(
-							(engine) => engine.engine === 'lumen',
-						)?.experimental
-							? t('settings.experimental')
-							: 'Lumen Core'}
-						description={t('settings.lumenCoreSupport')}
-					/>
-				{/if}
-				<!-- Routing Mode -->
-				<SettingRow label={t('settings.routingMode')}>
-					<Dropdown
-						label={t('settings.routingMode')}
-						options={routingOptions}
-						value={runtime.isTauri ? $nativeSettings.networkMode : 'proxy'}
-						disabled={!runtime.isTauri}
-						onChange={(value) =>
-							updateNativeSettings({ networkMode: value as 'proxy' | 'tun' })}
-						compact
-					/>
-				</SettingRow>
-
-				<!-- Auto Connect -->
-				<SettingRow label={t('settings.autoConnect')}>
-					<ToggleSwitch
-						mode="checkbox"
-						disabled={!runtime.isTauri}
-						ariaLabel={t('settings.autoConnect')}
-						checked={runtime.isTauri
-							? $nativeSettings.autoConnect
-							: autoConnect}
-						onchange={(value) => updateNativeSettings({ autoConnect: value })}
-					/>
-				</SettingRow>
-
-				<SettingRow
-					label={t('settings.autoReconnect')}
-					description={t('settings.autoReconnectDesc')}
-				>
-					<ToggleSwitch
-						mode="checkbox"
-						disabled={!runtime.isTauri}
-						ariaLabel={t('settings.autoReconnect')}
-						checked={$nativeSettings.autoReconnect}
-						onchange={(value) => updateNativeSettings({ autoReconnect: value })}
-					/>
-				</SettingRow>
-
-				<SettingRow
-					label={t('settings.serverSelection')}
-					description={t('settings.serverSelectionDesc')}
-				>
-					<Dropdown
-						label={t('settings.serverSelection')}
-						options={serverSelectionOptions}
-						value={$nativeSettings.serverSelection}
-						disabled={!runtime.isTauri}
-						onChange={(value) =>
-							updateNativeSettings({
-								serverSelection: value as 'manual' | 'best',
-							})}
-						compact
-					/>
-				</SettingRow>
-
-				<!-- DNS Server -->
-				<SettingRow
-					label={t('settings.dnsServer')}
-					description={t('settings.dnsTunOnly')}
-				>
-					<Dropdown
-						label={t('settings.dnsServer')}
-						options={dnsOptions}
-						value={runtime.isTauri
-							? customDnsOpen
-								? 'custom'
-								: dnsSelection
-							: 'system'}
-						disabled={!runtime.isTauri}
-						onChange={(value) => {
-							customDnsOpen = value === 'custom';
-							customDnsInvalid = false;
-							if (value !== 'custom')
-								void updateNativeSettings({ dnsServer: value });
-						}}
-						compact
-					/>
-				</SettingRow>
-				{#if customDnsOpen || dnsSelection === 'custom'}
-					<SettingRow
-						label={t('settings.dnsCustomAddress')}
-						description={customDnsInvalid
-							? t('settings.dnsInvalid')
-							: t('settings.dnsCustomHint')}
-					>
-						<input
-							class="ping-url-input custom-dns-input"
-							type="text"
-							inputmode="decimal"
-							placeholder="9.9.9.9"
-							aria-label={t('settings.dnsCustomAddress')}
-							bind:value={customDnsDraft}
-							onchange={commitCustomDns}
-							onkeydown={(event) => {
-								if (event.key === 'Enter')
-									(event.target as HTMLInputElement).blur();
+								<button
+									type="button"
+									class="action-btn"
+									class:success={geoUpdateSuccess}
+									disabled={geoUpdating}
+									onclick={handleUpdateGeo}
+								>
+									{geoUpdating
+										? t('settings.downloadingUpdate') || 'Обновление...'
+										: geoUpdateSuccess
+											? t('settings.latestVersionInstalled') || 'Обновлено'
+											: t('settings.updateDatabases') || 'Обновить базы'}
+								</button>
+							</div>
+						</SettingRow>
+						<SettingRow
+							label={i18n.currentLanguage === 'ru' ? 'Инструменты' : 'Tools'}
+							showChevron
+							onclick={() => {
+								toolsOpen = true;
 							}}
 						/>
-					</SettingRow>
-				{/if}
+						<SettingRow
+							label={t('settings.diagnostics')}
+							showChevron
+							onclick={() => {
+								currentSubView = 'diagnostics';
+								void loadDiagnostics();
+							}}
+						/>
+						<SettingRow
+							label={t('settings.logConsole')}
+							description={logConsoleError
+								? t('settings.logConsoleError')
+								: t('settings.logConsoleDesc')}
+						>
+							<button
+								type="button"
+								class="action-btn"
+								disabled={!runtime.isTauri || openingLogConsole}
+								onclick={() => void openLogConsole()}
+							>
+								{openingLogConsole
+									? t('common.loading')
+									: t('settings.openLogConsole')}
+							</button>
+						</SettingRow>
+					</div>
+					<p class="availability">
+						{runtime.isTauri
+							? $settingsError
+								? t('errors.' + $settingsError)
+								: ''
+							: t('demo.unavailable')}
+					</p>
+				</div>
 
-				<!-- Bypass LAN -->
-				<SettingRow label={t('settings.bypassLan')}>
-					<ToggleSwitch
-						mode="checkbox"
-						disabled={!runtime.isTauri}
-						ariaLabel={t('settings.bypassLan')}
-						checked={runtime.isTauri
-							? ($nativeSettings.bypassLan ?? true)
-							: true}
-						onchange={(val) => updateNativeSettings({ bypassLan: val })}
-					/>
-				</SettingRow>
+				<!-- Section 4: Background Shader -->
+				<div class="settings-section">
+					<div class="section-header">
+						<span class="section-title">{t('settings.shaderTitle')}</span>
+					</div>
+					<div class="settings-group">
+						{#if onOpenBrightness}
+							<SettingRow
+								label={t('settings.brightness')}
+								showChevron
+								onclick={onOpenBrightness}
+							/>
+						{/if}
 
-				<!-- Update Interval -->
-				<SettingRow label={t('settings.updateInterval')}>
-					<Dropdown
-						label={t('settings.updateInterval')}
-						options={updateIntervalOptions}
-						value={runtime.isTauri
-							? ($nativeSettings.updateIntervalHours?.toString() ?? '24')
-							: '24'}
-						disabled={!runtime.isTauri}
-						onChange={(value) =>
-							updateNativeSettings({
-								updateIntervalHours: parseInt(value, 10),
-							})}
-						compact
-					/>
-				</SettingRow>
-				<SettingRow label={t('settings.pingPolicy')}>
-					<Dropdown
-						label={t('settings.pingPolicy')}
-						options={pingPolicyOptions}
-						value={$nativeSettings.pingPolicy}
-						disabled={!runtime.isTauri}
-						onChange={(value) =>
-							updateNativeSettings({
-								pingPolicy: value as 'startup' | 'list' | 'manual',
-							})}
-						compact
-					/>
-				</SettingRow>
+						<!-- Presets -->
+						<SettingRow
+							label={t('settings.presets')}
+							showChevron
+							onclick={() => (currentSubView = 'presets')}
+						/>
 
-				<!-- Ping Test URL -->
-				<SettingRow
-					label={t('settings.pingUrl')}
-					description={t('settings.pingUrlDesc')}
-				>
-					<div class="ping-url-wrapper">
-						<input
-							type="text"
-							class="ping-url-input"
-							placeholder="http://www.google.com/generate_204"
-							value={$nativeSettings.pingUrl || ''}
-							onchange={(e) =>
-								updateNativeSettings({
-									pingUrl: (e.target as HTMLInputElement).value.trim(),
-								})}
+						<!-- Custom Colors -->
+						<SettingRow
+							label={t('settings.customColors')}
+							showChevron
+							onclick={() => (currentSubView = 'colors')}
 						/>
 					</div>
-				</SettingRow>
-
-				<!-- Reset System Proxy -->
-				<SettingRow
-					label={t('settings.resetProxy')}
-					description={t('settings.resetProxyDesc')}
-				>
-					<button
-						type="button"
-						class="action-btn"
-						class:success={resetSuccess}
-						disabled={!runtime.isTauri || resettingProxy}
-						onclick={handleResetProxy}
-					>
-						{resetSuccess
-							? t('settings.proxyResetSuccess')
-							: i18n.currentLanguage === 'ru'
-								? 'Сбросить'
-								: 'Reset'}
-					</button>
-				</SettingRow>
-
-				<!-- Xray Core Status -->
-				<SettingRow label={t('settings.xrayCore')}>
-					<div class="version-badge-container">
-						<span class="badge version-badge">
-							{runtime.isTauri
-								? $nativeSettings.coreVersion
-								: t('settings.mockReady')}
-						</span>
+				</div>
+			{:else if currentSubView === 'notifications'}
+				<div class="subview-container">
+					<div class="subview-header">
+						<button
+							type="button"
+							class="back-btn"
+							onclick={() => (currentSubView = 'main')}
+							aria-label={t('common.back')}
+						>
+							<img
+								src={chevronIcon}
+								alt=""
+								class="back-chevron"
+								aria-hidden="true"
+							/>
+							<span class="subview-title">{t('settings.notifications')}</span>
+						</button>
+					</div>
+					<div class="settings-group">
+						<SettingRow label={t('settings.notifyDisconnect')}>
+							<ToggleSwitch
+								mode="checkbox"
+								disabled={!runtime.isTauri}
+								ariaLabel={t('settings.notifyDisconnect')}
+								checked={$nativeSettings.notifyDisconnect}
+								onchange={(value) =>
+									updateNativeSettings({ notifyDisconnect: value })}
+							/>
+						</SettingRow>
+						<SettingRow label={t('settings.notifyReconnect')}>
+							<ToggleSwitch
+								mode="checkbox"
+								disabled={!runtime.isTauri}
+								ariaLabel={t('settings.notifyReconnect')}
+								checked={$nativeSettings.notifyReconnect}
+								onchange={(value) =>
+									updateNativeSettings({ notifyReconnect: value })}
+							/>
+						</SettingRow>
+						<SettingRow label={t('settings.notifyExpiry')}>
+							<ToggleSwitch
+								mode="checkbox"
+								disabled={!runtime.isTauri}
+								ariaLabel={t('settings.notifyExpiry')}
+								checked={$nativeSettings.notifyExpiry}
+								onchange={(value) =>
+									updateNativeSettings({ notifyExpiry: value })}
+							/>
+						</SettingRow>
+						<SettingRow label={t('settings.notifyUpdate')}>
+							<ToggleSwitch
+								mode="checkbox"
+								disabled={!runtime.isTauri}
+								ariaLabel={t('settings.notifyUpdate')}
+								checked={$nativeSettings.notifyUpdate}
+								onchange={(value) =>
+									updateNativeSettings({ notifyUpdate: value })}
+							/>
+						</SettingRow>
+					</div>
+				</div>
+			{:else if currentSubView === 'diagnostics'}
+				<div class="subview-container">
+					<div class="subview-header">
+						<button
+							type="button"
+							class="back-btn"
+							onclick={() => (currentSubView = 'main')}
+							aria-label={t('common.back')}
+						>
+							<img
+								src={chevronIcon}
+								alt=""
+								class="back-chevron"
+								aria-hidden="true"
+							/>
+							<span class="subview-title">{t('settings.diagnostics')}</span>
+						</button>
+					</div>
+					{#if diagnostics}
+						<div class="settings-group">
+							<SettingRow label={t('settings.diagStatus')}>
+								<span class="diag-value">
+									{t('home.' + diagnostics.status)}
+								</span>
+							</SettingRow>
+							<SettingRow label={t('settings.routingMode')}>
+								<span class="diag-value">
+									{t(
+										diagnostics.networkMode === 'tun'
+											? 'settings.modeTun'
+											: 'settings.modeProxy',
+									)}
+								</span>
+							</SettingRow>
+							<SettingRow label={t('settings.xrayCore')}>
+								<span class="diag-value">{diagnostics.coreVersion}</span>
+							</SettingRow>
+							<SettingRow label="IPv4">
+								<span class="diag-value">
+									{diagnostics.publicIpv4 ?? t('settings.diagUnavailable')}
+								</span>
+							</SettingRow>
+							<SettingRow label="IPv6">
+								<span class="diag-value">
+									{diagnostics.publicIpv6 ?? t('settings.diagUnavailable')}
+								</span>
+							</SettingRow>
+							<SettingRow label={t('settings.diagSystemDns')}>
+								<span class="diag-value">
+									{diagnostics.systemDns.join(', ') ||
+										t('settings.diagUnavailable')}
+								</span>
+							</SettingRow>
+							<SettingRow label={t('settings.dnsServer')}>
+								<span class="diag-value">{diagnostics.configuredDns}</span>
+							</SettingRow>
+							<SettingRow label={t('settings.diagTunnel')}>
+								<span class="diag-value">
+									{diagnostics.tunnelReady
+										? t('settings.diagReady')
+										: t('settings.diagUnavailable')}
+								</span>
+							</SettingRow>
+							<SettingRow label={t('settings.diagRoutes')}>
+								<span class="diag-value">
+									{diagnostics.routingConflict
+										? t('settings.diagConflict')
+										: diagnostics.routesReady
+											? t('settings.diagReady')
+											: t('settings.diagUnavailable')}
+								</span>
+							</SettingRow>
+							<SettingRow label={t('settings.diagProxy')}>
+								<span class="diag-value">
+									{diagnostics.proxyManaged
+										? t('settings.diagProxyLumen')
+										: diagnostics.systemProxyEnabled
+											? t('settings.diagProxyOther')
+											: t('settings.diagProxyOff')}
+								</span>
+							</SettingRow>
+						</div>
+					{/if}
+					{#if diagnosticsError}<p class="availability" role="alert">
+							{t('settings.diagError')}
+						</p>{/if}
+					<div class="diagnostics-actions">
 						<button
 							type="button"
 							class="action-btn"
-							class:success={$coreUpdateState.status === 'latest'}
-							disabled={!runtime.isTauri ||
-								['checking', 'installing'].includes($coreUpdateState.status)}
-							onclick={handleCoreUpdateAction}
+							disabled={diagnosticsBusy || !runtime.isTauri}
+							onclick={() => void loadDiagnostics()}
 						>
-							{#if $coreUpdateState.status === 'checking'}{t(
-									'settings.checkingUpdates',
-								)}
-							{:else if $coreUpdateState.status === 'installing'}{t(
-									'settings.downloadingUpdate',
-								)}
-							{:else if $coreUpdateState.status === 'available'}{t(
-									'settings.downloadUpdate',
-									{ version: $coreUpdateState.version ?? '' },
-								)}
-							{:else if $coreUpdateState.status === 'latest'}{t(
-									'settings.latestVersionInstalled',
-								)}
-							{:else if $coreUpdateState.status === 'error'}{t('common.retry')}
-							{:else}{t('settings.checkUpdates')}{/if}
+							{diagnosticsBusy
+								? t('settings.checkingUpdates')
+								: t('settings.diagRefresh')}
 						</button>
-					</div>
-				</SettingRow>
-				<!-- GeoIP / GeoSite Database Status -->
-				<SettingRow
-					label={t('settings.geoDatabases') || 'Базы GeoIP / GeoSite'}
-					description={geoError
-						? t('errors.' + geoError) ||
-							t('settings.geoDataCorrupted') ||
-							'Базы GeoIP/GeoSite отсутствуют или повреждены'
-						: geoInfo
-							? `${geoInfo.source}${geoInfo.updatedAt ? ' · ' + new Date(geoInfo.updatedAt).toLocaleDateString() : ''}`
-							: undefined}
-				>
-					<div class="version-badge-container">
-						<span
-							class="badge version-badge"
-							class:error-badge={geoError || (geoInfo && !geoInfo.valid)}
-						>
-							{geoInfo?.version || '202410152325'}
-						</span>
 						<button
 							type="button"
 							class="action-btn"
-							class:success={geoUpdateSuccess}
-							disabled={geoUpdating}
-							onclick={handleUpdateGeo}
+							disabled={!diagnostics}
+							onclick={() => void copyDiagnostics()}
 						>
-							{geoUpdating
-								? t('settings.downloadingUpdate') || 'Обновление...'
-								: geoUpdateSuccess
-									? t('settings.latestVersionInstalled') || 'Обновлено'
-									: t('settings.updateDatabases') || 'Обновить базы'}
+							{reportCopied ? t('common.copied') : t('settings.diagCopy')}
 						</button>
 					</div>
-				</SettingRow>
-				<SettingRow
-					label={i18n.currentLanguage === 'ru' ? 'Инструменты' : 'Tools'}
-					showChevron
-					onclick={() => {
-						toolsOpen = true;
-					}}
-				/>
-				<SettingRow
-					label={t('settings.diagnostics')}
-					showChevron
-					onclick={() => {
-						currentSubView = 'diagnostics';
-						void loadDiagnostics();
-					}}
-				/>
-				<SettingRow
-					label={t('settings.logConsole')}
-					description={logConsoleError
-						? t('settings.logConsoleError')
-						: t('settings.logConsoleDesc')}
-				>
-					<button
-						type="button"
-						class="action-btn"
-						disabled={!runtime.isTauri || openingLogConsole}
-						onclick={() => void openLogConsole()}
-					>
-						{openingLogConsole
-							? t('common.loading')
-							: t('settings.openLogConsole')}
-					</button>
-				</SettingRow>
-			</div>
-			<p class="availability">
-				{runtime.isTauri
-					? $settingsError
-						? t('errors.' + $settingsError)
-						: ''
-					: t('demo.unavailable')}
-			</p>
-		</div>
+				</div>
+			{:else if currentSubView === 'presets'}
+				<!-- Presets Subview -->
+				<div class="subview-container">
+					<div class="subview-header">
+						<button
+							type="button"
+							class="back-btn"
+							onclick={() => (currentSubView = 'main')}
+							aria-label={t('common.back') || 'Назад'}
+						>
+							<img
+								src={chevronIcon}
+								alt=""
+								class="back-chevron"
+								aria-hidden="true"
+							/>
+							<span class="subview-title">{t('settings.presets')}</span>
+						</button>
+					</div>
 
-		<!-- Section 4: Background Shader -->
-		<div class="settings-section">
-			<div class="section-header">
-				<span class="section-title">{t('settings.shaderTitle')}</span>
-			</div>
-			<div class="settings-group">
-				<!-- Presets -->
-				<SettingRow
-					label={t('settings.presets')}
-					showChevron
-					onclick={() => (currentSubView = 'presets')}
-				/>
+					<div class="settings-group">
+						{#each SHADER_PRESETS as preset (preset.id)}
+							<button
+								type="button"
+								class="preset-item"
+								class:selected={shaderSettings.selectedPreset === preset.id}
+								onclick={() => shaderSettings.applyPreset(preset.id)}
+							>
+								<div class="preset-left">
+									<div class="swatches-pair">
+										<span
+											class="swatch-dot"
+											style="background-color: {preset.colorA}"
+										></span>
+										<span
+											class="swatch-dot swatch-overlap"
+											style="background-color: {preset.colorB}"
+										></span>
+									</div>
+									<span class="preset-label">{t(preset.nameKey)}</span>
+								</div>
+								{#if shaderSettings.selectedPreset === preset.id}
+									<span class="check-mark" aria-hidden="true">✓</span>
+								{/if}
+							</button>
+						{/each}
 
-				<!-- Custom Colors -->
-				<SettingRow
-					label={t('settings.customColors')}
-					showChevron
-					onclick={() => (currentSubView = 'colors')}
-				/>
-			</div>
-		</div>
-	{:else if currentSubView === 'notifications'}
-		<div class="subview-container">
-			<div class="subview-header">
-				<button
-					type="button"
-					class="back-btn"
-					onclick={() => (currentSubView = 'main')}
-					aria-label={t('common.back')}
-				>
-					<img
-						src={chevronIcon}
-						alt=""
-						class="back-chevron"
-						aria-hidden="true"
-					/>
-					<span class="subview-title">{t('settings.notifications')}</span>
-				</button>
-			</div>
-			<div class="settings-group">
-				<SettingRow label={t('settings.notifyDisconnect')}>
-					<ToggleSwitch
-						mode="checkbox"
-						disabled={!runtime.isTauri}
-						ariaLabel={t('settings.notifyDisconnect')}
-						checked={$nativeSettings.notifyDisconnect}
-						onchange={(value) =>
-							updateNativeSettings({ notifyDisconnect: value })}
-					/>
-				</SettingRow>
-				<SettingRow label={t('settings.notifyReconnect')}>
-					<ToggleSwitch
-						mode="checkbox"
-						disabled={!runtime.isTauri}
-						ariaLabel={t('settings.notifyReconnect')}
-						checked={$nativeSettings.notifyReconnect}
-						onchange={(value) =>
-							updateNativeSettings({ notifyReconnect: value })}
-					/>
-				</SettingRow>
-				<SettingRow label={t('settings.notifyExpiry')}>
-					<ToggleSwitch
-						mode="checkbox"
-						disabled={!runtime.isTauri}
-						ariaLabel={t('settings.notifyExpiry')}
-						checked={$nativeSettings.notifyExpiry}
-						onchange={(value) => updateNativeSettings({ notifyExpiry: value })}
-					/>
-				</SettingRow>
-				<SettingRow label={t('settings.notifyUpdate')}>
-					<ToggleSwitch
-						mode="checkbox"
-						disabled={!runtime.isTauri}
-						ariaLabel={t('settings.notifyUpdate')}
-						checked={$nativeSettings.notifyUpdate}
-						onchange={(value) => updateNativeSettings({ notifyUpdate: value })}
-					/>
-				</SettingRow>
-			</div>
-		</div>
-	{:else if currentSubView === 'diagnostics'}
-		<div class="subview-container">
-			<div class="subview-header">
-				<button
-					type="button"
-					class="back-btn"
-					onclick={() => (currentSubView = 'main')}
-					aria-label={t('common.back')}
-				>
-					<img
-						src={chevronIcon}
-						alt=""
-						class="back-chevron"
-						aria-hidden="true"
-					/>
-					<span class="subview-title">{t('settings.diagnostics')}</span>
-				</button>
-			</div>
-			{#if diagnostics}
-				<div class="settings-group">
-					<SettingRow label={t('settings.diagStatus')}>
-						<span class="diag-value">{t('home.' + diagnostics.status)}</span>
-					</SettingRow>
-					<SettingRow label={t('settings.routingMode')}>
-						<span class="diag-value">
-							{t(
-								diagnostics.networkMode === 'tun'
-									? 'settings.modeTun'
-									: 'settings.modeProxy',
-							)}
-						</span>
-					</SettingRow>
-					<SettingRow label={t('settings.xrayCore')}>
-						<span class="diag-value">{diagnostics.coreVersion}</span>
-					</SettingRow>
-					<SettingRow label="IPv4">
-						<span class="diag-value">
-							{diagnostics.publicIpv4 ?? t('settings.diagUnavailable')}
-						</span>
-					</SettingRow>
-					<SettingRow label="IPv6">
-						<span class="diag-value">
-							{diagnostics.publicIpv6 ?? t('settings.diagUnavailable')}
-						</span>
-					</SettingRow>
-					<SettingRow label={t('settings.diagSystemDns')}>
-						<span class="diag-value">
-							{diagnostics.systemDns.join(', ') ||
-								t('settings.diagUnavailable')}
-						</span>
-					</SettingRow>
-					<SettingRow label={t('settings.dnsServer')}>
-						<span class="diag-value">{diagnostics.configuredDns}</span>
-					</SettingRow>
-					<SettingRow label={t('settings.diagTunnel')}>
-						<span class="diag-value">
-							{diagnostics.tunnelReady
-								? t('settings.diagReady')
-								: t('settings.diagUnavailable')}
-						</span>
-					</SettingRow>
-					<SettingRow label={t('settings.diagRoutes')}>
-						<span class="diag-value">
-							{diagnostics.routingConflict
-								? t('settings.diagConflict')
-								: diagnostics.routesReady
-									? t('settings.diagReady')
-									: t('settings.diagUnavailable')}
-						</span>
-					</SettingRow>
-					<SettingRow label={t('settings.diagProxy')}>
-						<span class="diag-value">
-							{diagnostics.proxyManaged
-								? t('settings.diagProxyLumen')
-								: diagnostics.systemProxyEnabled
-									? t('settings.diagProxyOther')
-									: t('settings.diagProxyOff')}
-						</span>
-					</SettingRow>
+						{#if shaderSettings.selectedPreset === 'custom'}
+							<div class="preset-item selected">
+								<div class="preset-left">
+									<div class="swatches-pair">
+										<span
+											class="swatch-dot"
+											style="background-color: {shaderSettings.colorA}"
+										></span>
+										<span
+											class="swatch-dot swatch-overlap"
+											style="background-color: {shaderSettings.colorB}"
+										></span>
+									</div>
+									<span class="preset-label">
+										{t('settings.shaderPresetCustom')}
+									</span>
+								</div>
+								<span class="check-mark" aria-hidden="true">✓</span>
+							</div>
+						{/if}
+					</div>
+				</div>
+			{:else if currentSubView === 'colors'}
+				<!-- Custom Colors Subview -->
+				<div class="subview-container">
+					<div class="subview-header">
+						<button
+							type="button"
+							class="back-btn"
+							onclick={() => (currentSubView = 'main')}
+							aria-label={t('common.back') || 'Назад'}
+						>
+							<img
+								src={chevronIcon}
+								alt=""
+								class="back-chevron"
+								aria-hidden="true"
+							/>
+							<span class="subview-title">{t('settings.customColors')}</span>
+						</button>
+					</div>
+
+					<div class="settings-group">
+						<!-- Idle Color A (Dark) -->
+						<SettingRow label={t('settings.shaderIdleColor')}>
+							<div class="color-picker-control">
+								<label
+									class="color-swatch"
+									style="background-color: {shaderSettings.idleColorA}"
+								>
+									<input
+										type="color"
+										aria-label={t('settings.shaderIdleColor')}
+										value={shaderSettings.idleColorA}
+										oninput={(e) =>
+											shaderSettings.setIdleColorA(
+												(e.target as HTMLInputElement).value,
+											)}
+									/>
+								</label>
+								<span class="color-hex">
+									{shaderSettings.idleColorA.toUpperCase()}
+								</span>
+							</div>
+						</SettingRow>
+
+						<!-- Idle Color B (Light) -->
+						<SettingRow label={t('settings.shaderIdleColorB')}>
+							<div class="color-picker-control">
+								<label
+									class="color-swatch"
+									style="background-color: {shaderSettings.idleColorB}"
+								>
+									<input
+										type="color"
+										aria-label={t('settings.shaderIdleColorB')}
+										value={shaderSettings.idleColorB}
+										oninput={(e) =>
+											shaderSettings.setIdleColorB(
+												(e.target as HTMLInputElement).value,
+											)}
+									/>
+								</label>
+								<span class="color-hex">
+									{shaderSettings.idleColorB.toUpperCase()}
+								</span>
+							</div>
+						</SettingRow>
+
+						<!-- Active Color A -->
+						<SettingRow label={t('settings.shaderColorA')}>
+							<div class="color-picker-control">
+								<label
+									class="color-swatch"
+									style="background-color: {shaderSettings.colorA}"
+								>
+									<input
+										type="color"
+										aria-label={t('settings.shaderColorA')}
+										value={shaderSettings.colorA}
+										oninput={(e) =>
+											shaderSettings.setColorA(
+												(e.target as HTMLInputElement).value,
+											)}
+									/>
+								</label>
+								<span class="color-hex">
+									{shaderSettings.colorA.toUpperCase()}
+								</span>
+							</div>
+						</SettingRow>
+
+						<!-- Active Color B -->
+						<SettingRow label={t('settings.shaderColorB')}>
+							<div class="color-picker-control">
+								<label
+									class="color-swatch"
+									style="background-color: {shaderSettings.colorB}"
+								>
+									<input
+										type="color"
+										aria-label={t('settings.shaderColorB')}
+										value={shaderSettings.colorB}
+										oninput={(e) =>
+											shaderSettings.setColorB(
+												(e.target as HTMLInputElement).value,
+											)}
+									/>
+								</label>
+								<span class="color-hex">
+									{shaderSettings.colorB.toUpperCase()}
+								</span>
+							</div>
+						</SettingRow>
+
+						<!-- Exposure Slider & Input -->
+						<SettingRow label={t('settings.shaderExposure')}>
+							<div class="range-control">
+								<input
+									type="range"
+									min="0.8"
+									max="2.5"
+									step="0.05"
+									aria-label={t('settings.shaderExposure')}
+									value={shaderSettings.exposure}
+									oninput={(e) => {
+										const val = parseFloat(
+											(e.target as HTMLInputElement).value,
+										);
+										shaderSettings.setExposure(val);
+										if (!isEditingExposure) {
+											exposureText = val.toFixed(2);
+										}
+									}}
+									class="range-slider"
+								/>
+								<div class="range-input-wrapper">
+									<input
+										type="text"
+										inputmode="decimal"
+										class="range-text-input exposure-input"
+										aria-label="{t('settings.shaderExposure')} (x)"
+										bind:value={exposureText}
+										onfocus={() => (isEditingExposure = true)}
+										onblur={commitExposure}
+										onkeydown={(e) => {
+											if (e.key === 'Enter') {
+												(e.target as HTMLInputElement).blur();
+											}
+										}}
+									/>
+									<span class="range-unit">x</span>
+								</div>
+							</div>
+						</SettingRow>
+					</div>
+
+					<!-- Reset Button -->
+					<div class="reset-row">
+						<button
+							type="button"
+							class="reset-btn"
+							onclick={() => shaderSettings.reset()}
+						>
+							<img
+								src={reloadIcon}
+								alt=""
+								width="14"
+								height="14"
+								class="reset-icon"
+							/>
+							<span>{t('settings.shaderReset')}</span>
+						</button>
+					</div>
 				</div>
 			{/if}
-			{#if diagnosticsError}<p class="availability" role="alert">
-					{t('settings.diagError')}
-				</p>{/if}
-			<div class="diagnostics-actions">
-				<button
-					type="button"
-					class="action-btn"
-					disabled={diagnosticsBusy || !runtime.isTauri}
-					onclick={() => void loadDiagnostics()}
-				>
-					{diagnosticsBusy
-						? t('settings.checkingUpdates')
-						: t('settings.diagRefresh')}
-				</button>
-				<button
-					type="button"
-					class="action-btn"
-					disabled={!diagnostics}
-					onclick={() => void copyDiagnostics()}
-				>
-					{reportCopied ? t('common.copied') : t('settings.diagCopy')}
-				</button>
-			</div>
 		</div>
-	{:else if currentSubView === 'presets'}
-		<!-- Presets Subview -->
-		<div class="subview-container">
-			<div class="subview-header">
-				<button
-					type="button"
-					class="back-btn"
-					onclick={() => (currentSubView = 'main')}
-					aria-label={t('common.back') || 'Назад'}
-				>
-					<img
-						src={chevronIcon}
-						alt=""
-						class="back-chevron"
-						aria-hidden="true"
-					/>
-					<span class="subview-title">{t('settings.presets')}</span>
-				</button>
-			</div>
-
-			<div class="settings-group">
-				{#each SHADER_PRESETS as preset (preset.id)}
-					<button
-						type="button"
-						class="preset-item"
-						class:selected={shaderSettings.selectedPreset === preset.id}
-						onclick={() => shaderSettings.applyPreset(preset.id)}
-					>
-						<div class="preset-left">
-							<div class="swatches-pair">
-								<span
-									class="swatch-dot"
-									style="background-color: {preset.colorA}"
-								></span>
-								<span
-									class="swatch-dot swatch-overlap"
-									style="background-color: {preset.colorB}"
-								></span>
-							</div>
-							<span class="preset-label">{t(preset.nameKey)}</span>
-						</div>
-						{#if shaderSettings.selectedPreset === preset.id}
-							<span class="check-mark" aria-hidden="true">✓</span>
-						{/if}
-					</button>
-				{/each}
-
-				{#if shaderSettings.selectedPreset === 'custom'}
-					<div class="preset-item selected">
-						<div class="preset-left">
-							<div class="swatches-pair">
-								<span
-									class="swatch-dot"
-									style="background-color: {shaderSettings.colorA}"
-								></span>
-								<span
-									class="swatch-dot swatch-overlap"
-									style="background-color: {shaderSettings.colorB}"
-								></span>
-							</div>
-							<span class="preset-label">
-								{t('settings.shaderPresetCustom')}
-							</span>
-						</div>
-						<span class="check-mark" aria-hidden="true">✓</span>
-					</div>
-				{/if}
-			</div>
-		</div>
-	{:else if currentSubView === 'colors'}
-		<!-- Custom Colors Subview -->
-		<div class="subview-container">
-			<div class="subview-header">
-				<button
-					type="button"
-					class="back-btn"
-					onclick={() => (currentSubView = 'main')}
-					aria-label={t('common.back') || 'Назад'}
-				>
-					<img
-						src={chevronIcon}
-						alt=""
-						class="back-chevron"
-						aria-hidden="true"
-					/>
-					<span class="subview-title">{t('settings.customColors')}</span>
-				</button>
-			</div>
-
-			<div class="settings-group">
-				<!-- Idle Color A (Dark) -->
-				<SettingRow label={t('settings.shaderIdleColor')}>
-					<div class="color-picker-control">
-						<label
-							class="color-swatch"
-							style="background-color: {shaderSettings.idleColorA}"
-						>
-							<input
-								type="color"
-								aria-label={t('settings.shaderIdleColor')}
-								value={shaderSettings.idleColorA}
-								oninput={(e) =>
-									shaderSettings.setIdleColorA(
-										(e.target as HTMLInputElement).value,
-									)}
-							/>
-						</label>
-						<span class="color-hex">
-							{shaderSettings.idleColorA.toUpperCase()}
-						</span>
-					</div>
-				</SettingRow>
-
-				<!-- Idle Color B (Light) -->
-				<SettingRow label={t('settings.shaderIdleColorB')}>
-					<div class="color-picker-control">
-						<label
-							class="color-swatch"
-							style="background-color: {shaderSettings.idleColorB}"
-						>
-							<input
-								type="color"
-								aria-label={t('settings.shaderIdleColorB')}
-								value={shaderSettings.idleColorB}
-								oninput={(e) =>
-									shaderSettings.setIdleColorB(
-										(e.target as HTMLInputElement).value,
-									)}
-							/>
-						</label>
-						<span class="color-hex">
-							{shaderSettings.idleColorB.toUpperCase()}
-						</span>
-					</div>
-				</SettingRow>
-
-				<!-- Active Color A -->
-				<SettingRow label={t('settings.shaderColorA')}>
-					<div class="color-picker-control">
-						<label
-							class="color-swatch"
-							style="background-color: {shaderSettings.colorA}"
-						>
-							<input
-								type="color"
-								aria-label={t('settings.shaderColorA')}
-								value={shaderSettings.colorA}
-								oninput={(e) =>
-									shaderSettings.setColorA(
-										(e.target as HTMLInputElement).value,
-									)}
-							/>
-						</label>
-						<span class="color-hex">{shaderSettings.colorA.toUpperCase()}</span>
-					</div>
-				</SettingRow>
-
-				<!-- Active Color B -->
-				<SettingRow label={t('settings.shaderColorB')}>
-					<div class="color-picker-control">
-						<label
-							class="color-swatch"
-							style="background-color: {shaderSettings.colorB}"
-						>
-							<input
-								type="color"
-								aria-label={t('settings.shaderColorB')}
-								value={shaderSettings.colorB}
-								oninput={(e) =>
-									shaderSettings.setColorB(
-										(e.target as HTMLInputElement).value,
-									)}
-							/>
-						</label>
-						<span class="color-hex">{shaderSettings.colorB.toUpperCase()}</span>
-					</div>
-				</SettingRow>
-
-				<!-- Exposure Slider & Input -->
-				<SettingRow label={t('settings.shaderExposure')}>
-					<div class="range-control">
-						<input
-							type="range"
-							min="0.8"
-							max="2.5"
-							step="0.05"
-							aria-label={t('settings.shaderExposure')}
-							value={shaderSettings.exposure}
-							oninput={(e) => {
-								const val = parseFloat((e.target as HTMLInputElement).value);
-								shaderSettings.setExposure(val);
-								if (!isEditingExposure) {
-									exposureText = val.toFixed(2);
-								}
-							}}
-							class="range-slider"
-						/>
-						<div class="range-input-wrapper">
-							<input
-								type="text"
-								inputmode="decimal"
-								class="range-text-input exposure-input"
-								aria-label="{t('settings.shaderExposure')} (x)"
-								bind:value={exposureText}
-								onfocus={() => (isEditingExposure = true)}
-								onblur={commitExposure}
-								onkeydown={(e) => {
-									if (e.key === 'Enter') {
-										(e.target as HTMLInputElement).blur();
-									}
-								}}
-							/>
-							<span class="range-unit">x</span>
-						</div>
-					</div>
-				</SettingRow>
-			</div>
-
-			<!-- Reset Button -->
-			<div class="reset-row">
-				<button
-					type="button"
-					class="reset-btn"
-					onclick={() => shaderSettings.reset()}
-				>
-					<img
-						src={reloadIcon}
-						alt=""
-						width="14"
-						height="14"
-						class="reset-icon"
-					/>
-					<span>{t('settings.shaderReset')}</span>
-				</button>
-			</div>
-		</div>
-	{/if}
+	{/key}
 </div>
 
 {#if toolsOpen}<AdvancedTools
@@ -1217,6 +1266,16 @@
 		padding-bottom: 96px;
 		scrollbar-width: none;
 		-ms-overflow-style: none;
+	}
+	.settings-page {
+		display: flex;
+		flex-direction: column;
+		gap: 14px;
+		width: 100%;
+	}
+	.reveal-row {
+		display: flex;
+		flex-direction: column;
 	}
 	.settings-view::-webkit-scrollbar {
 		display: none;

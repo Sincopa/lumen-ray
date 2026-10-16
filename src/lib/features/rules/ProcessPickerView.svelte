@@ -4,11 +4,11 @@
 	import { getProcesses } from '../../services/processes';
 	import { catalog } from '../../services';
 	import { createDeferredTask } from '../../utils/deferredTask';
+	import backIcon from '../../../assets/back.svg';
 	import yandexIcon from '../../../assets/yandex.png';
 	import searchIcon from '../../../assets/search.svg';
 	import checkIcon from '../../../assets/check.svg';
 	import crossIcon from '../../../assets/close.svg';
-	import chevronIcon from '../../../assets/chevron-down.svg';
 	import IconButton from '../../components/IconButton.svelte';
 	import MaterialIcon from '../../components/MaterialIcon.svelte';
 	import { t } from '../../i18n';
@@ -42,18 +42,18 @@
 					{
 						id: 'discord',
 						name: 'Discord',
-						detail: 'C:\\Users\\user\\AppData',
+						detail: '%LOCALAPPDATA%\\Discord',
 					},
 					{
 						id: 'yandex',
 						name: 'Yandex',
-						detail: 'C:\\Users\\user\\AppData',
+						detail: '%LOCALAPPDATA%\\Yandex',
 						icon: yandexIcon,
 					},
 					{
 						id: 'youtube',
 						name: 'youtube.com/',
-						detail: 'C:\\Users\\user\\AppData',
+						detail: 'youtube.com',
 					},
 					{
 						id: 'chrome',
@@ -243,14 +243,15 @@
 			<!-- Screen 15: Standard 3-button bottom bar -->
 			<div class="standard-bar" class:bar-hidden={searchMode}>
 				<IconButton
-					icon={chevronIcon}
-					ariaLabel={t('common.close')}
+					design
+					icon={backIcon}
+					ariaLabel={t('common.back')}
 					size="lg"
 					variant="surface"
-					class="back-round"
 					onclick={onCancel}
 				/>
 				<IconButton
+					design
 					icon={searchIcon}
 					ariaLabel={t('common.search')}
 					size="lg"
@@ -258,10 +259,12 @@
 					onclick={handleOpenSearch}
 				/>
 				<IconButton
+					design
 					icon={checkIcon}
 					ariaLabel={t('common.save')}
 					size="lg"
 					variant="primary"
+					disabled={selected.length === 0}
 					onclick={handleConfirm}
 				/>
 			</div>
@@ -305,23 +308,27 @@
 		min-height: 0;
 		justify-content: space-between;
 		box-sizing: border-box;
-		padding-top: 4px;
+		padding-top: 0;
 		position: relative;
 	}
 
+	/* Figma 202:8003 — "Select all" sits in the header slot. */
 	.top-row {
 		display: flex;
 		justify-content: flex-end;
 		align-items: center;
 		width: 100%;
-		padding: 0 4px 12px;
+		height: 28px;
+		margin-bottom: 16px;
+		padding: 0 16px 0 0;
 		box-sizing: border-box;
+		flex-shrink: 0;
 	}
 
 	.select-all-btn {
 		display: flex;
 		align-items: center;
-		gap: 12px;
+		gap: 16px;
 		background: transparent;
 		border: none;
 		cursor: pointer;
@@ -329,20 +336,22 @@
 	}
 
 	.select-all-text {
-		font-size: 14px;
-		color: rgba(255, 255, 255, 0.85);
+		color: #fff;
+		font-family: 'Satoshi', var(--font-family-base);
+		font-size: 12px;
 		font-weight: 500;
+		line-height: 16.2px;
 	}
 
 	.process-list {
 		display: flex;
 		flex-direction: column;
-		gap: 8px;
+		gap: 6px;
 		width: 100%;
 		flex: 1;
 		min-height: 0;
 		overflow-y: auto;
-		padding-bottom: 20px;
+		padding-bottom: 96px;
 		scrollbar-width: none;
 	}
 
@@ -354,8 +363,10 @@
 		display: flex;
 		align-items: center;
 		justify-content: space-between;
-		padding: 10px 8px;
-		border-radius: 16px;
+		height: 56px;
+		flex-shrink: 0;
+		padding: 12px;
+		border-radius: 32px;
 		background: transparent !important;
 		border: none !important;
 		outline: none !important;
@@ -371,26 +382,26 @@
 
 	.process-row:hover,
 	.process-row:focus-visible {
-		background: rgba(255, 255, 255, 0.06) !important;
+		background: var(--design-panel) !important;
 		outline: none !important;
 	}
 
 	.process-left {
 		display: flex;
 		align-items: center;
-		gap: 14px;
+		gap: 6px;
 		min-width: 0;
 	}
 
 	.app-icon-box {
-		width: 36px;
-		height: 36px;
-		min-width: 36px;
+		width: 32px;
+		height: 32px;
+		min-width: 32px;
 		border-radius: 50%;
 		display: flex;
 		align-items: center;
 		justify-content: center;
-		background: rgba(255, 255, 255, 0.08);
+		background: #efefef;
 		overflow: hidden;
 	}
 
@@ -406,20 +417,21 @@
 		display: flex;
 		align-items: center;
 		justify-content: center;
-		color: #ffffff;
-		opacity: 0.8;
+		color: #00000080;
 	}
 
 	.process-info {
 		display: flex;
 		flex-direction: column;
-		gap: 2px;
+		gap: 1px;
 		min-width: 0;
 	}
 
 	.process-name {
 		font-size: 14px;
-		font-weight: 500;
+		font-weight: 400;
+		line-height: 18.2px;
+		letter-spacing: -0.3px;
 		color: #ffffff;
 		overflow: hidden;
 		text-overflow: ellipsis;
@@ -428,7 +440,8 @@
 
 	.process-detail {
 		font-size: 12px;
-		color: rgba(255, 255, 255, 0.45);
+		line-height: 15.6px;
+		color: #ffffff80;
 		overflow: hidden;
 		text-overflow: ellipsis;
 		white-space: nowrap;
@@ -441,25 +454,30 @@
 		padding-left: 8px;
 	}
 
-	/* Round indicator: dark circle by default, solid white when selected (Figma spec) */
+	/* Figma "Component 26" — glass well with a white knob when selected. */
 	.round-indicator {
+		display: grid;
+		place-items: center;
+		width: 28px;
+		height: 28px;
+		border-radius: 50%;
+		background: #ffffff0a;
+		-webkit-backdrop-filter: blur(25px);
+		backdrop-filter: blur(25px);
+		flex-shrink: 0;
+	}
+	.round-indicator::after {
+		content: '';
 		width: 24px;
 		height: 24px;
 		border-radius: 50%;
-		background: rgba(0, 0, 0, 0.35);
-		border: 2px solid rgba(255, 255, 255, 0.2);
-		box-sizing: border-box;
-		flex-shrink: 0;
-		transition:
-			background-color 160ms ease,
-			border-color 160ms ease,
-			box-shadow 160ms ease;
+		background: #fff;
+		box-shadow: 0 2px 7.7px #00000040;
+		transform: scale(0);
+		transition: transform 180ms var(--ease-spring);
 	}
-
-	.round-indicator.checked {
-		background: #ffffff !important;
-		border-color: #ffffff !important;
-		box-shadow: 0 0 10px rgba(255, 255, 255, 0.35);
+	.round-indicator.checked::after {
+		transform: scale(1);
 	}
 
 	.empty-msg {
@@ -470,9 +488,14 @@
 	}
 
 	.bottom-container {
-		width: 100%;
-		flex-shrink: 0;
-		margin-bottom: 33px;
+		position: absolute;
+		left: calc(var(--nav-inset) - 16px);
+		right: calc(var(--nav-inset-end) - 16px);
+		bottom: var(--nav-bottom);
+		z-index: 20;
+		display: flex;
+		align-items: center;
+		height: var(--nav-height);
 	}
 
 	.bottom-wrapper {
@@ -490,7 +513,7 @@
 		display: flex;
 		justify-content: space-between;
 		align-items: center;
-		padding: 0 4px;
+		padding: 0;
 		box-sizing: border-box;
 		transition:
 			opacity 200ms ease,
@@ -503,10 +526,6 @@
 		opacity: 0;
 		transform: scale(0.92);
 		pointer-events: none;
-	}
-
-	:global(.back-round .btn-icon) {
-		transform: rotate(90deg) !important;
 	}
 
 	/* Search bar pill (Screen 16): animates width from center outward (50px -> 100%) and back */

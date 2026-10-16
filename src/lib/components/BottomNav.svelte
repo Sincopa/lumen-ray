@@ -8,12 +8,16 @@
 	import tunIcon from '../../assets/mode-rules.svg';
 	import { tooltip } from '../actions/tooltip';
 	import { t } from '../i18n';
+	import { fade } from 'svelte/transition';
+	import { pop, rise, swap } from '../motion';
 
 	type Tab = 'home' | 'subscriptions' | 'servers' | 'settings' | 'rules';
 	interface Props {
 		currentTab: Tab;
 		routingMode?: 'global' | 'rules';
 		hasSubscriptions?: boolean;
+		/** Replaces the routing-mode pill with the "add profile" button. */
+		showAdd?: boolean;
 		modeDisabled?: boolean;
 		onTabChange: (tab: Tab) => void;
 		onModeChange?: (mode: 'global' | 'rules') => void;
@@ -23,6 +27,7 @@
 		currentTab,
 		routingMode = 'global',
 		hasSubscriptions = true,
+		showAdd = false,
 		modeDisabled = false,
 		onTabChange,
 		onModeChange,
@@ -43,7 +48,13 @@
 	);
 </script>
 
-<nav class="bottom-nav" aria-label={t('nav.home')}>
+<nav
+	in:rise|global={{ y: 16, duration: 260 }}
+	out:fade|global={{ duration: 120 }}
+	class="bottom-nav"
+	class:on-dark={currentTab !== 'home' || !hasSubscriptions}
+	aria-label={t('nav.home')}
+>
 	<div class="nav-pill">
 		{#each tabs as tab (tab.id)}
 			<button
@@ -59,8 +70,9 @@
 			</button>
 		{/each}
 	</div>
-	{#if currentTab === 'subscriptions'}
+	{#if showAdd}
 		<button
+			in:pop={{ start: 0.9 }}
 			type="button"
 			class="nav-add"
 			aria-label={t('subscriptions.addProfile')}
@@ -71,6 +83,7 @@
 		</button>
 	{:else if hasSubscriptions}
 		<button
+			in:pop={{ start: 0.9 }}
 			type="button"
 			class="action-pill"
 			disabled={modeDisabled}
@@ -80,13 +93,16 @@
 			onclick={() =>
 				onModeChange?.(routingMode === 'global' ? 'rules' : 'global')}
 		>
-			<img
-				src={routingMode === 'rules' ? tunIcon : globalIcon}
-				alt=""
-				width="34"
-				height="34"
-			/>
-			<span>{routingMode === 'rules' ? 'Tun' : 'All'}</span>
+			{#key routingMode}
+				<img
+					in:pop={{ start: 0.8, duration: 220 }}
+					src={routingMode === 'rules' ? tunIcon : globalIcon}
+					alt=""
+					width="34"
+					height="34"
+				/>
+				<span in:swap>{routingMode === 'rules' ? 'Tun' : 'All'}</span>
+			{/key}
 		</button>
 	{/if}
 </nav>
@@ -96,7 +112,8 @@
 		position: absolute;
 		bottom: var(--nav-bottom);
 		left: var(--nav-inset);
-		right: var(--nav-inset);
+		right: var(--nav-inset-end);
+		height: var(--nav-height);
 		display: flex;
 		justify-content: space-between;
 		align-items: center;
@@ -129,6 +146,11 @@
 	}
 	.pill-btn img {
 		display: block;
+		opacity: 0.5;
+		transition: opacity 160ms ease;
+	}
+	.pill-btn.active img {
+		opacity: 1;
 	}
 	.nav-add,
 	.action-pill {
@@ -145,17 +167,27 @@
 			transform 160ms var(--ease-spring);
 	}
 	.nav-add {
-		width: 50px;
+		width: var(--nav-height);
+		height: var(--nav-height);
 		background: var(--design-glass);
 		backdrop-filter: blur(25px);
 	}
+	.on-dark .nav-pill,
+	.on-dark .nav-add {
+		background: var(--design-glass-dark);
+	}
 	.action-pill {
 		min-width: 87px;
+		height: var(--nav-height);
+		gap: 8px;
 		padding: 8px 18px 8px 8px;
+		border: 1px solid #ffffff40;
 		background: #fff;
-		color: #252525;
-		font-size: 16px;
-		font-weight: 500;
+		color: #262626;
+		font-size: 20px;
+		font-weight: 600;
+		line-height: 26px;
+		backdrop-filter: blur(25px);
 	}
 	.action-pill img {
 		object-fit: contain;
@@ -165,6 +197,17 @@
 	.nav-add:active,
 	.action-pill:active:not(:disabled) {
 		transform: scale(0.94);
+	}
+	/* Narrow windows keep the mode toggle as an icon so the row still fits. */
+	@media (max-width: 350px) {
+		.action-pill {
+			min-width: 0;
+			width: var(--nav-height);
+			padding: 0;
+		}
+		.action-pill span {
+			display: none;
+		}
 	}
 	@media (hover: hover) and (pointer: fine) {
 		.pill-btn:hover {

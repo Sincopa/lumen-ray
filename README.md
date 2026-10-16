@@ -1,70 +1,116 @@
 ﻿# Lumen
 
-A compact desktop client for connecting to your own Xray-compatible VPN subscription on Windows. Add a link or key, pick a server, and connect from one small window.
+A Windows VPN and proxy client for your own servers and subscriptions. Import a link, choose a server, and connect from a compact desktop window.
 
-**[Download for Windows x64](https://github.com/Sincopa/lumen-ray/releases/latest)** · [License](LICENSE)
+**[Download for Windows x64](https://github.com/Sincopa/lumen-ray/releases/latest)** · [Report a bug](https://github.com/Sincopa/lumen-ray/issues) · [Apache 2.0](LICENSE)
 
-## A look inside
+## Screenshots
 
 <p align="center">
-  <a href="docs/screenshots/home.png"><img src="docs/screenshots/home.png" width="210" alt="Lumen connection screen" /></a>
-  <a href="docs/screenshots/servers.png"><img src="docs/screenshots/servers.png" width="210" alt="Lumen server list with latency readings" /></a>
-  <a href="docs/screenshots/subscriptions.png"><img src="docs/screenshots/subscriptions.png" width="210" alt="Lumen subscription details" /></a>
-  <a href="docs/screenshots/rules.png"><img src="docs/screenshots/rules.png" width="210" alt="Lumen routing rule" /></a>
+  <a href="docs/screenshots/home.png"><img src="docs/screenshots/home.png" width="195" alt="Home: connection controls and selected server" /></a>
+  <a href="docs/screenshots/servers.png"><img src="docs/screenshots/servers.png" width="195" alt="Servers: countries, protocols and latency" /></a>
+  <a href="docs/screenshots/subscriptions.png"><img src="docs/screenshots/subscriptions.png" width="195" alt="Subscriptions: profiles, remaining days and traffic" /></a>
+  <a href="docs/screenshots/rules.png"><img src="docs/screenshots/rules.png" width="195" alt="Rules: route domains and applications" /></a>
 </p>
 
-<p align="center"><sub>Click a screenshot to see it full size. These previews use sample data and the browser demo interface.</sub></p>
+<p align="center"><sub>The current interface with sample data in browser preview mode. Click to enlarge. PNGs preserve the window's transparent, rounded corners.</sub></p>
 
-## What you can do
+[Settings screenshot](docs/screenshots/settings.png)
 
-- **Keep your servers together.** Import subscription URLs, individual links, Base64 lists, Xray JSON, or Clash/Mihomo proxy lists. Refresh subscriptions without rebuilding your list by hand.
-- **Choose with context.** Search servers, check their latency, and switch the active node from the same window.
-- **Control the route.** Use the Windows system proxy or a TUN adapter. In TUN mode, choose global routing or rules for apps, domains, and IP ranges.
-- **Make it yours.** Switch between English and Russian, adjust the interface and animated background, and manage core and app updates in Settings.
+## Features
 
-Lumen supports VLESS, VMess, Trojan, Shadowsocks, Hysteria 2, and Xray WireGuard outbounds. Some provider-specific extensions are unsupported; the app reports entries it cannot import.
+- Import subscription URLs, individual connection keys, Base64 lists, Xray JSON, and Clash/Mihomo proxy lists.
+- Search servers, measure latency, refresh subscriptions, and switch the selected server.
+- Choose Windows system proxy or a TUN adapter, with global or rule-based routing.
+- Route applications, domains, IP ranges, and GeoIP/GeoSite categories through Xray, directly, or to a blocking rule.
+- Use English or Russian, adjust interface scale and background colors, and manage app and core updates.
+- Keep the app in the system tray, enable startup connection, and use network diagnostics when troubleshooting.
 
-## Get started
+Xray is the default engine. Supported imports include VLESS, VMess, Trojan, Shadowsocks, Hysteria 2, WireGuard, SOCKS, and HTTP proxies; availability depends on the selected engine and configuration. Unsupported provider extensions are reported during import. The experimental **Lumen Core** handles TCP SOCKS5 and HTTP CONNECT upstreams with domain/IP rules; use Xray for TUN, UDP, application rules, GeoIP/GeoSite, and other protocols.
 
-1. Download and install the latest Windows x64 release.
-2. Open **Subscriptions** and add your provider's subscription URL or connection key.
-3. Open **Servers**, choose a node, then click the Lumen symbol on **Home** to connect.
-4. To change how traffic is routed, open **Settings → Network → Working Mode**.
+## Install and connect
 
-For the portable release, extract the entire ZIP, keep `runtime` beside `Lumen.exe`, and launch `Lumen.exe` directly. The interface and startup diagnostics are built into the EXE; no launcher script or development server is needed. Lumen shows a native error dialog when WebView2 is unavailable or initialization fails, with an option to open the [official WebView2 download page](https://developer.microsoft.com/microsoft-edge/webview2/). Startup reports are stored in `%LOCALAPPDATA%\app.lumen.desktop\logs\startup.log` (with a `%TEMP%\lumen-startup.log` fallback). These reports exclude subscription URLs and credentials.
+1. Download **Setup.exe** or **Portable.zip** from [Releases](https://github.com/Sincopa/lumen-ray/releases/latest).
+2. Install the app, or extract the **entire** portable ZIP and keep `runtime` beside `Lumen.exe`.
+3. Open **Subscriptions → Add profile** and paste your provider's URL or connection key.
+4. Choose a server in **Servers**, then click the Lumen symbol on **Home**.
+5. Open **Settings → Network → Working Mode** to choose system proxy or TUN.
 
-| Mode             | What it does                                                                                                                                                    |
-| ---------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **System Proxy** | Sets the current user's Windows HTTP/HTTPS proxy. Only apps that use the system proxy are affected.                                                             |
-| **TUN Adapter**  | Routes traffic through a virtual adapter. Windows asks for administrator approval when the TUN helper starts. Global and rule-based routing are available here. |
+Lumen does not include a VPN subscription. The portable build needs no development server or launcher script. Windows WebView2 is required; if it is missing, the app offers the [official download page](https://developer.microsoft.com/microsoft-edge/webview2/).
 
-> **Current status:** Proxy connectivity has been tested locally. Full-device and per-app TUN traffic, IPv6, and recovery after failures still need end-to-end verification. There is no Kill Switch. The browser demo shown above does not protect traffic.
+| Mode             | Traffic covered                                                                                      |
+| ---------------- | ---------------------------------------------------------------------------------------------------- |
+| **System Proxy** | Applications that honor the current user's Windows HTTP/HTTPS proxy settings.                        |
+| **TUN Adapter**  | Traffic routed through the virtual adapter. Starting the TUN helper requires administrator approval. |
 
-## For developers
+There is no Kill Switch. Browser preview mode uses demo services and does not route traffic. Protocol support and automated checks do not guarantee that a particular provider, network, or application will work; verify your traffic after changing routing settings.
 
-Lumen uses Svelte 5 and TypeScript for the interface, Tauri 2 and Rust for native integration, and a managed Xray core for connections. The browser build uses demo services; native networking runs only in Tauri.
+Windows releases use self-signed Authenticode certificates. Other computers do not automatically trust them, so SmartScreen warnings may appear.
 
-**Requirements:** Node.js 22.12+, Rust 1.92+, MSVC Build Tools, Windows SDK, and WebView2.
+## Build from source
+
+The interface uses **Svelte 5 + TypeScript**, the desktop shell uses **Tauri 2 + Rust**, and the default network engine is **Xray**. Native networking is available only inside Tauri.
+
+On Windows, install Node.js **22.12+**, Rust **1.92+**, MSVC Build Tools with the Windows SDK, and WebView2. Then run:
 
 ```powershell
 npm ci
-powershell -NoProfile -File scripts/prepare-core.ps1
+powershell -NoProfile -File src-tauri/build/prepare-core.ps1
 npm run tauri:dev
 ```
 
-`prepare-core.ps1` downloads the pinned Xray and Wintun binaries and verifies the archive hash. Run it before a native build in a fresh checkout. For interface work without native networking, use `npm run dev`.
+`prepare-core.ps1` downloads the pinned runtime and routing databases and checks their SHA-256 hashes. For interface development with demo services, use `npm run dev`.
+
+```powershell
+npm run build:installer
+npm run build:portable
+# Build both packages:
+npm run build:release
+```
+
+Build outputs are written to `release/`. Windows builds use SDK SignTool and create or reuse a local self-signed certificate. The private key stays in the current user's Windows certificate store. See [sign-windows.ps1](src-tauri/build/sign-windows.ps1) for the signing commands.
+
+The [GitHub Actions release workflow](.github/workflows/release.yml) verifies the frontend and backend before packaging a version tag. CI requires `WINDOWS_CERTIFICATE_PFX_BASE64`, `WINDOWS_CERTIFICATE_PASSWORD`, and `TAURI_SIGNING_PRIVATE_KEY` as repository secrets, plus the `WINDOWS_CERTIFICATE_THUMBPRINT` repository variable. The updater key is separate from the Windows certificate; keep both private. The configured updater public key is safe to distribute.
+
+## Development and checks
 
 ```powershell
 npm run check
 npm run lint
 npm run format:check
-npm test
 npm run build
-npm run test:e2e
-cargo test --locked --manifest-path src-tauri/Cargo.toml
+cargo test --locked --manifest-path src-tauri/Cargo.toml -- --test-threads=1
 cargo clippy --locked --manifest-path src-tauri/Cargo.toml --all-targets --all-features -- -D warnings
 ```
 
-On Windows, `npm run test:tun` checks DNS, IPv4/IPv6 routes, and video playback through an already connected Lumen TUN session. It does not change the connection. `npm run benchmark:latency` measures the startup time and memory of one and four isolated Xray probe processes without a subscription.
+| Directory            | Contents                                                                   |
+| -------------------- | -------------------------------------------------------------------------- |
+| `src/`               | Interface, translations, browser demo services, and Tauri service adapters |
+| `src-tauri/src/`     | Native engines, subscriptions, routing, storage, and Windows integration   |
+| `src-tauri/runtime/` | Pinned network runtime, databases, and runtime licenses                    |
+| `src-tauri/build/`   | Windows packaging, signing, runtime preparation, and diagnostics           |
 
-The release workflow builds the Windows installer and signed updater artifacts from a version tag. Native data is stored as user-scoped DPAPI ciphertext under `%LOCALAPPDATA%\app.lumen.desktop\data`. Windows builds automatically apply a self-signed SHA-256 Authenticode signature to application executables and installers; see [Windows code signing](docs/windows-code-signing.md). Other computers do not automatically trust this certificate, and SmartScreen warnings or Defender detections may still occur.
+Bug reports and focused pull requests are welcome. Include the app version, Windows version, steps to reproduce, and the checks you ran. Use sample configurations and remove credentials from logs and screenshots.
+
+For vulnerabilities, use GitHub's private reporting option under **Security** if enabled. Otherwise, request a private contact in an issue without posting sensitive details. Revoke any exposed subscription links or signing keys at their source; deleting a file does not invalidate copied credentials.
+
+## Data and license
+
+On Windows, native application data is encrypted for the current user with DPAPI under `%LOCALAPPDATA%\app.lumen.desktop\data`. Startup diagnostics are written to `%LOCALAPPDATA%\app.lumen.desktop\logs\startup.log`, with `%TEMP%\lumen-startup.log` as a fallback. Never attach subscription links, connection credentials, or decrypted data to a public issue.
+
+Lumen is licensed under [Apache 2.0](LICENSE). Bundled components retain their own licenses:
+
+| Component                                                                   | License and source                                                                                                                                  |
+| --------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
+| [Xray Core](https://github.com/XTLS/Xray-core)                              | [Mozilla Public License 2.0](src-tauri/runtime/licenses/xray.txt). The executable receives an Authenticode signature; upstream source is unchanged. |
+| [Wintun 0.14.1](https://www.wintun.net/)                                    | [Prebuilt binary license](src-tauri/runtime/licenses/wintun.txt), preserved from the official 0.14.1 source tag.                                    |
+| [Geist](https://github.com/vercel/geist-font)                               | [SIL Open Font License 1.1](src-tauri/runtime/licenses/geist.txt)                                                                                   |
+| [Satoshi](https://www.fontshare.com/fonts/satoshi)                          | [ITF Free Font License](src/assets/fonts/Satoshi-LICENSE.txt)                                                                                       |
+| [Material Symbols Rounded](https://github.com/google/material-design-icons) | Apache 2.0; [subset notice](src/assets/fonts/MaterialSymbolsRounded-subset-v375.README.txt)                                                         |
+| [flag-icons](https://github.com/lipis/flag-icons)                           | [MIT, Panayiotis Lipiridis](src-tauri/runtime/licenses/flag-icons.txt)                                                                              |
+| [lottie-web](https://github.com/airbnb/lottie-web)                          | [MIT, Bodymovin](src-tauri/runtime/licenses/lottie-web.txt)                                                                                         |
+| [jsQR](https://github.com/cozmo/jsQR)                                       | Apache 2.0                                                                                                                                          |
+
+Routing databases come from [NetworkKeeper/v2ray-rules-ru](https://github.com/NetworkKeeper/v2ray-rules-ru), which lists its upstream data sources in its README. That aggregator has no top-level license file; Lumen's license does not relicense the datasets. The download versions and hashes are pinned in [prepare-core.ps1](src-tauri/build/prepare-core.ps1).
+
+Other dependency versions and their upstream packages are recorded in [package-lock.json](package-lock.json) and [Cargo.lock](src-tauri/Cargo.lock). Preserve their original notices when redistributing them. Windows WebView2 and the Windows SDK are Microsoft components with separate terms.

@@ -1,9 +1,11 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { fade } from 'svelte/transition';
+	import { rise, swap } from '../../motion';
 	import RollingNumber from '../../components/RollingNumber.svelte';
 	import CountryFlag from '../../components/CountryFlag.svelte';
 	import LumenFace from '../../components/LumenFace.svelte';
+	import HomeNotice from '../../components/HomeNotice.svelte';
 	import { t } from '../../i18n';
 	import { serverDisplayName } from '../../utils/serverDisplayName';
 	import { tooltip } from '../../actions/tooltip';
@@ -25,6 +27,10 @@
 		selectedCountry?: string;
 		onToggle: () => void;
 		onSelectServer: () => void;
+		updateVersion?: string | null;
+		updating?: boolean;
+		onInstallUpdate?: () => void;
+		subscriptionExpired?: boolean;
 	}
 
 	let {
@@ -36,6 +42,10 @@
 		selectedCountry = 'fi',
 		onToggle,
 		onSelectServer,
+		updateVersion = null,
+		updating = false,
+		onInstallUpdate,
+		subscriptionExpired = false,
 	}: Props = $props();
 
 	let isConnected = $derived(connectionState === 'connected');
@@ -75,6 +85,22 @@
 </script>
 
 <div class="connection-view">
+	{#if subscriptionExpired || updateVersion}
+		<div class="notice-slot" in:rise={{ y: -8 }} out:fade={{ duration: 140 }}>
+			{#if subscriptionExpired}
+				<HomeNotice icon="bell" text={t('home.subscriptionExpired')} />
+			{:else}
+				<HomeNotice
+					icon="update"
+					text={t('home.updateAvailable')}
+					actionLabel={t('home.updateAction')}
+					actionDisabled={updating}
+					onAction={onInstallUpdate}
+				/>
+			{/if}
+		</div>
+	{/if}
+
 	<div class="center-container">
 		<!-- Central Lumen Logo Button -->
 		<button
@@ -116,12 +142,17 @@
 				<p
 					class="connection-status"
 					aria-hidden="true"
-					transition:fade={{ duration: 240 }}
+					in:swap
+					out:fade={{ duration: 120 }}
 				>
 					{t('home.' + connectionState)}
 				</p>
 			{:else if isConnected}
-				<div class="timer" transition:fade={{ duration: 240 }}>
+				<div
+					class="timer"
+					in:swap={{ y: 8, duration: 260 }}
+					out:fade={{ duration: 120 }}
+				>
 					<span class="time-segment">
 						<RollingNumber value={hours} />
 						<span class="time-label">{t('home.hoursUnit')}</span>
@@ -143,7 +174,8 @@
 				<div
 					class="connection-error"
 					role="alert"
-					transition:fade={{ duration: 200 }}
+					in:rise={{ y: 6 }}
+					out:fade={{ duration: 140 }}
 				>
 					{t('errors.' + error)}
 				</div>
@@ -151,41 +183,44 @@
 		</div>
 	</div>
 
-	<!-- Server Selector Card -->
-	<button
-		class="server-selector"
-		aria-label={server ? serverDisplayName(server) : t('servers.empty')}
-		onclick={onSelectServer}
-	>
-		<div class="server-info">
-			<div class="flag-circle">
-				<CountryFlag countryCode={selectedCountry} size={32} />
+	<!-- Server Selector Card (hidden while the subscription is expired, Figma 202:4966) -->
+	{#if !subscriptionExpired}
+		<button
+			transition:rise={{ y: 12 }}
+			class="server-selector"
+			aria-label={server ? serverDisplayName(server) : t('servers.empty')}
+			onclick={onSelectServer}
+		>
+			<div class="server-info">
+				<div class="flag-circle">
+					<CountryFlag countryCode={selectedCountry} size={32} />
+				</div>
+				<div class="server-details">
+					<span class="protocol">{info?.protocol || 'VLESS'}</span>
+					<span class="latency">
+						{#if typeof server?.latency === 'number'}
+							<RollingNumber value={server.latency} />
+							<span class="latency-unit">ms</span>
+						{:else if server?.latency === 'timeout'}
+							<span>{t('servers.timeout')}</span>
+						{:else}
+							<span>{server?.latency ?? '—'}</span>
+						{/if}
+					</span>
+				</div>
 			</div>
-			<div class="server-details">
-				<span class="protocol">{info?.protocol || 'VLESS'}</span>
-				<span class="latency">
-					{#if typeof server?.latency === 'number'}
-						<RollingNumber value={server.latency} />
-						<span class="latency-unit">ms</span>
-					{:else if server?.latency === 'timeout'}
-						<span>{t('servers.timeout')}</span>
-					{:else}
-						<span>{server?.latency ?? '—'}</span>
-					{/if}
-				</span>
-			</div>
-		</div>
 
-		<div class="server-arrow">
-			<img
-				src={chevronIcon}
-				alt=""
-				width="24"
-				height="24"
-				class="chevron-icon"
-			/>
-		</div>
-	</button>
+			<div class="server-arrow">
+				<img
+					src={chevronIcon}
+					alt=""
+					width="24"
+					height="24"
+					class="chevron-icon"
+				/>
+			</div>
+		</button>
+	{/if}
 </div>
 
 <style>
@@ -196,9 +231,22 @@
 		min-height: 0;
 	}
 
+	/* Figma 202:4868 — notices sit right under the header, centred. */
+	.notice-slot {
+		position: absolute;
+		top: 0;
+		left: 0;
+		right: 0;
+		z-index: 2;
+		display: flex;
+		justify-content: center;
+		padding: 0 26.5px;
+	}
+
+	/* Figma 202:4868 — the face starts 149px into the 628px content area. */
 	.center-container {
 		position: absolute;
-		top: calc(39.9421% - 87.5px);
+		top: calc(37.64% - 87.5px);
 		left: 0;
 		right: 0;
 		display: flex;
