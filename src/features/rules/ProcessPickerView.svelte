@@ -120,26 +120,11 @@
 		),
 	);
 
-	let isAllSelected = $derived(
-		filteredProcesses.length > 0 &&
-			filteredProcesses.every((p) => selectedNames.has(processKey(p))),
-	);
-
 	function toggleSelect(name: string) {
 		if (selectedNames.has(name)) {
 			selected = selected.filter((n) => n !== name);
 		} else {
 			selected = [...selected, name];
-		}
-	}
-
-	function toggleSelectAll() {
-		if (isAllSelected) {
-			const filteredNames = new Set(filteredProcesses.map(processKey));
-			selected = selected.filter((n) => !filteredNames.has(n));
-		} else {
-			const set = new Set([...selected, ...filteredProcesses.map(processKey)]);
-			selected = Array.from(set);
 		}
 	}
 
@@ -189,19 +174,6 @@
 	class="process-picker-view"
 	aria-label={t('rules.selectProcess') || 'Выбор процесса'}
 >
-	<!-- Top Subheader: Select All -->
-	<div class="top-row">
-		<button
-			type="button"
-			class="select-all-btn"
-			onclick={toggleSelectAll}
-			aria-label="Select all"
-		>
-			<span class="select-all-text">Select all</span>
-			<div class="round-indicator" class:checked={isAllSelected}></div>
-		</button>
-	</div>
-
 	<!-- Processes List -->
 	<div class="process-list" role="list">
 		{#each filteredProcesses as item (item.id)}
@@ -310,37 +282,6 @@
 		box-sizing: border-box;
 		padding-top: 0;
 		position: relative;
-	}
-
-	/* "Select all" sits in the header slot. */
-	.top-row {
-		display: flex;
-		justify-content: flex-end;
-		align-items: center;
-		width: 100%;
-		height: 28px;
-		margin-bottom: 16px;
-		padding: 0 16px 0 0;
-		box-sizing: border-box;
-		flex-shrink: 0;
-	}
-
-	.select-all-btn {
-		display: flex;
-		align-items: center;
-		gap: 16px;
-		background: transparent;
-		border: none;
-		cursor: pointer;
-		padding: 0;
-	}
-
-	.select-all-text {
-		color: #fff;
-		font-family: 'Satoshi', var(--font-family-base);
-		font-size: 12px;
-		font-weight: 500;
-		line-height: 16.2px;
 	}
 
 	.process-list {
@@ -543,9 +484,9 @@
 		backdrop-filter: blur(16px);
 		display: flex;
 		align-items: center;
-		padding: 0 8px 0 18px;
+		padding: 0 8px 0 11px;
 		box-sizing: border-box;
-		gap: 12px;
+		gap: 5px;
 		opacity: 0;
 		pointer-events: none;
 		overflow: hidden;
@@ -575,12 +516,13 @@
 			opacity 200ms ease 60ms;
 	}
 
+	/* Full 28px box: the glyph has built-in padding, like the other design icons. */
 	.search-pill-icon {
-		width: 18px;
-		height: 18px;
+		width: 28px;
+		height: 28px;
 		object-fit: contain;
 		filter: brightness(0) invert(1);
-		opacity: 0.6;
+		opacity: 0.8;
 		flex-shrink: 0;
 	}
 

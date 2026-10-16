@@ -1,4 +1,5 @@
 <script lang="ts">
+	import downloadIcon from '../assets/download.svg';
 	import bellIcon from '../assets/bell-ring.svg';
 
 	interface Props {
@@ -22,21 +23,7 @@
 <div class="home-notice" class:has-action={!!actionLabel} role="status">
 	<span class="notice-icon" aria-hidden="true">
 		{#if icon === 'update'}
-			<svg width="32" height="32" viewBox="0 0 32 32" fill="none">
-				<path
-					d="M16 8.6v10.2M11.9 15.1l4.1 4.1 4.1-4.1"
-					stroke="#fff"
-					stroke-width="1.6"
-					stroke-linecap="round"
-					stroke-linejoin="round"
-				/>
-				<path
-					d="M8.5 20v2.4c0 .9.7 1.6 1.6 1.6h11.8c.9 0 1.6-.7 1.6-1.6V20"
-					stroke="#fff"
-					stroke-width="1.6"
-					stroke-linecap="round"
-				/>
-			</svg>
+			<img src={downloadIcon} alt="" width="32" height="32" />
 		{:else}
 			<img src={bellIcon} alt="" width="32" height="32" class="bell" />
 		{/if}

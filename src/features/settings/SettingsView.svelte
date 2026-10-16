@@ -1,16 +1,12 @@
-<script lang="ts">
-	import { onMount } from 'svelte';
+<script module lang="ts">
+	/** Main-list position kept while the brightness screen replaces settings. */
+	let resumeScroll: number | null = null;
+</script>
 
-	interface Props {
-		onOpenBrightness?: () => void;
-	}
-	let { onOpenBrightness }: Props = $props();
-	import AdvancedTools from './AdvancedTools.svelte';
-	let toolsOpen = $state(false);
+<script lang="ts">
+	import backIcon from '../../assets/chevron-left-small.svg';
+	import { onMount, tick } from 'svelte';
 	import { invoke } from '@tauri-apps/api/core';
-	import chevronIcon from '../../assets/chevron-down.svg';
-	import reloadIcon from '../../assets/reload.svg';
-	import Dropdown from '../../components/Dropdown.svelte';
 	import SettingRow from '../../components/SettingRow.svelte';
 	import ToggleSwitch from '../../components/ToggleSwitch.svelte';
 	import { runtime } from '../../lib/runtime';
@@ -37,23 +33,42 @@
 		updateGeoDatabases,
 		type GeoDatabaseInfo,
 	} from '../../lib/services/geoDatabase';
-	import {
-		formatNetworkDiagnostics,
-		type NetworkDiagnostics,
-	} from '../../lib/services/networkDiagnostics';
+	import { screen, reveal, pop } from '../../lib/motion';
 
-	let autoConnect = $state(false);
+	interface Props {
+		onClose?: () => void;
+		onOpenBrightness?: () => void;
+	}
+	let { onClose, onOpenBrightness }: Props = $props();
+
+	type SubView =
+		| 'main'
+		| 'language'
+		| 'uiScale'
+		| 'appVersion'
+		| 'notifications'
+		| 'routingMode'
+		| 'serverSelection'
+		| 'dns'
+		| 'updateInterval'
+		| 'pingPolicy'
+		| 'pingUrl'
+		| 'resetProxy'
+		| 'xrayCore'
+		| 'geo'
+		| 'logConsole'
+		| 'presets'
+		| 'colors';
+	interface Option {
+		value: string;
+		label: string;
+	}
+
 	let resettingProxy = $state(false);
 	let resetSuccess = $state(false);
-	let currentSubView = $state<
-		'main' | 'presets' | 'colors' | 'notifications' | 'diagnostics'
-	>('main');
+	let currentSubView = $state<SubView>('main');
 	const applicationUpdateState = applicationUpdate.state;
 	const coreUpdateState = coreUpdate.state;
-	let diagnostics = $state<NetworkDiagnostics | null>(null);
-	let diagnosticsBusy = $state(false);
-	let diagnosticsError = $state(false);
-	let reportCopied = $state(false);
 	let openingLogConsole = $state(false);
 	let logConsoleError = $state(false);
 	let customDnsOpen = $state(false);
@@ -64,9 +79,41 @@
 	let geoUpdateSuccess = $state(false);
 	let geoError = $state<string | null>(null);
 
+	let scroller = $state<HTMLDivElement | null>(null);
+	let mainScroll = 0;
+
 	onMount(() => {
 		void loadGeoInfo();
+		if (resumeScroll !== null) {
+			const top = resumeScroll;
+			resumeScroll = null;
+			void tick().then(() => {
+				if (scroller) scroller.scrollTop = top;
+			});
+		}
 	});
+
+	function openBrightness() {
+		resumeScroll = scroller?.scrollTop ?? 0;
+		onOpenBrightness?.();
+	}
+
+	/** Opens a sub-page from the main list and remembers where the list was. */
+	function open(view: SubView) {
+		mainScroll = scroller?.scrollTop ?? 0;
+		currentSubView = view;
+		if (scroller) scroller.scrollTop = 0;
+	}
+
+	async function back() {
+		if (currentSubView === 'main') {
+			onClose?.();
+			return;
+		}
+		currentSubView = 'main';
+		await tick();
+		if (scroller) scroller.scrollTop = mainScroll;
+	}
 
 	async function loadGeoInfo() {
 		try {
@@ -100,18 +147,8 @@
 		}
 	}
 
-	let uiScaleText = $state(Math.round(shaderSettings.uiScale * 100).toString());
-	let uiScaleDraft = $state(shaderSettings.uiScale);
 	let exposureText = $state(shaderSettings.exposure.toFixed(2));
-	let isEditingUiScale = $state(false);
 	let isEditingExposure = $state(false);
-
-	$effect(() => {
-		if (!isEditingUiScale) {
-			uiScaleText = Math.round(shaderSettings.uiScale * 100).toString();
-			uiScaleDraft = shaderSettings.uiScale;
-		}
-	});
 
 	$effect(() => {
 		if (!isEditingExposure) {
@@ -130,34 +167,6 @@
 	function handleCoreUpdateAction() {
 		if ($coreUpdateState.status === 'available') void coreUpdate.install();
 		else void coreUpdate.check();
-	}
-
-	async function loadDiagnostics() {
-		if (!runtime.isTauri) return;
-		diagnosticsBusy = true;
-		diagnosticsError = false;
-		try {
-			diagnostics = await invoke<NetworkDiagnostics>('get_network_diagnostics');
-		} catch {
-			diagnosticsError = true;
-		} finally {
-			diagnosticsBusy = false;
-		}
-	}
-
-	async function copyDiagnostics() {
-		if (!diagnostics) return;
-		try {
-			await navigator.clipboard.writeText(
-				formatNetworkDiagnostics(diagnostics),
-			);
-			reportCopied = true;
-			setTimeout(() => {
-				reportCopied = false;
-			}, 2000);
-		} catch {
-			diagnosticsError = true;
-		}
 	}
 
 	async function openLogConsole() {
@@ -205,24 +214,6 @@
 		}
 	}
 
-	function commitUiScale() {
-		isEditingUiScale = false;
-		const parsed = parseInt(uiScaleText, 10);
-		if (isNaN(parsed)) {
-			uiScaleText = Math.round(shaderSettings.uiScale * 100).toString();
-			return;
-		}
-		const clamped = Math.min(150, Math.max(75, parsed));
-		shaderSettings.setUiScale(clamped / 100);
-		uiScaleDraft = clamped / 100;
-		uiScaleText = clamped.toString();
-	}
-
-	function commitUiScaleSlider() {
-		shaderSettings.setUiScale(uiScaleDraft);
-		uiScaleText = Math.round(uiScaleDraft * 100).toString();
-	}
-
 	function commitExposure() {
 		isEditingExposure = false;
 		const parsed = parseFloat(exposureText.replace(',', '.'));
@@ -240,10 +231,19 @@
 		label: lang.name,
 	}));
 
+	const uiScaleOptions = [75, 90, 100, 110, 125, 150].map((percent) => ({
+		value: String(percent),
+		label: `${percent}%`,
+	}));
+	let uiScaleValue = $derived(String(Math.round(shaderSettings.uiScale * 100)));
+
 	let routingOptions = $derived([
-		{ value: 'proxy', label: t('settings.modeProxy') },
 		{ value: 'tun', label: t('settings.modeTun') },
+		{ value: 'proxy', label: t('settings.modeProxy') },
 	]);
+	let networkMode = $derived(
+		runtime.isTauri ? $nativeSettings.networkMode : 'proxy',
+	);
 
 	let dnsOptions = $derived([
 		{ value: 'system', label: t('settings.dnsSystem') },
@@ -282,35 +282,162 @@
 		{ value: '24', label: t('settings.update24h') },
 		{ value: '0', label: t('settings.updateManual') },
 	]);
-	import { screen, reveal } from '../../lib/motion';
+	let updateInterval = $derived(
+		runtime.isTauri
+			? ($nativeSettings.updateIntervalHours?.toString() ?? '24')
+			: '24',
+	);
+	const updateIntervalShort: Record<string, string> = {
+		'1': 'settings.update1hShort',
+		'6': 'settings.update6hShort',
+		'24': 'settings.update24hShort',
+		'0': 'settings.updateManualShort',
+	};
+
+	function appUpdateLabel() {
+		switch ($applicationUpdateState.status) {
+			case 'checking':
+				return t('settings.checkingUpdates');
+			case 'downloading':
+				return t('settings.downloadingUpdate');
+			case 'available':
+				return t('settings.downloadUpdate', {
+					version: $applicationUpdateState.version ?? '',
+				});
+			case 'latest':
+				return t('settings.latestVersionInstalled');
+			case 'error':
+				return t('common.retry');
+			default:
+				return t('settings.checkUpdates');
+		}
+	}
+
+	function coreUpdateLabel() {
+		switch ($coreUpdateState.status) {
+			case 'checking':
+				return t('settings.checkingUpdates');
+			case 'installing':
+				return t('settings.downloadingUpdate');
+			case 'available':
+				return t('settings.downloadUpdate', {
+					version: $coreUpdateState.version ?? '',
+				});
+			case 'latest':
+				return t('settings.latestVersionInstalled');
+			case 'error':
+				return t('common.retry');
+			default:
+				return t('settings.checkUpdates');
+		}
+	}
+
+	let titles = $derived<Record<SubView, string>>({
+		main: '',
+		language: t('settings.language'),
+		uiScale: t('settings.uiScale'),
+		appVersion: t('settings.appVersion'),
+		notifications: t('settings.notifications'),
+		routingMode: t('settings.routingMode'),
+		serverSelection: t('settings.serverSelection'),
+		dns: t('settings.dnsServer'),
+		updateInterval: t('settings.updateInterval'),
+		pingPolicy: t('settings.pingPolicy'),
+		pingUrl: t('settings.pingUrl'),
+		resetProxy: t('settings.resetProxy'),
+		xrayCore: t('settings.xrayCore'),
+		geo: t('settings.geoDatabases'),
+		logConsole: t('settings.logConsole'),
+		presets: t('settings.presets'),
+		colors: t('settings.customColors'),
+	});
 </script>
 
-<div class="settings-view">
+{#snippet choices(
+	options: Option[],
+	value: string,
+	onSelect: (value: string) => void,
+	disabled = false,
+)}
+	<div class="settings-group choice-group" role="radiogroup">
+		{#each options as option (option.value)}
+			<button
+				type="button"
+				role="radio"
+				class="choice-row"
+				aria-checked={value === option.value}
+				{disabled}
+				onclick={() => value !== option.value && onSelect(option.value)}
+			>
+				<span class="choice-mark" aria-hidden="true">
+					{#if value === option.value}
+						<span
+							class="choice-dot"
+							in:pop={{ start: 0.4, duration: 220 }}
+						></span>
+					{/if}
+				</span>
+				<span class="choice-label">{option.label}</span>
+			</button>
+		{/each}
+	</div>
+{/snippet}
+
+{#snippet actionCard(
+	label: string,
+	value: string,
+	action: string,
+	onclick: () => void,
+	disabled: boolean,
+	success = false,
+	error = false,
+)}
+	<div class="settings-group action-card">
+		<div class="info-row">
+			<span class="info-label">{label}</span>
+			<span class="info-value" class:error-text={error}>{value}</span>
+		</div>
+		<button type="button" class="wide-btn" class:success {disabled} {onclick}>
+			{action}
+		</button>
+	</div>
+{/snippet}
+
+{#snippet hint(text: string | undefined, alert = false)}
+	{#if text}
+		<p class="hint" role={alert ? 'alert' : undefined}>{text}</p>
+	{/if}
+{/snippet}
+
+<div class="settings-view" bind:this={scroller}>
 	{#key currentSubView}
 		<div
 			class="settings-page"
 			in:screen={{ dir: currentSubView === 'main' ? -1 : 1 }}
 		>
-			{#if currentSubView === 'main'}
-				<!-- Section 1: General Settings -->
-				<div class="settings-section">
-					<div class="section-header">
-						<span class="section-title">{t('settings.generalSection')}</span>
-					</div>
-					<div class="settings-group">
-						<!-- Language Switcher -->
-						<SettingRow label={t('settings.language')}>
-							<Dropdown
-								label={t('settings.language')}
-								options={languageOptions}
-								value={i18n.currentLanguage}
-								onChange={(value) =>
-									i18n.setLanguage(value as SupportedLanguage)}
-								compact
-							/>
-						</SettingRow>
+			<div class="page-header">
+				<button
+					type="button"
+					class="circle-back"
+					aria-label={t('common.back')}
+					onclick={() => void back()}
+				>
+					<img src={backIcon} alt="" width="24" height="24" />
+				</button>
+				{#if currentSubView !== 'main'}
+					<span class="page-title">{titles[currentSubView]}</span>
+				{/if}
+			</div>
 
-						<!-- Animated Background -->
+			{#if currentSubView === 'main'}
+				<section class="settings-section">
+					<h2 class="section-title">{t('settings.generalSection')}</h2>
+					<div class="settings-group">
+						<SettingRow
+							label={t('settings.language')}
+							showChevron
+							onclick={() => open('language')}
+						/>
 						<SettingRow label={t('settings.animation')}>
 							<ToggleSwitch
 								mode="checkbox"
@@ -319,8 +446,6 @@
 								onchange={(val) => shaderSettings.setEnabled(val)}
 							/>
 						</SettingRow>
-
-						<!-- Tooltips toggle -->
 						<SettingRow label={t('settings.tooltips')}>
 							<ToggleSwitch
 								mode="checkbox"
@@ -329,99 +454,23 @@
 								onchange={(val) => shaderSettings.setTooltipsEnabled(val)}
 							/>
 						</SettingRow>
-
-						<!-- UI Scale Slider & Input -->
-						<SettingRow label={t('settings.uiScale')}>
-							<div class="range-control">
-								<input
-									type="range"
-									min="0.75"
-									max="1.5"
-									step="0.05"
-									aria-label={t('settings.uiScale')}
-									value={uiScaleDraft}
-									oninput={(e) => {
-										const val = parseFloat(
-											(e.target as HTMLInputElement).value,
-										);
-										uiScaleDraft = val;
-										if (!isEditingUiScale) {
-											uiScaleText = Math.round(val * 100).toString();
-										}
-									}}
-									onchange={commitUiScaleSlider}
-									class="range-slider"
-								/>
-								<div class="range-input-wrapper">
-									<input
-										type="text"
-										inputmode="numeric"
-										pattern="[0-9]*"
-										class="range-text-input"
-										aria-label="{t('settings.uiScale')} (%)"
-										bind:value={uiScaleText}
-										onfocus={() => (isEditingUiScale = true)}
-										onblur={commitUiScale}
-										onkeydown={(e) => {
-											if (e.key === 'Enter') {
-												(e.target as HTMLInputElement).blur();
-											}
-										}}
-									/>
-									<span class="range-unit">%</span>
-								</div>
-							</div>
-						</SettingRow>
-
-						<!-- App Version & Updates -->
-						<SettingRow label={t('settings.appVersion')}>
-							<div class="version-badge-container">
-								<span class="badge version-badge">
-									v{$applicationUpdateState.currentVersion}
-								</span>
-								<button
-									type="button"
-									class="action-btn"
-									class:success={$applicationUpdateState.status === 'latest'}
-									disabled={['checking', 'downloading'].includes(
-										$applicationUpdateState.status,
-									)}
-									onclick={handleUpdateAction}
-								>
-									{#if $applicationUpdateState.status === 'checking'}
-										<span class="loading-spinner"></span>
-										<span>{t('settings.checkingUpdates')}</span>
-									{:else if $applicationUpdateState.status === 'downloading'}
-										<span class="loading-spinner"></span>
-										<span>{t('settings.downloadingUpdate')}</span>
-									{:else if $applicationUpdateState.status === 'available'}
-										<span>
-											{t('settings.downloadUpdate', {
-												version: $applicationUpdateState.version ?? '',
-											})}
-										</span>
-									{:else if $applicationUpdateState.status === 'latest'}
-										<span class="success-text">
-											✓ {t('settings.latestVersionInstalled')}
-										</span>
-									{:else if $applicationUpdateState.status === 'error'}
-										<span>{t('common.retry')}</span>
-									{:else}
-										<span>{t('settings.checkUpdates')}</span>
-									{/if}
-								</button>
-							</div>
-						</SettingRow>
+						<SettingRow
+							label={t('settings.uiScale')}
+							value="{uiScaleValue}%"
+							showChevron
+							onclick={() => open('uiScale')}
+						/>
+						<SettingRow
+							label={t('settings.appVersion')}
+							showChevron
+							onclick={() => open('appVersion')}
+						/>
 					</div>
-				</div>
+				</section>
 
-				<!-- Section 2: System & Startup -->
-				<div class="settings-section">
-					<div class="section-header">
-						<span class="section-title">{t('settings.systemSection')}</span>
-					</div>
+				<section class="settings-section">
+					<h2 class="section-title">{t('settings.systemSection')}</h2>
 					<div class="settings-group">
-						<!-- Auto Start with Windows -->
 						<SettingRow label={t('settings.autoStart')}>
 							<ToggleSwitch
 								mode="checkbox"
@@ -431,8 +480,6 @@
 								onchange={(val) => updateNativeSettings({ autoStart: val })}
 							/>
 						</SettingRow>
-
-						<!-- Close to Tray -->
 						<SettingRow label={t('settings.closeToTray')}>
 							<ToggleSwitch
 								mode="checkbox"
@@ -442,8 +489,6 @@
 								onchange={(val) => updateNativeSettings({ closeToTray: val })}
 							/>
 						</SettingRow>
-
-						<!-- Start Minimized -->
 						<SettingRow label={t('settings.startMinimized')}>
 							<ToggleSwitch
 								mode="checkbox"
@@ -459,82 +504,35 @@
 						<SettingRow
 							label={t('settings.notifications')}
 							showChevron
-							onclick={() => (currentSubView = 'notifications')}
+							onclick={() => open('notifications')}
 						/>
 					</div>
-				</div>
+				</section>
 
-				<!-- Section 3: Network / Core Settings -->
-				<div class="settings-section">
-					<div class="section-header">
-						<span class="section-title">{t('settings.networkSection')}</span>
-					</div>
+				<section class="settings-section">
+					<h2 class="section-title">{t('settings.networkSection')}</h2>
 					<div class="settings-group">
 						<SettingRow
-							label={t('settings.coreEngine')}
-							description={t('settings.coreEngineDesc')}
-						>
-							<Dropdown
-								label={t('settings.coreEngine')}
-								options={[
-									{
-										value: 'lumen',
-										label: 'Lumen Core',
-									},
-									{ value: 'xray', label: 'Xray Core' },
-								]}
-								value={$nativeSettings.coreEngine}
-								disabled={!runtime.isTauri}
-								onChange={(value) =>
-									updateNativeSettings({
-										coreEngine: value as 'lumen' | 'xray',
-									})}
-								compact
-							/>
-						</SettingRow>
-						{#if $nativeSettings.coreEngine === 'lumen'}
-							<SettingRow
-								label={$nativeSettings.coreEngines.find(
-									(engine) => engine.engine === 'lumen',
-								)?.experimental
-									? t('settings.experimental')
-									: 'Lumen Core'}
-								description={t('settings.lumenCoreSupport')}
-							/>
-						{/if}
-						<!-- Routing Mode -->
-						<SettingRow label={t('settings.routingMode')}>
-							<Dropdown
-								label={t('settings.routingMode')}
-								options={routingOptions}
-								value={runtime.isTauri ? $nativeSettings.networkMode : 'proxy'}
-								disabled={!runtime.isTauri}
-								onChange={(value) =>
-									updateNativeSettings({
-										networkMode: value as 'proxy' | 'tun',
-									})}
-								compact
-							/>
-						</SettingRow>
-
-						<!-- Auto Connect -->
+							label={t('settings.routingMode')}
+							value={t(
+								networkMode === 'tun'
+									? 'settings.modeTunShort'
+									: 'settings.modeProxyShort',
+							)}
+							showChevron
+							onclick={() => open('routingMode')}
+						/>
 						<SettingRow label={t('settings.autoConnect')}>
 							<ToggleSwitch
 								mode="checkbox"
 								disabled={!runtime.isTauri}
 								ariaLabel={t('settings.autoConnect')}
-								checked={runtime.isTauri
-									? $nativeSettings.autoConnect
-									: autoConnect}
+								checked={runtime.isTauri ? $nativeSettings.autoConnect : false}
 								onchange={(value) =>
 									updateNativeSettings({ autoConnect: value })}
 							/>
 						</SettingRow>
-
-						<SettingRow
-							label={t('settings.autoReconnect')}
-							description={t('settings.autoReconnectDesc')}
-						>
+						<SettingRow label={t('settings.autoReconnect')}>
 							<ToggleSwitch
 								mode="checkbox"
 								disabled={!runtime.isTauri}
@@ -544,73 +542,21 @@
 									updateNativeSettings({ autoReconnect: value })}
 							/>
 						</SettingRow>
-
 						<SettingRow
 							label={t('settings.serverSelection')}
-							description={t('settings.serverSelectionDesc')}
-						>
-							<Dropdown
-								label={t('settings.serverSelection')}
-								options={serverSelectionOptions}
-								value={$nativeSettings.serverSelection}
-								disabled={!runtime.isTauri}
-								onChange={(value) =>
-									updateNativeSettings({
-										serverSelection: value as 'manual' | 'best',
-									})}
-								compact
-							/>
-						</SettingRow>
-
-						<!-- DNS Server -->
+							value={t(
+								$nativeSettings.serverSelection === 'best'
+									? 'settings.serverBestShort'
+									: 'settings.serverManual',
+							)}
+							showChevron
+							onclick={() => open('serverSelection')}
+						/>
 						<SettingRow
 							label={t('settings.dnsServer')}
-							description={t('settings.dnsTunOnly')}
-						>
-							<Dropdown
-								label={t('settings.dnsServer')}
-								options={dnsOptions}
-								value={runtime.isTauri
-									? customDnsOpen
-										? 'custom'
-										: dnsSelection
-									: 'system'}
-								disabled={!runtime.isTauri}
-								onChange={(value) => {
-									customDnsOpen = value === 'custom';
-									customDnsInvalid = false;
-									if (value !== 'custom')
-										void updateNativeSettings({ dnsServer: value });
-								}}
-								compact
-							/>
-						</SettingRow>
-						{#if customDnsOpen || dnsSelection === 'custom'}
-							<div class="reveal-row" transition:reveal>
-								<SettingRow
-									label={t('settings.dnsCustomAddress')}
-									description={customDnsInvalid
-										? t('settings.dnsInvalid')
-										: t('settings.dnsCustomHint')}
-								>
-									<input
-										class="ping-url-input custom-dns-input"
-										type="text"
-										inputmode="decimal"
-										placeholder="9.9.9.9"
-										aria-label={t('settings.dnsCustomAddress')}
-										bind:value={customDnsDraft}
-										onchange={commitCustomDns}
-										onkeydown={(event) => {
-											if (event.key === 'Enter')
-												(event.target as HTMLInputElement).blur();
-										}}
-									/>
-								</SettingRow>
-							</div>
-						{/if}
-
-						<!-- Bypass LAN -->
+							showChevron
+							onclick={() => open('dns')}
+						/>
 						<SettingRow label={t('settings.bypassLan')}>
 							<ToggleSwitch
 								mode="checkbox"
@@ -622,638 +568,421 @@
 								onchange={(val) => updateNativeSettings({ bypassLan: val })}
 							/>
 						</SettingRow>
-
-						<!-- Update Interval -->
-						<SettingRow label={t('settings.updateInterval')}>
-							<Dropdown
-								label={t('settings.updateInterval')}
-								options={updateIntervalOptions}
-								value={runtime.isTauri
-									? ($nativeSettings.updateIntervalHours?.toString() ?? '24')
-									: '24'}
-								disabled={!runtime.isTauri}
-								onChange={(value) =>
-									updateNativeSettings({
-										updateIntervalHours: parseInt(value, 10),
-									})}
-								compact
-							/>
-						</SettingRow>
-						<SettingRow label={t('settings.pingPolicy')}>
-							<Dropdown
-								label={t('settings.pingPolicy')}
-								options={pingPolicyOptions}
-								value={$nativeSettings.pingPolicy}
-								disabled={!runtime.isTauri}
-								onChange={(value) =>
-									updateNativeSettings({
-										pingPolicy: value as 'startup' | 'list' | 'manual',
-									})}
-								compact
-							/>
-						</SettingRow>
-
-						<!-- Ping Test URL -->
 						<SettingRow
-							label={t('settings.pingUrl')}
-							description={t('settings.pingUrlDesc')}
-						>
-							<div class="ping-url-wrapper">
-								<input
-									type="text"
-									class="ping-url-input"
-									placeholder="http://www.google.com/generate_204"
-									value={$nativeSettings.pingUrl || ''}
-									onchange={(e) =>
-										updateNativeSettings({
-											pingUrl: (e.target as HTMLInputElement).value.trim(),
-										})}
-								/>
-							</div>
-						</SettingRow>
-
-						<!-- Reset System Proxy -->
-						<SettingRow
-							label={t('settings.resetProxy')}
-							description={t('settings.resetProxyDesc')}
-						>
-							<button
-								type="button"
-								class="action-btn"
-								class:success={resetSuccess}
-								disabled={!runtime.isTauri || resettingProxy}
-								onclick={handleResetProxy}
-							>
-								{resetSuccess
-									? t('settings.proxyResetSuccess')
-									: i18n.currentLanguage === 'ru'
-										? 'Сбросить'
-										: 'Reset'}
-							</button>
-						</SettingRow>
-
-						<!-- Xray Core Status -->
-						<SettingRow label={t('settings.xrayCore')}>
-							<div class="version-badge-container">
-								<span class="badge version-badge">
-									{runtime.isTauri
-										? $nativeSettings.coreVersion
-										: t('settings.mockReady')}
-								</span>
-								<button
-									type="button"
-									class="action-btn"
-									class:success={$coreUpdateState.status === 'latest'}
-									disabled={!runtime.isTauri ||
-										['checking', 'installing'].includes(
-											$coreUpdateState.status,
-										)}
-									onclick={handleCoreUpdateAction}
-								>
-									{#if $coreUpdateState.status === 'checking'}{t(
-											'settings.checkingUpdates',
-										)}
-									{:else if $coreUpdateState.status === 'installing'}{t(
-											'settings.downloadingUpdate',
-										)}
-									{:else if $coreUpdateState.status === 'available'}{t(
-											'settings.downloadUpdate',
-											{ version: $coreUpdateState.version ?? '' },
-										)}
-									{:else if $coreUpdateState.status === 'latest'}{t(
-											'settings.latestVersionInstalled',
-										)}
-									{:else if $coreUpdateState.status === 'error'}{t(
-											'common.retry',
-										)}
-									{:else}{t('settings.checkUpdates')}{/if}
-								</button>
-							</div>
-						</SettingRow>
-						<!-- GeoIP / GeoSite Database Status -->
-						<SettingRow
-							label={t('settings.geoDatabases') || 'Базы GeoIP / GeoSite'}
-							description={geoError
-								? t('errors.' + geoError) ||
-									t('settings.geoDataCorrupted') ||
-									'Базы GeoIP/GeoSite отсутствуют или повреждены'
-								: geoInfo
-									? `${geoInfo.source}${geoInfo.updatedAt ? ' · ' + new Date(geoInfo.updatedAt).toLocaleDateString() : ''}`
-									: undefined}
-						>
-							<div class="version-badge-container">
-								<span
-									class="badge version-badge"
-									class:error-badge={geoError || (geoInfo && !geoInfo.valid)}
-								>
-									{geoInfo?.version || '202410152325'}
-								</span>
-								<button
-									type="button"
-									class="action-btn"
-									class:success={geoUpdateSuccess}
-									disabled={geoUpdating}
-									onclick={handleUpdateGeo}
-								>
-									{geoUpdating
-										? t('settings.downloadingUpdate') || 'Обновление...'
-										: geoUpdateSuccess
-											? t('settings.latestVersionInstalled') || 'Обновлено'
-											: t('settings.updateDatabases') || 'Обновить базы'}
-								</button>
-							</div>
-						</SettingRow>
-						<SettingRow
-							label={i18n.currentLanguage === 'ru' ? 'Инструменты' : 'Tools'}
+							label={t('settings.updateInterval')}
+							value={t(updateIntervalShort[updateInterval] ?? '')}
 							showChevron
-							onclick={() => {
-								toolsOpen = true;
-							}}
+							onclick={() => open('updateInterval')}
 						/>
 						<SettingRow
-							label={t('settings.diagnostics')}
+							label={t('settings.pingPolicy')}
 							showChevron
-							onclick={() => {
-								currentSubView = 'diagnostics';
-								void loadDiagnostics();
-							}}
+							onclick={() => open('pingPolicy')}
+						/>
+						<SettingRow
+							label={t('settings.pingUrl')}
+							showChevron
+							onclick={() => open('pingUrl')}
+						/>
+						<SettingRow
+							label={t('settings.resetProxy')}
+							showChevron
+							onclick={() => open('resetProxy')}
+						/>
+						<SettingRow
+							label={t('settings.xrayCore')}
+							showChevron
+							onclick={() => open('xrayCore')}
+						/>
+						<SettingRow
+							label={t('settings.geoDatabases')}
+							showChevron
+							onclick={() => open('geo')}
 						/>
 						<SettingRow
 							label={t('settings.logConsole')}
-							description={logConsoleError
-								? t('settings.logConsoleError')
-								: t('settings.logConsoleDesc')}
-						>
-							<button
-								type="button"
-								class="action-btn"
-								disabled={!runtime.isTauri || openingLogConsole}
-								onclick={() => void openLogConsole()}
-							>
-								{openingLogConsole
-									? t('common.loading')
-									: t('settings.openLogConsole')}
-							</button>
-						</SettingRow>
+							showChevron
+							onclick={() => open('logConsole')}
+						/>
 					</div>
-					<p class="availability">
-						{runtime.isTauri
+					{@render hint(
+						runtime.isTauri
 							? $settingsError
 								? t('errors.' + $settingsError)
 								: ''
-							: t('demo.unavailable')}
-					</p>
-				</div>
+							: t('demo.unavailable'),
+					)}
+				</section>
 
-				<!-- Section 4: Background Shader -->
-				<div class="settings-section">
-					<div class="section-header">
-						<span class="section-title">{t('settings.shaderTitle')}</span>
-					</div>
+				<section class="settings-section">
+					<h2 class="section-title">{t('settings.shaderTitle')}</h2>
 					<div class="settings-group">
 						{#if onOpenBrightness}
 							<SettingRow
 								label={t('settings.brightness')}
 								showChevron
-								onclick={onOpenBrightness}
+								onclick={openBrightness}
 							/>
 						{/if}
-
-						<!-- Presets -->
 						<SettingRow
 							label={t('settings.presets')}
 							showChevron
-							onclick={() => (currentSubView = 'presets')}
+							onclick={() => open('presets')}
 						/>
-
-						<!-- Custom Colors -->
 						<SettingRow
 							label={t('settings.customColors')}
 							showChevron
-							onclick={() => (currentSubView = 'colors')}
+							onclick={() => open('colors')}
 						/>
 					</div>
-				</div>
+				</section>
+			{:else if currentSubView === 'language'}
+				{@render choices(languageOptions, i18n.currentLanguage, (value) =>
+					i18n.setLanguage(value as SupportedLanguage),
+				)}
+			{:else if currentSubView === 'uiScale'}
+				{@render choices(uiScaleOptions, uiScaleValue, (value) =>
+					shaderSettings.setUiScale(Number(value) / 100),
+				)}
+				{@render hint(t('settings.uiScaleDesc'))}
+			{:else if currentSubView === 'appVersion'}
+				{@render actionCard(
+					t('settings.currentVersion'),
+					$applicationUpdateState.currentVersion,
+					appUpdateLabel(),
+					handleUpdateAction,
+					['checking', 'downloading'].includes($applicationUpdateState.status),
+					$applicationUpdateState.status === 'latest',
+				)}
 			{:else if currentSubView === 'notifications'}
-				<div class="subview-container">
-					<div class="subview-header">
-						<button
-							type="button"
-							class="back-btn"
-							onclick={() => (currentSubView = 'main')}
-							aria-label={t('common.back')}
-						>
-							<img
-								src={chevronIcon}
-								alt=""
-								class="back-chevron"
-								aria-hidden="true"
-							/>
-							<span class="subview-title">{t('settings.notifications')}</span>
-						</button>
-					</div>
-					<div class="settings-group">
-						<SettingRow label={t('settings.notifyDisconnect')}>
-							<ToggleSwitch
-								mode="checkbox"
-								disabled={!runtime.isTauri}
-								ariaLabel={t('settings.notifyDisconnect')}
-								checked={$nativeSettings.notifyDisconnect}
-								onchange={(value) =>
-									updateNativeSettings({ notifyDisconnect: value })}
-							/>
-						</SettingRow>
-						<SettingRow label={t('settings.notifyReconnect')}>
-							<ToggleSwitch
-								mode="checkbox"
-								disabled={!runtime.isTauri}
-								ariaLabel={t('settings.notifyReconnect')}
-								checked={$nativeSettings.notifyReconnect}
-								onchange={(value) =>
-									updateNativeSettings({ notifyReconnect: value })}
-							/>
-						</SettingRow>
-						<SettingRow label={t('settings.notifyExpiry')}>
-							<ToggleSwitch
-								mode="checkbox"
-								disabled={!runtime.isTauri}
-								ariaLabel={t('settings.notifyExpiry')}
-								checked={$nativeSettings.notifyExpiry}
-								onchange={(value) =>
-									updateNativeSettings({ notifyExpiry: value })}
-							/>
-						</SettingRow>
-						<SettingRow label={t('settings.notifyUpdate')}>
-							<ToggleSwitch
-								mode="checkbox"
-								disabled={!runtime.isTauri}
-								ariaLabel={t('settings.notifyUpdate')}
-								checked={$nativeSettings.notifyUpdate}
-								onchange={(value) =>
-									updateNativeSettings({ notifyUpdate: value })}
-							/>
-						</SettingRow>
-					</div>
+				<div class="settings-group">
+					<SettingRow label={t('settings.notifyDisconnect')}>
+						<ToggleSwitch
+							mode="checkbox"
+							disabled={!runtime.isTauri}
+							ariaLabel={t('settings.notifyDisconnect')}
+							checked={$nativeSettings.notifyDisconnect}
+							onchange={(value) =>
+								updateNativeSettings({ notifyDisconnect: value })}
+						/>
+					</SettingRow>
+					<SettingRow label={t('settings.notifyReconnect')}>
+						<ToggleSwitch
+							mode="checkbox"
+							disabled={!runtime.isTauri}
+							ariaLabel={t('settings.notifyReconnect')}
+							checked={$nativeSettings.notifyReconnect}
+							onchange={(value) =>
+								updateNativeSettings({ notifyReconnect: value })}
+						/>
+					</SettingRow>
+					<SettingRow label={t('settings.notifyExpiry')}>
+						<ToggleSwitch
+							mode="checkbox"
+							disabled={!runtime.isTauri}
+							ariaLabel={t('settings.notifyExpiry')}
+							checked={$nativeSettings.notifyExpiry}
+							onchange={(value) =>
+								updateNativeSettings({ notifyExpiry: value })}
+						/>
+					</SettingRow>
+					<SettingRow label={t('settings.notifyUpdate')}>
+						<ToggleSwitch
+							mode="checkbox"
+							disabled={!runtime.isTauri}
+							ariaLabel={t('settings.notifyUpdate')}
+							checked={$nativeSettings.notifyUpdate}
+							onchange={(value) =>
+								updateNativeSettings({ notifyUpdate: value })}
+						/>
+					</SettingRow>
 				</div>
-			{:else if currentSubView === 'diagnostics'}
-				<div class="subview-container">
-					<div class="subview-header">
+			{:else if currentSubView === 'routingMode'}
+				{@render choices(
+					routingOptions,
+					networkMode,
+					(value) =>
+						updateNativeSettings({ networkMode: value as 'proxy' | 'tun' }),
+					!runtime.isTauri,
+				)}
+				{@render hint(t('settings.routingDesc'))}
+			{:else if currentSubView === 'serverSelection'}
+				{@render choices(
+					serverSelectionOptions,
+					$nativeSettings.serverSelection,
+					(value) =>
+						updateNativeSettings({
+							serverSelection: value as 'manual' | 'best',
+						}),
+					!runtime.isTauri,
+				)}
+				{@render hint(t('settings.serverSelectionDesc'))}
+			{:else if currentSubView === 'dns'}
+				{@render choices(
+					dnsOptions,
+					runtime.isTauri
+						? customDnsOpen
+							? 'custom'
+							: dnsSelection
+						: 'system',
+					(value) => {
+						customDnsOpen = value === 'custom';
+						customDnsInvalid = false;
+						if (value !== 'custom')
+							void updateNativeSettings({ dnsServer: value });
+					},
+					!runtime.isTauri,
+				)}
+				{#if customDnsOpen || dnsSelection === 'custom'}
+					<div class="settings-group field-group" transition:reveal>
+						<input
+							class="text-field"
+							type="text"
+							inputmode="decimal"
+							placeholder="9.9.9.9"
+							aria-label={t('settings.dnsCustomAddress')}
+							bind:value={customDnsDraft}
+							onchange={commitCustomDns}
+							onkeydown={(event) => {
+								if (event.key === 'Enter')
+									(event.target as HTMLInputElement).blur();
+							}}
+						/>
+					</div>
+					{@render hint(
+						customDnsInvalid
+							? t('settings.dnsInvalid')
+							: t('settings.dnsCustomHint'),
+						customDnsInvalid,
+					)}
+				{/if}
+				{@render hint(t('settings.dnsTunOnly'))}
+			{:else if currentSubView === 'updateInterval'}
+				{@render choices(
+					updateIntervalOptions,
+					updateInterval,
+					(value) =>
+						updateNativeSettings({ updateIntervalHours: parseInt(value, 10) }),
+					!runtime.isTauri,
+				)}
+			{:else if currentSubView === 'pingPolicy'}
+				{@render choices(
+					pingPolicyOptions,
+					$nativeSettings.pingPolicy,
+					(value) =>
+						updateNativeSettings({
+							pingPolicy: value as 'startup' | 'list' | 'manual',
+						}),
+					!runtime.isTauri,
+				)}
+			{:else if currentSubView === 'pingUrl'}
+				<div class="settings-group field-group">
+					<input
+						type="text"
+						class="text-field"
+						placeholder="http://www.google.com/generate_204"
+						aria-label={t('settings.pingUrl')}
+						spellcheck="false"
+						value={$nativeSettings.pingUrl || ''}
+						onchange={(e) =>
+							updateNativeSettings({
+								pingUrl: (e.target as HTMLInputElement).value.trim(),
+							})}
+						onkeydown={(event) => {
+							if (event.key === 'Enter')
+								(event.target as HTMLInputElement).blur();
+						}}
+					/>
+				</div>
+				{@render hint(t('settings.pingUrlDesc'))}
+			{:else if currentSubView === 'resetProxy'}
+				<div class="settings-group action-card">
+					<p class="card-text">{t('settings.resetProxyDesc')}</p>
+					<button
+						type="button"
+						class="wide-btn"
+						class:success={resetSuccess}
+						disabled={!runtime.isTauri || resettingProxy}
+						onclick={handleResetProxy}
+					>
+						{resetSuccess
+							? t('settings.proxyResetSuccess')
+							: t('settings.resetProxyAction')}
+					</button>
+				</div>
+			{:else if currentSubView === 'xrayCore'}
+				{@render actionCard(
+					t('settings.currentVersion'),
+					runtime.isTauri
+						? $nativeSettings.coreVersion
+						: t('settings.mockReady'),
+					coreUpdateLabel(),
+					handleCoreUpdateAction,
+					!runtime.isTauri ||
+						['checking', 'installing'].includes($coreUpdateState.status),
+					$coreUpdateState.status === 'latest',
+				)}
+			{:else if currentSubView === 'geo'}
+				{@render actionCard(
+					t('settings.currentVersion'),
+					geoInfo?.version || '—',
+					geoUpdating
+						? t('settings.downloadingUpdate')
+						: geoUpdateSuccess
+							? t('settings.latestVersionInstalled')
+							: t('settings.updateDatabases'),
+					handleUpdateGeo,
+					geoUpdating,
+					geoUpdateSuccess,
+					Boolean(geoError || (geoInfo && !geoInfo.valid)),
+				)}
+				{@render hint(
+					geoError
+						? t('errors.' + geoError) || t('settings.geoDataCorrupted')
+						: geoInfo
+							? `${geoInfo.source}${geoInfo.updatedAt ? ' · ' + new Date(geoInfo.updatedAt).toLocaleDateString() : ''}`
+							: undefined,
+					Boolean(geoError),
+				)}
+			{:else if currentSubView === 'logConsole'}
+				<div class="settings-group action-card">
+					<p class="card-text">{t('settings.logConsoleDesc')}</p>
+					<button
+						type="button"
+						class="wide-btn"
+						disabled={!runtime.isTauri || openingLogConsole}
+						onclick={() => void openLogConsole()}
+					>
+						{openingLogConsole
+							? t('common.loading')
+							: t('settings.openLogConsole')}
+					</button>
+				</div>
+				{#if logConsoleError}
+					{@render hint(t('settings.logConsoleError'), true)}
+				{/if}
+			{:else if currentSubView === 'presets'}
+				<div class="settings-group choice-group" role="radiogroup">
+					{#each SHADER_PRESETS as preset (preset.id)}
+						{@const selected = shaderSettings.selectedPreset === preset.id}
 						<button
 							type="button"
-							class="back-btn"
-							onclick={() => (currentSubView = 'main')}
-							aria-label={t('common.back')}
+							role="radio"
+							class="choice-row"
+							aria-checked={selected}
+							onclick={() => shaderSettings.applyPreset(preset.id)}
 						>
-							<img
-								src={chevronIcon}
-								alt=""
-								class="back-chevron"
-								aria-hidden="true"
-							/>
-							<span class="subview-title">{t('settings.diagnostics')}</span>
+							<span class="choice-mark" aria-hidden="true">
+								{#if selected}
+									<span
+										class="choice-dot"
+										in:pop={{ start: 0.4, duration: 220 }}
+									></span>
+								{/if}
+							</span>
+							<span class="choice-label">{t(preset.nameKey)}</span>
+							<span class="swatches-pair" aria-hidden="true">
+								<span
+									class="swatch-dot"
+									style:background={preset.colorA}
+								></span>
+								<span
+									class="swatch-dot swatch-overlap"
+									style:background={preset.colorB}
+								></span>
+							</span>
 						</button>
-					</div>
-					{#if diagnostics}
-						<div class="settings-group">
-							<SettingRow label={t('settings.diagStatus')}>
-								<span class="diag-value">
-									{t('home.' + diagnostics.status)}
-								</span>
-							</SettingRow>
-							<SettingRow label={t('settings.routingMode')}>
-								<span class="diag-value">
-									{t(
-										diagnostics.networkMode === 'tun'
-											? 'settings.modeTun'
-											: 'settings.modeProxy',
-									)}
-								</span>
-							</SettingRow>
-							<SettingRow label={t('settings.xrayCore')}>
-								<span class="diag-value">{diagnostics.coreVersion}</span>
-							</SettingRow>
-							<SettingRow label="IPv4">
-								<span class="diag-value">
-									{diagnostics.publicIpv4 ?? t('settings.diagUnavailable')}
-								</span>
-							</SettingRow>
-							<SettingRow label="IPv6">
-								<span class="diag-value">
-									{diagnostics.publicIpv6 ?? t('settings.diagUnavailable')}
-								</span>
-							</SettingRow>
-							<SettingRow label={t('settings.diagSystemDns')}>
-								<span class="diag-value">
-									{diagnostics.systemDns.join(', ') ||
-										t('settings.diagUnavailable')}
-								</span>
-							</SettingRow>
-							<SettingRow label={t('settings.dnsServer')}>
-								<span class="diag-value">{diagnostics.configuredDns}</span>
-							</SettingRow>
-							<SettingRow label={t('settings.diagTunnel')}>
-								<span class="diag-value">
-									{diagnostics.tunnelReady
-										? t('settings.diagReady')
-										: t('settings.diagUnavailable')}
-								</span>
-							</SettingRow>
-							<SettingRow label={t('settings.diagRoutes')}>
-								<span class="diag-value">
-									{diagnostics.routingConflict
-										? t('settings.diagConflict')
-										: diagnostics.routesReady
-											? t('settings.diagReady')
-											: t('settings.diagUnavailable')}
-								</span>
-							</SettingRow>
-							<SettingRow label={t('settings.diagProxy')}>
-								<span class="diag-value">
-									{diagnostics.proxyManaged
-										? t('settings.diagProxyLumen')
-										: diagnostics.systemProxyEnabled
-											? t('settings.diagProxyOther')
-											: t('settings.diagProxyOff')}
-								</span>
-							</SettingRow>
+					{/each}
+					{#if shaderSettings.selectedPreset === 'custom'}
+						<div class="choice-row" role="radio" aria-checked="true">
+							<span class="choice-mark" aria-hidden="true">
+								<span class="choice-dot"></span>
+							</span>
+							<span class="choice-label">
+								{t('settings.shaderPresetCustom')}
+							</span>
+							<span class="swatches-pair" aria-hidden="true">
+								<span
+									class="swatch-dot"
+									style:background={shaderSettings.colorA}
+								></span>
+								<span
+									class="swatch-dot swatch-overlap"
+									style:background={shaderSettings.colorB}
+								></span>
+							</span>
 						</div>
 					{/if}
-					{#if diagnosticsError}<p class="availability" role="alert">
-							{t('settings.diagError')}
-						</p>{/if}
-					<div class="diagnostics-actions">
-						<button
-							type="button"
-							class="action-btn"
-							disabled={diagnosticsBusy || !runtime.isTauri}
-							onclick={() => void loadDiagnostics()}
-						>
-							{diagnosticsBusy
-								? t('settings.checkingUpdates')
-								: t('settings.diagRefresh')}
-						</button>
-						<button
-							type="button"
-							class="action-btn"
-							disabled={!diagnostics}
-							onclick={() => void copyDiagnostics()}
-						>
-							{reportCopied ? t('common.copied') : t('settings.diagCopy')}
-						</button>
-					</div>
-				</div>
-			{:else if currentSubView === 'presets'}
-				<!-- Presets Subview -->
-				<div class="subview-container">
-					<div class="subview-header">
-						<button
-							type="button"
-							class="back-btn"
-							onclick={() => (currentSubView = 'main')}
-							aria-label={t('common.back') || 'Назад'}
-						>
-							<img
-								src={chevronIcon}
-								alt=""
-								class="back-chevron"
-								aria-hidden="true"
-							/>
-							<span class="subview-title">{t('settings.presets')}</span>
-						</button>
-					</div>
-
-					<div class="settings-group">
-						{#each SHADER_PRESETS as preset (preset.id)}
-							<button
-								type="button"
-								class="preset-item"
-								class:selected={shaderSettings.selectedPreset === preset.id}
-								onclick={() => shaderSettings.applyPreset(preset.id)}
-							>
-								<div class="preset-left">
-									<div class="swatches-pair">
-										<span
-											class="swatch-dot"
-											style="background-color: {preset.colorA}"
-										></span>
-										<span
-											class="swatch-dot swatch-overlap"
-											style="background-color: {preset.colorB}"
-										></span>
-									</div>
-									<span class="preset-label">{t(preset.nameKey)}</span>
-								</div>
-								{#if shaderSettings.selectedPreset === preset.id}
-									<span class="check-mark" aria-hidden="true">✓</span>
-								{/if}
-							</button>
-						{/each}
-
-						{#if shaderSettings.selectedPreset === 'custom'}
-							<div class="preset-item selected">
-								<div class="preset-left">
-									<div class="swatches-pair">
-										<span
-											class="swatch-dot"
-											style="background-color: {shaderSettings.colorA}"
-										></span>
-										<span
-											class="swatch-dot swatch-overlap"
-											style="background-color: {shaderSettings.colorB}"
-										></span>
-									</div>
-									<span class="preset-label">
-										{t('settings.shaderPresetCustom')}
-									</span>
-								</div>
-								<span class="check-mark" aria-hidden="true">✓</span>
-							</div>
-						{/if}
-					</div>
 				</div>
 			{:else if currentSubView === 'colors'}
-				<!-- Custom Colors Subview -->
-				<div class="subview-container">
-					<div class="subview-header">
-						<button
-							type="button"
-							class="back-btn"
-							onclick={() => (currentSubView = 'main')}
-							aria-label={t('common.back') || 'Назад'}
-						>
-							<img
-								src={chevronIcon}
-								alt=""
-								class="back-chevron"
-								aria-hidden="true"
-							/>
-							<span class="subview-title">{t('settings.customColors')}</span>
-						</button>
-					</div>
-
-					<div class="settings-group">
-						<!-- Idle Color A (Dark) -->
-						<SettingRow label={t('settings.shaderIdleColor')}>
-							<div class="color-picker-control">
-								<label
-									class="color-swatch"
-									style="background-color: {shaderSettings.idleColorA}"
-								>
-									<input
-										type="color"
-										aria-label={t('settings.shaderIdleColor')}
-										value={shaderSettings.idleColorA}
-										oninput={(e) =>
-											shaderSettings.setIdleColorA(
-												(e.target as HTMLInputElement).value,
-											)}
-									/>
-								</label>
-								<span class="color-hex">
-									{shaderSettings.idleColorA.toUpperCase()}
-								</span>
-							</div>
-						</SettingRow>
-
-						<!-- Idle Color B (Light) -->
-						<SettingRow label={t('settings.shaderIdleColorB')}>
-							<div class="color-picker-control">
-								<label
-									class="color-swatch"
-									style="background-color: {shaderSettings.idleColorB}"
-								>
-									<input
-										type="color"
-										aria-label={t('settings.shaderIdleColorB')}
-										value={shaderSettings.idleColorB}
-										oninput={(e) =>
-											shaderSettings.setIdleColorB(
-												(e.target as HTMLInputElement).value,
-											)}
-									/>
-								</label>
-								<span class="color-hex">
-									{shaderSettings.idleColorB.toUpperCase()}
-								</span>
-							</div>
-						</SettingRow>
-
-						<!-- Active Color A -->
-						<SettingRow label={t('settings.shaderColorA')}>
-							<div class="color-picker-control">
-								<label
-									class="color-swatch"
-									style="background-color: {shaderSettings.colorA}"
-								>
-									<input
-										type="color"
-										aria-label={t('settings.shaderColorA')}
-										value={shaderSettings.colorA}
-										oninput={(e) =>
-											shaderSettings.setColorA(
-												(e.target as HTMLInputElement).value,
-											)}
-									/>
-								</label>
-								<span class="color-hex">
-									{shaderSettings.colorA.toUpperCase()}
-								</span>
-							</div>
-						</SettingRow>
-
-						<!-- Active Color B -->
-						<SettingRow label={t('settings.shaderColorB')}>
-							<div class="color-picker-control">
-								<label
-									class="color-swatch"
-									style="background-color: {shaderSettings.colorB}"
-								>
-									<input
-										type="color"
-										aria-label={t('settings.shaderColorB')}
-										value={shaderSettings.colorB}
-										oninput={(e) =>
-											shaderSettings.setColorB(
-												(e.target as HTMLInputElement).value,
-											)}
-									/>
-								</label>
-								<span class="color-hex">
-									{shaderSettings.colorB.toUpperCase()}
-								</span>
-							</div>
-						</SettingRow>
-
-						<!-- Exposure Slider & Input -->
-						<SettingRow label={t('settings.shaderExposure')}>
-							<div class="range-control">
+				{#snippet colorRow(
+					label: string,
+					value: string,
+					onInput: (hex: string) => void,
+				)}
+					<SettingRow {label}>
+						<div class="color-picker-control">
+							<span class="color-hex">{value.toUpperCase()}</span>
+							<label class="color-swatch" style:background-color={value}>
 								<input
-									type="range"
-									min="0.8"
-									max="2.5"
-									step="0.05"
-									aria-label={t('settings.shaderExposure')}
-									value={shaderSettings.exposure}
-									oninput={(e) => {
-										const val = parseFloat(
-											(e.target as HTMLInputElement).value,
-										);
-										shaderSettings.setExposure(val);
-										if (!isEditingExposure) {
-											exposureText = val.toFixed(2);
-										}
-									}}
-									class="range-slider"
+									type="color"
+									aria-label={label}
+									{value}
+									oninput={(e) => onInput((e.target as HTMLInputElement).value)}
 								/>
-								<div class="range-input-wrapper">
-									<input
-										type="text"
-										inputmode="decimal"
-										class="range-text-input exposure-input"
-										aria-label="{t('settings.shaderExposure')} (x)"
-										bind:value={exposureText}
-										onfocus={() => (isEditingExposure = true)}
-										onblur={commitExposure}
-										onkeydown={(e) => {
-											if (e.key === 'Enter') {
-												(e.target as HTMLInputElement).blur();
-											}
-										}}
-									/>
-									<span class="range-unit">x</span>
-								</div>
-							</div>
-						</SettingRow>
-					</div>
-
-					<!-- Reset Button -->
-					<div class="reset-row">
-						<button
-							type="button"
-							class="reset-btn"
-							onclick={() => shaderSettings.reset()}
-						>
-							<img
-								src={reloadIcon}
-								alt=""
-								width="14"
-								height="14"
-								class="reset-icon"
-							/>
-							<span>{t('settings.shaderReset')}</span>
-						</button>
-					</div>
+							</label>
+						</div>
+					</SettingRow>
+				{/snippet}
+				<div class="settings-group">
+					{@render colorRow(
+						t('settings.shaderIdleColor'),
+						shaderSettings.idleColorA,
+						(hex) => shaderSettings.setIdleColorA(hex),
+					)}
+					{@render colorRow(
+						t('settings.shaderIdleColorB'),
+						shaderSettings.idleColorB,
+						(hex) => shaderSettings.setIdleColorB(hex),
+					)}
+					{@render colorRow(
+						t('settings.shaderColorA'),
+						shaderSettings.colorA,
+						(hex) => shaderSettings.setColorA(hex),
+					)}
+					{@render colorRow(
+						t('settings.shaderColorB'),
+						shaderSettings.colorB,
+						(hex) => shaderSettings.setColorB(hex),
+					)}
+					<SettingRow label={t('settings.shaderExposure')}>
+						<input
+							type="text"
+							inputmode="decimal"
+							class="value-input"
+							aria-label="{t('settings.shaderExposure')} (x)"
+							bind:value={exposureText}
+							onfocus={() => (isEditingExposure = true)}
+							onblur={commitExposure}
+							onkeydown={(e) => {
+								if (e.key === 'Enter') {
+									(e.target as HTMLInputElement).blur();
+								}
+							}}
+						/>
+					</SettingRow>
 				</div>
+				<button
+					type="button"
+					class="wide-btn"
+					onclick={() => shaderSettings.reset()}
+				>
+					{t('settings.shaderReset')}
+				</button>
 			{/if}
 		</div>
 	{/key}
 </div>
-
-{#if toolsOpen}<AdvancedTools
-		onClose={() => {
-			toolsOpen = false;
-		}}
-	/>{/if}
 
 <style>
 	.settings-view {
@@ -1261,451 +990,334 @@
 		flex-direction: column;
 		width: 100%;
 		flex: 1;
-		gap: 14px;
 		overflow-y: auto;
-		padding-bottom: 96px;
+		padding-bottom: 32px;
 		scrollbar-width: none;
 		-ms-overflow-style: none;
+	}
+	.settings-view::-webkit-scrollbar {
+		display: none;
 	}
 	.settings-page {
 		display: flex;
 		flex-direction: column;
-		gap: 14px;
+		gap: 12px;
 		width: 100%;
 	}
-	.reveal-row {
+
+	/* Back button with the page title centred on the window. */
+	.page-header {
+		position: relative;
 		display: flex;
-		flex-direction: column;
+		align-items: center;
+		justify-content: center;
+		min-height: 40px;
+		margin-top: 5px;
 	}
-	.settings-view::-webkit-scrollbar {
-		display: none;
+	.circle-back {
+		position: absolute;
+		left: 0;
+		top: 0;
+		display: grid;
+		place-items: center;
+		width: 40px;
+		height: 40px;
+		padding: 0;
+		border: 1px solid rgba(0, 0, 0, 0.15);
+		border-radius: 50%;
+		background: rgba(255, 255, 255, 0.05);
+		-webkit-backdrop-filter: blur(25px);
+		backdrop-filter: blur(25px);
+		cursor: pointer;
+		transition:
+			background-color 0.15s ease,
+			transform 160ms var(--ease-spring, ease);
+	}
+	.circle-back:active {
+		transform: scale(0.94);
+	}
+	.page-title,
+	.section-title {
+		margin: 0;
+		font-family: var(--font-family-base);
+		font-size: 14px;
+		font-weight: 500;
+		letter-spacing: -0.02em;
+		line-height: 1;
+		color: rgba(255, 255, 255, 0.5);
+		text-align: center;
+		text-box-trim: trim-both;
+		text-box-edge: cap alphabetic;
+	}
+	/* Ellipsis needs overflow clipping, so this title keeps its full line box. */
+	.page-title {
+		max-width: calc(100% - 112px);
+		line-height: 1.3;
+		text-box-trim: none;
+		white-space: nowrap;
+		overflow: hidden;
+		text-overflow: ellipsis;
 	}
 
 	.settings-section {
 		display: flex;
 		flex-direction: column;
-		gap: 6px;
+		gap: 12px;
 	}
-
-	.section-header {
-		padding: 0 4px;
-	}
-
-	.section-title {
-		font-family: var(--font-family-base);
-		font-size: 13px;
-		font-weight: 500;
-		color: #ffffff;
-		letter-spacing: -0.1px;
+	.settings-section + .settings-section {
+		margin-top: 12px;
 	}
 
 	.settings-group {
 		display: flex;
 		flex-direction: column;
-		gap: 0;
-		background: rgba(0, 0, 0, 0.2);
-		border-radius: 16px;
-		overflow: hidden;
+		padding: 0 18px;
+		background: rgba(255, 255, 255, 0.02);
+		border: 1px solid rgba(0, 0, 0, 0.25);
+		border-radius: 24px;
+		-webkit-backdrop-filter: blur(25px);
+		backdrop-filter: blur(25px);
+	}
+	.settings-group > :global(* + *) {
+		border-top: 1px solid rgba(255, 255, 255, 0.05);
 	}
 
-	.availability {
-		font-family: var(--font-family-base);
-		font-size: 11.5px;
-		line-height: 1.35;
-		color: rgba(255, 255, 255, 0.45);
-		margin: 3px 4px 0 4px;
-	}
-
-	.badge {
+	.hint {
+		margin: 0 8px;
 		font-family: var(--font-family-base);
 		font-size: 12px;
-		color: #86e16f;
-		background: rgba(134, 225, 111, 0.15);
-		padding: 2px 8px;
-		border-radius: 12px;
-		font-weight: 500;
+		line-height: 1.4;
+		color: rgba(255, 255, 255, 0.45);
+	}
+	.hint[role='alert'] {
+		color: #feb2b2;
 	}
 
-	/* Subviews */
-	.subview-container {
+	/* Single-choice lists: a white dot marks the current option. */
+	.choice-group {
+		padding: 0 14px;
+	}
+	.choice-group > :global(* + *) {
+		border-top: none;
+	}
+	.choice-row {
+		position: relative;
 		display: flex;
-		flex-direction: column;
-		gap: 14px;
-		width: 100%;
-	}
-
-	.subview-header {
-		display: flex;
-		align-items: center;
-		margin-top: 2px;
-		padding: 0 4px;
-	}
-
-	.back-btn {
-		display: inline-flex;
 		align-items: center;
 		gap: 8px;
-		background: transparent;
-		border: none;
-		padding: 4px 0;
-		cursor: pointer;
-		color: #ffffff;
-		transition: opacity 0.15s ease;
-	}
-
-	.back-btn:hover {
-		opacity: 0.8;
-	}
-
-	.back-chevron {
-		width: 14px;
-		height: 14px;
-		transform: rotate(90deg);
-		opacity: 0.75;
-		flex-shrink: 0;
-		align-self: center;
-		display: block;
-	}
-
-	.subview-title {
-		font-family: var(--font-family-base);
-		font-size: 15px;
-		font-weight: 600;
-		color: #ffffff;
-	}
-
-	.preset-item {
 		width: 100%;
-		min-height: 48px;
+		min-height: 54px;
+		padding: 0;
+		border: 0;
 		background: transparent;
-		border: none;
-		border-bottom: 1px solid rgba(255, 255, 255, 0.06);
-		padding: 10px 16px;
-		display: flex;
-		justify-content: space-between;
-		align-items: center;
-		gap: 12px;
-		box-sizing: border-box;
+		color: #fff;
 		text-align: left;
 		cursor: pointer;
-		transition: background 0.15s ease;
 	}
-
-	.preset-item:first-child {
-		border-top-left-radius: 16px;
-		border-top-right-radius: 16px;
+	.choice-row + .choice-row::before {
+		content: '';
+		position: absolute;
+		top: 0;
+		left: 40px;
+		right: 0;
+		border-top: 1px solid rgba(255, 255, 255, 0.05);
 	}
-
-	.preset-item:last-child {
-		border-bottom-left-radius: 16px;
-		border-bottom-right-radius: 16px;
-		border-bottom: none;
+	.choice-row:disabled {
+		cursor: not-allowed;
+		opacity: 0.6;
 	}
-
-	.preset-item:hover {
-		background: rgba(0, 0, 0, 0.4);
+	.choice-mark {
+		display: grid;
+		place-items: center;
+		flex: 0 0 32px;
+		height: 32px;
 	}
-
-	.preset-item:active {
-		background: rgba(0, 0, 0, 0.5);
-	}
-
-	.preset-item.selected {
-		background: rgba(0, 0, 0, 0.4);
-	}
-
-	.preset-item.selected:hover {
-		background: rgba(0, 0, 0, 0.5);
-	}
-
-	.preset-left {
-		display: flex;
-		align-items: center;
-		gap: 12px;
-	}
-
-	.swatches-pair {
-		display: flex;
-		align-items: center;
-		position: relative;
-		width: 28px;
-		height: 18px;
-	}
-
-	.swatch-dot {
+	.choice-dot {
 		width: 16px;
 		height: 16px;
 		border-radius: 50%;
-		border: 1.5px solid rgba(0, 0, 0, 0.4);
-		box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
-		position: absolute;
-		left: 0;
+		background: #fff;
+	}
+	.choice-label {
+		flex: 1;
+		min-width: 0;
+		font-family: var(--font-family-base);
+		font-size: 14px;
+		letter-spacing: -0.02em;
+		white-space: nowrap;
+		overflow: hidden;
+		text-overflow: ellipsis;
+	}
+	@media (hover: hover) and (pointer: fine) {
+		.choice-row:not(:disabled):hover
+			.choice-mark:not(:has(.choice-dot))::after {
+			content: '';
+			width: 16px;
+			height: 16px;
+			border-radius: 50%;
+			background: rgba(255, 255, 255, 0.15);
+		}
 	}
 
-	.swatch-overlap {
-		left: 10px;
+	/* Version card: value row and a wide action button. */
+	.action-card {
+		gap: 16px;
+		padding: 18px;
 	}
-
-	.preset-label {
+	.action-card > :global(* + *) {
+		border-top: none;
+	}
+	.info-row {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 16px;
+		padding: 6px 8px;
+	}
+	.info-label {
+		font-family: var(--font-family-base);
+		font-size: 12px;
+		color: rgba(255, 255, 255, 0.5);
+	}
+	.info-value {
 		font-family: var(--font-family-base);
 		font-size: 14px;
 		font-weight: 500;
-		color: #ffffff;
+		font-variant-numeric: tabular-nums;
+		color: #fff;
+		text-align: right;
+		overflow-wrap: anywhere;
+	}
+	.info-value.error-text {
+		color: #feb2b2;
+	}
+	.card-text {
+		margin: 0;
+		padding: 0 8px;
+		font-family: var(--font-family-base);
+		font-size: 13px;
+		line-height: 1.45;
+		color: rgba(255, 255, 255, 0.6);
+	}
+	.wide-btn {
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		width: 100%;
+		min-height: 48px;
+		padding: 12px 24px;
+		border: 1px solid rgba(255, 255, 255, 0.05);
+		border-radius: 123px;
+		background: rgba(255, 255, 255, 0.05);
+		color: rgba(255, 255, 255, 0.8);
+		font-family: var(--font-family-base);
+		font-size: 16px;
+		font-weight: 500;
+		cursor: pointer;
+		transition:
+			background-color 0.15s ease,
+			color 0.15s ease,
+			transform 160ms var(--ease-spring, ease);
+	}
+	.wide-btn:active:not(:disabled) {
+		transform: scale(0.98);
+	}
+	.wide-btn:disabled {
+		opacity: 0.5;
+		cursor: not-allowed;
+	}
+	.wide-btn.success {
+		color: #86e16f;
+		background: rgba(134, 225, 111, 0.1);
 	}
 
-	.check-mark {
-		font-size: 15px;
-		font-weight: 700;
-		color: #ffffff;
+	.field-group {
+		padding: 0 18px;
+	}
+	.text-field,
+	.value-input {
+		width: 100%;
+		min-height: 54px;
+		padding: 0;
+		border: 0;
+		background: transparent;
+		color: #fff;
+		font-family: var(--font-family-base);
+		font-size: 14px;
+		letter-spacing: -0.02em;
+		outline: none;
+	}
+	.text-field::placeholder {
+		color: rgba(255, 255, 255, 0.35);
+	}
+	.value-input {
+		width: 64px;
+		min-height: 33px;
+		padding: 0 12px;
+		border-radius: 123px;
+		background: rgba(0, 0, 0, 0.15);
+		font-size: 12px;
+		text-align: center;
+		font-variant-numeric: tabular-nums;
 	}
 
-	/* Controls */
+	.swatches-pair {
+		position: relative;
+		flex: 0 0 30px;
+		height: 18px;
+	}
+	.swatch-dot {
+		position: absolute;
+		top: 1px;
+		left: 0;
+		width: 16px;
+		height: 16px;
+		border-radius: 50%;
+		box-shadow: 0 0 0 1.5px rgba(0, 0, 0, 0.4);
+	}
+	.swatch-overlap {
+		left: 12px;
+	}
+
 	.color-picker-control {
 		display: flex;
 		align-items: center;
 		gap: 10px;
 	}
-
 	.color-swatch {
-		width: 26px;
-		height: 26px;
-		border-radius: 8px;
-		border: none;
 		position: relative;
-		cursor: pointer;
-		overflow: hidden;
-		box-shadow: 0 1px 4px rgba(0, 0, 0, 0.4);
-		transition: transform 0.15s ease;
 		display: block;
+		width: 28px;
+		height: 28px;
+		border-radius: 50%;
+		overflow: hidden;
+		cursor: pointer;
+		box-shadow: 0 2px 7.7px rgba(0, 0, 0, 0.25);
 	}
-
-	.color-swatch:hover {
-		transform: scale(1.1);
-	}
-
 	.color-swatch input[type='color'] {
 		position: absolute;
-		top: -10px;
-		left: -10px;
+		inset: -10px;
 		width: 50px;
 		height: 50px;
-		opacity: 0;
-		cursor: pointer;
 		padding: 0;
 		margin: 0;
+		opacity: 0;
+		cursor: pointer;
 	}
-
 	.color-hex {
 		font-family: var(--font-family-base);
 		font-size: 12px;
-		color: rgba(255, 255, 255, 0.65);
-		font-weight: 500;
 		font-variant-numeric: tabular-nums;
-		min-width: 60px;
+		color: rgba(255, 255, 255, 0.6);
 	}
 
-	.range-control {
-		display: flex;
-		align-items: center;
-		gap: 10px;
-		min-width: 0;
-	}
-
-	.range-slider {
-		width: 90px;
-		accent-color: #888899;
-		cursor: pointer;
-		height: 4px;
-		background: rgba(255, 255, 255, 0.15);
-		border-radius: 3px;
-	}
-
-	.range-input-wrapper {
-		display: flex;
-		align-items: center;
-		justify-content: center;
-		background: rgba(0, 0, 0, 0.2);
-		border: 1px solid transparent;
-		border-radius: 8px;
-		padding: 2px 7px;
-		height: 24px;
-		box-sizing: border-box;
-		transition:
-			border-color 0.15s ease,
-			background 0.15s ease;
-	}
-
-	.range-input-wrapper:hover,
-	.range-input-wrapper:focus-within {
-		border-color: rgba(255, 255, 255, 0.2);
-		background: rgba(0, 0, 0, 0.35);
-	}
-
-	.range-text-input {
-		width: 24px;
-		background: transparent;
-		border: none;
-		padding: 0;
-		margin: 0;
-		color: #ffffff;
-		font-family: var(--font-family-base);
-		font-size: 12px;
-		font-weight: 500;
-		text-align: center;
-		font-variant-numeric: tabular-nums;
-		outline: none;
-	}
-
-	.range-text-input.exposure-input {
-		width: 30px;
-	}
-
-	.range-unit {
-		font-family: var(--font-family-base);
-		font-size: 11px;
-		color: rgba(255, 255, 255, 0.55);
-		user-select: none;
-		margin-left: 2px;
-	}
-
-	.reset-row {
-		display: flex;
-		justify-content: flex-end;
-		background: transparent;
-		border: none;
-		padding: 4px 0 16px 0;
-	}
-
-	.reset-btn {
-		display: flex;
-		align-items: center;
-		gap: 8px;
-		background: rgba(0, 0, 0, 0.2);
-		border: none;
-		border-radius: 12px;
-		padding: 8px 14px;
-		color: rgba(255, 255, 255, 0.8);
-		font-family: var(--font-family-base);
-		font-size: 12px;
-		font-weight: 500;
-		cursor: pointer;
-		transition: all 0.2s;
-	}
-
-	.reset-btn:hover {
-		background: rgba(0, 0, 0, 0.4);
-		color: #ffffff;
-	}
-
-	.action-btn {
-		display: inline-flex;
-		align-items: center;
-		justify-content: center;
-		padding: 5px 12px;
-		border-radius: 12px;
-		background: rgba(255, 255, 255, 0.08);
-		border: 1px solid rgba(255, 255, 255, 0.12);
-		color: #ffffff;
-		font-family: var(--font-family-base);
-		font-size: 12px;
-		font-weight: 500;
-		cursor: pointer;
-		transition: all 0.2s ease;
-		white-space: nowrap;
-	}
-
-	.action-btn:hover:not(:disabled) {
-		background: rgba(255, 255, 255, 0.16);
-		border-color: rgba(255, 255, 255, 0.2);
-	}
-
-	.action-btn:active:not(:disabled) {
-		transform: scale(0.96);
-	}
-
-	.action-btn.success {
-		background: rgba(134, 225, 111, 0.2);
-		border-color: rgba(134, 225, 111, 0.4);
-		color: #86e16f;
-	}
-
-	.action-btn:disabled {
-		opacity: 0.5;
-		cursor: not-allowed;
-	}
-
-	.version-badge-container {
-		display: flex;
-		align-items: center;
-		gap: 8px;
-	}
-
-	.version-badge {
-		background: rgba(255, 255, 255, 0.1);
-		color: rgba(255, 255, 255, 0.85);
-		font-variant-numeric: tabular-nums;
-	}
-	.version-badge.error-badge {
-		background: rgba(229, 62, 62, 0.2);
-		color: #feb2b2;
-	}
-	.custom-dns-input {
-		width: 130px;
-	}
-	.diag-value {
-		max-width: 160px;
-		font-size: 12px;
-		color: rgba(255, 255, 255, 0.78);
-		text-align: right;
-		word-break: break-word;
-	}
-	.diagnostics-actions {
-		display: flex;
-		gap: 8px;
-		padding: 0 4px;
-	}
-
-	.ping-url-wrapper {
-		display: flex;
-		align-items: center;
-		width: 140px;
-	}
-
-	.ping-url-input {
-		width: 100%;
-		background: rgba(0, 0, 0, 0.25);
-		border: 1px solid rgba(255, 255, 255, 0.1);
-		border-radius: 10px;
-		padding: 4px 8px;
-		color: #fff;
-		font-family: var(--font-family-base);
-		font-size: 12px;
-		outline: none;
-		transition: border-color 0.15s ease;
-	}
-
-	.ping-url-input:focus {
-		border-color: rgba(255, 255, 255, 0.3);
-	}
-
-	.loading-spinner {
-		display: inline-block;
-		width: 10px;
-		height: 10px;
-		border: 1.5px solid rgba(255, 255, 255, 0.3);
-		border-top-color: #ffffff;
-		border-radius: 50%;
-		animation: spin 0.8s linear infinite;
-		margin-right: 4px;
-	}
-
-	@keyframes spin {
-		to {
-			transform: rotate(360deg);
+	@media (hover: hover) and (pointer: fine) {
+		.circle-back:hover {
+			background: rgba(255, 255, 255, 0.1);
 		}
-	}
-
-	.success-text {
-		color: #86e16f;
+		.wide-btn:hover:not(:disabled) {
+			background: rgba(255, 255, 255, 0.09);
+			color: #fff;
+		}
 	}
 </style>

@@ -16,10 +16,7 @@
 	import CountryFlag from '../../components/CountryFlag.svelte';
 	import MaterialIcon from '../../components/MaterialIcon.svelte';
 	import IconButton from '../../components/IconButton.svelte';
-	import PopupMenu from '../../components/PopupMenu.svelte';
-	import MenuItem from '../../components/MenuItem.svelte';
 	import backIcon from '../../assets/back.svg';
-	import menuIcon from '../../assets/menu.svg';
 	import tunIcon from '../../assets/mode-rules.svg';
 	import StatusDot from '../../components/StatusDot.svelte';
 	import RoundCheckbox from '../../components/RoundCheckbox.svelte';
@@ -31,7 +28,6 @@
 	import { flip } from 'svelte/animate';
 	import { screen, rise, pop, easeOut } from '../../lib/motion';
 	import searchIcon from '../../assets/search.svg';
-	import reloadIcon from '../../assets/reload.svg';
 	import addIcon from '../../assets/plus.svg';
 	import pencilIcon from '../../assets/pencil.svg';
 	import trashIcon from '../../assets/trash.svg';
@@ -85,7 +81,6 @@
 	let selected = $state<string[]>([]);
 	let error = $state('');
 	let showPresets = $state(false);
-	let menu = $state(false);
 	let confirmSwitchToRules = $state(false);
 
 	// Derived state
@@ -276,17 +271,6 @@
 	}
 
 	// Action handlers
-	async function refresh() {
-		try {
-			if (activeSub) {
-				await catalog.refreshSubscription(activeSub.id);
-			}
-			error = '';
-		} catch (e) {
-			error = t('errors.' + errorCode(e));
-		}
-	}
-
 	async function pickServer(server: { id: string }) {
 		if (!selectingRule) return;
 		pendingServerId = server.id;
@@ -361,15 +345,8 @@
 </script>
 
 <svelte:window
-	onclick={(event) => {
-		const target = event.target as HTMLElement | null;
-		if (!target?.closest('.popup-menu, .icon-btn')) menu = false;
-	}}
 	onkeydown={(event) => {
-		if (event.key === 'Escape') {
-			menu = false;
-			if (searching) handleCloseSearch();
-		}
+		if (event.key === 'Escape' && searching) handleCloseSearch();
 	}}
 />
 
@@ -532,7 +509,7 @@
 										? []
 										: filtered.map((rule) => rule.id))}
 						>
-							<span>Select all</span>
+							<span>{t('rules.selectAll')}</span>
 							<RoundCheckbox
 								asSpan
 								checked={filtered.length > 0 &&
@@ -563,30 +540,20 @@
 										ariaLabel={t('common.search')}
 										onclick={handleOpenSearch}
 									/>
-									<IconButton
-										design
-										icon={reloadIcon}
-										ariaLabel={t('common.reload')}
-										onclick={refresh}
-									/>
-
 									{#if !selectMode}
 										<IconButton
 											design
 											icon={pencilIcon}
 											ariaLabel={t('rules.selectMode')}
-											onclick={() => {
-												menu = false;
-												selectMode = true;
-											}}
+											onclick={() => (selectMode = true)}
 										/>
 										<IconButton
 											design
-											icon={menuIcon}
-											ariaLabel={t('common.menu')}
-											expanded={menu}
-											onclick={() => (menu = !menu)}
-										/>
+											ariaLabel={t('rules.presets')}
+											onclick={() => (showPresets = true)}
+										>
+											<MaterialIcon name="tune" size={18} />
+										</IconButton>
 									{/if}
 								</div>
 							</div>
@@ -768,7 +735,6 @@
 										<ToggleSwitch
 											checked={rule.enabled}
 											mode="switch"
-											appearance={matcher === 'application' ? 'pill' : 'dot'}
 											ariaLabel={t('rules.toggle', { name: rule.name })}
 											onchange={() => toggle(rule)}
 										/>
@@ -805,29 +771,6 @@
 							}}
 						/>
 					</div>
-				{/if}
-				{#if menu}
-					<PopupMenu top="70px" right="58px">
-						<button
-							class="rules-menu-item"
-							type="button"
-							onclick={() => {
-								menu = false;
-								showPresets = true;
-							}}
-						>
-							<MaterialIcon name="tune" size={18} />{t('rules.presets')}
-						</button>
-						<MenuItem
-							icon={checkIcon}
-							label={t('rules.selectAll')}
-							onclick={() => {
-								menu = false;
-								selectMode = true;
-								selected = filtered.map((rule) => rule.id);
-							}}
-						/>
-					</PopupMenu>
 				{/if}
 			</section>
 		{/if}
@@ -969,6 +912,7 @@
 	}
 
 	.title-text {
+		line-height: 1.3;
 		white-space: nowrap;
 		overflow: hidden;
 		text-overflow: ellipsis;
@@ -1014,8 +958,8 @@
 	}
 
 	.search-header-icon {
-		width: 18px;
-		height: 18px;
+		width: 28px;
+		height: 28px;
 		object-fit: contain;
 		filter: brightness(0) invert(1);
 		opacity: 0.6;
@@ -1284,21 +1228,6 @@
 	}
 	.rule-left {
 		flex: 1;
-	}
-	.rules-menu-item {
-		display: flex;
-		align-items: center;
-		gap: 12px;
-		width: 100%;
-		min-height: 40px;
-		border: 0;
-		border-radius: 14px;
-		background: #ffffff0a;
-		padding: 0 12px;
-		font-size: 13px;
-	}
-	.rules-menu-item:hover {
-		background: #ffffff20;
 	}
 	.selection .header-pill {
 		width: 100%;

@@ -5,7 +5,7 @@ use crate::{
 use sha2::{Digest, Sha256};
 use std::{
     io::Write,
-    path::{Path, PathBuf},
+    path::PathBuf,
     sync::RwLock,
 };
 
@@ -332,14 +332,6 @@ impl DeviceIdentityManager {
         }
     }
 
-    #[cfg(test)]
-    pub fn with_store(path: PathBuf, store: Box<dyn SecretStore>) -> Self {
-        Self {
-            store: DeviceIdentityStore::with_store(path, store),
-            cached: RwLock::new(None),
-        }
-    }
-
     /// Returns the cached device identity or loads/creates it once.
     /// If loading or secure persistence fails, returns a typed error and does NOT
     /// silently generate a transient HWID per request.
@@ -391,10 +383,5 @@ impl DeviceIdentityManager {
 
         *guard = Some(identity.clone());
         Ok(identity)
-    }
-
-    /// Returns the HWID path on disk.
-    pub fn path(&self) -> &Path {
-        &self.store.path
     }
 }

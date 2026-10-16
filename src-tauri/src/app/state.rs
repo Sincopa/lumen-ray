@@ -24,7 +24,6 @@ pub struct AppState {
     pub connection_generation: std::sync::atomic::AtomicU64,
     pub server_quality:
         RwLock<std::collections::HashMap<String, crate::services::server_quality::Quality>>,
-    pub device_identity: Arc<crate::platform::device_identity::DeviceIdentityManager>,
     pub subscription_client: Arc<crate::subscription::fetcher::SubscriptionClient>,
     _instance: std::fs::File,
 }
@@ -88,8 +87,7 @@ impl AppState {
             log::warn!("Device identity initialization warning: {:?}", e);
         }
         let subscription_client = Arc::new(crate::subscription::fetcher::SubscriptionClient::new(
-            Arc::clone(&device_identity)
-                as Arc<dyn crate::subscription::fetcher::DeviceIdentityProvider>,
+            device_identity as Arc<dyn crate::subscription::fetcher::DeviceIdentityProvider>,
         ));
         let (shutdown, _) = tokio::sync::watch::channel(false);
         Ok(Arc::new(Self {
@@ -110,7 +108,6 @@ impl AppState {
             recovery_attempts: Mutex::new(Default::default()),
             connection_generation: std::sync::atomic::AtomicU64::new(0),
             server_quality: RwLock::new(Default::default()),
-            device_identity,
             subscription_client,
             _instance: instance,
         }))

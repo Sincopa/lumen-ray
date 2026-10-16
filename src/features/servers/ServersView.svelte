@@ -5,8 +5,6 @@
 	import { createDeferredTask } from '../../lib/utils/deferredTask';
 	import CountryFlag from '../../components/CountryFlag.svelte';
 	import IconButton from '../../components/IconButton.svelte';
-	import PopupMenu from '../../components/PopupMenu.svelte';
-	import MenuItem from '../../components/MenuItem.svelte';
 	import StatusDot from '../../components/StatusDot.svelte';
 	import RollingNumber from '../../components/RollingNumber.svelte';
 	import { catalog } from '../../lib/services';
@@ -17,18 +15,11 @@
 	import MaterialIcon from '../../components/MaterialIcon.svelte';
 	import reloadIcon from '../../assets/reload.svg';
 	import searchIcon from '../../assets/search.svg';
-	import checkIcon from '../../assets/check.svg';
 	import crossIcon from '../../assets/close.svg';
-	import menuIcon from '../../assets/menu.svg';
-	import pencilIcon from '../../assets/pencil.svg';
-	import trashIcon from '../../assets/trash.svg';
-	import shareIcon from '../../assets/share-link.svg';
 
 	const searchTask = createDeferredTask();
-	const renameTask = createDeferredTask();
 	onDestroy(() => {
 		searchTask.cancel();
-		renameTask.cancel();
 	});
 	const catalogStore = catalog.state;
 	const pingingServers = catalog.pinging;
@@ -55,11 +46,6 @@
 	let searching = $state(false);
 	let searchClosing = $state(false);
 	let searchInputEl = $state<HTMLInputElement | null>(null);
-	let editingSub = $state(false);
-	let editClosing = $state(false);
-	let editSubName = $state('');
-	let renameInputEl = $state<HTMLInputElement | null>(null);
-	let menu = $state(false);
 	let busy = $state(false);
 	let error = $state('');
 	const subscriptionsById = $derived(
@@ -142,37 +128,6 @@
 		if (searchSignal > 0) handleOpenSearch();
 	});
 
-	function handleOpenRename() {
-		menu = false;
-		editSubName = activeSubscription?.name ?? '';
-		editingSub = true;
-		editClosing = false;
-		renameTask.schedule(() => {
-			renameInputEl?.focus();
-			renameInputEl?.select();
-		}, 180);
-	}
-
-	function handleCloseRename() {
-		editClosing = true;
-		renameTask.schedule(() => {
-			editingSub = false;
-			editClosing = false;
-			editSubName = '';
-		}, 240);
-	}
-
-	async function handleSaveRename() {
-		const trimmed = editSubName.trim();
-		if (!trimmed || !activeSubscription) return;
-		try {
-			await catalog.renameSubscription(activeSubscription.id, trimmed);
-			handleCloseRename();
-		} catch (e) {
-			error = t('errors.' + errorCode(e));
-		}
-	}
-
 	function select(server: Server) {
 		onSelect?.({
 			id: server.id,
@@ -211,26 +166,15 @@
 
 <svelte:window
 	onkeydown={(event) => {
-		if (event.key === 'Escape') {
-			menu = false;
-			if (searching) handleCloseSearch();
-		}
-	}}
-	onclick={(e) => {
-		if (menu) {
-			const target = e.target as HTMLElement | null;
-			if (!target?.closest('.popup-menu') && !target?.closest('.icon-btn')) {
-				menu = false;
-			}
-		}
+		if (event.key === 'Escape' && searching) handleCloseSearch();
 	}}
 />
 
 <section class="servers-view" class:compact aria-label={t('servers.title')}>
-	<div class="header-wrapper" class:open={searching || editingSub}>
+	<div class="header-wrapper" class:open={searching}>
 		<div class="header-pill">
 			<!-- Standard header content -->
-			<div class="header-normal" class:header-hidden={searching || editingSub}>
+			<div class="header-normal" class:header-hidden={searching}>
 				<div class="header-card-title">
 					<span class="title-text">
 						{activeSubscription?.name ?? t('servers.title')}
@@ -251,16 +195,6 @@
 						disabled={busy || !$catalogStore.servers.length}
 						onclick={refresh}
 					/>
-					{#if !compact}
-						<IconButton
-							design
-							icon={menuIcon}
-							ariaLabel={t('common.menu')}
-							active={menu}
-							expanded={menu}
-							onclick={() => (menu = !menu)}
-						/>
-					{/if}
 				</div>
 			</div>
 
@@ -289,68 +223,7 @@
 					<img src={crossIcon} alt="" class="close-icon" />
 				</button>
 			</div>
-
-			<!-- Rename bar inside header pill -->
-			<div
-				class="header-search"
-				class:search-open={editingSub && !editClosing}
-				class:search-closing={editClosing}
-			>
-				<img src={pencilIcon} alt="" class="search-header-icon" />
-				<input
-					bind:this={renameInputEl}
-					type="text"
-					class="search-header-input"
-					placeholder={t('common.name')}
-					bind:value={editSubName}
-					maxlength="80"
-					autocomplete="off"
-					spellcheck="false"
-					onkeydown={(e) => {
-						if (e.key === 'Enter') {
-							e.preventDefault();
-							handleSaveRename();
-						} else if (e.key === 'Escape') {
-							e.preventDefault();
-							handleCloseRename();
-						}
-					}}
-				/>
-				<button
-					type="button"
-					class="close-search-btn"
-					onclick={handleSaveRename}
-					aria-label={t('common.save')}
-				>
-					<img src={checkIcon} alt="" class="close-icon" />
-				</button>
-				<button
-					type="button"
-					class="close-search-btn"
-					onclick={handleCloseRename}
-					aria-label={t('common.close')}
-				>
-					<img src={crossIcon} alt="" class="close-icon" />
-				</button>
-			</div>
 		</div>
-
-		{#if menu && !searching && !editingSub}
-			<PopupMenu top="68px" right="8px">
-				<MenuItem
-					icon={pencilIcon}
-					label={t('common.edit')}
-					onclick={handleOpenRename}
-				/>
-				<MenuItem icon={shareIcon} label={t('common.share')} disabled />
-				<MenuItem
-					icon={trashIcon}
-					label={t('common.delete')}
-					variant="danger"
-					disabled
-				/>
-			</PopupMenu>
-		{/if}
 	</div>
 
 	{#if error}<p role="alert" transition:rise>{error}</p>{/if}
@@ -546,6 +419,7 @@
 	}
 
 	.title-text {
+		line-height: 1.3;
 		white-space: nowrap;
 		overflow: hidden;
 		text-overflow: ellipsis;

@@ -1,10 +1,14 @@
 <script lang="ts">
+	import backIcon from '../../assets/chevron-left.svg';
+	import sunLowIcon from '../../assets/sun-low.svg';
+	import sunHighIcon from '../../assets/sun-high.svg';
 	import LumenFace from '../../components/LumenFace.svelte';
 	import { shaderSettings } from '../../lib/stores/shaderSettings.svelte';
 	import { t } from '../../lib/i18n';
 	import { fade } from 'svelte/transition';
 	import { pop, rise } from '../../lib/motion';
 	import type { VpnConnectionState } from '../../lib/types/models';
+	import reloadIcon from '../../assets/reload.svg';
 
 	interface Props {
 		connectionState: VpnConnectionState;
@@ -15,7 +19,34 @@
 
 	const MIN = 0.8;
 	const MAX = 2.5;
+	const DEFAULT_EXPOSURE = 1.6;
+	const THUMB_HALF = 8;
 	let progress = $derived((shaderSettings.exposure - MIN) / (MAX - MIN));
+
+	// The track is a wedge that grows from 16px on the left to 32px on the right.
+	let trackWidth = $state(208);
+	const CY = 16;
+	const halfHeight = (x: number) => 8 + (8 * x) / trackWidth;
+	let thumbX = $derived(THUMB_HALF + (trackWidth - THUMB_HALF * 2) * progress);
+
+	/** A wedge from 0 to `end` with round caps, shrunk by `inset` on every side. */
+	function wedge(end: number, inset: number) {
+		const left = halfHeight(0) - inset;
+		const right = Math.max(left, halfHeight(end) - inset);
+		const leftCenter = left + inset;
+		const rightCenter = Math.max(leftCenter, end - right);
+		return [
+			`M ${leftCenter} ${CY - left}`,
+			`L ${rightCenter} ${CY - right}`,
+			`A ${right} ${right} 0 0 1 ${rightCenter} ${CY + right}`,
+			`L ${leftCenter} ${CY + left}`,
+			`A ${left} ${left} 0 0 1 ${leftCenter} ${CY - left}`,
+			'Z',
+		].join(' ');
+	}
+
+	let trackPath = $derived(wedge(trackWidth, 0));
+	let fillPath = $derived(wedge(thumbX, 0.6));
 </script>
 
 <svelte:window
@@ -37,20 +68,17 @@
 		aria-label={t('common.back')}
 		onclick={onClose}
 	>
-		<svg
-			width="32"
-			height="32"
-			viewBox="0 0 32 32"
-			fill="none"
-			aria-hidden="true"
-		>
-			<path
-				d="M18.6 9.2 12.4 15.4a.85.85 0 0 0 0 1.2l6.2 6.2"
-				stroke="#fff"
-				stroke-width="1.6"
-				stroke-linecap="round"
-			/>
-		</svg>
+		<img src={backIcon} alt="" width="32" height="32" />
+	</button>
+
+	<button
+		type="button"
+		class="reset-btn"
+		aria-label={t('settings.brightnessReset')}
+		disabled={shaderSettings.exposure === DEFAULT_EXPOSURE}
+		onclick={() => shaderSettings.setExposure(DEFAULT_EXPOSURE)}
+	>
+		<img src={reloadIcon} alt="" width="32" height="32" />
 	</button>
 
 	<div
@@ -62,24 +90,23 @@
 	</div>
 
 	<div class="slider-card" in:rise|global={{ y: 16, delay: 80, duration: 300 }}>
-		<svg
-			class="sun"
-			width="32"
-			height="32"
-			viewBox="0 0 32 32"
-			fill="none"
-			aria-hidden="true"
+		<img src={sunLowIcon} alt="" class="sun" width="32" height="32" />
+		<div
+			class="track"
+			bind:clientWidth={trackWidth}
+			style="--thumb-x: {thumbX}px"
 		>
-			<circle cx="16" cy="16" r="4" stroke="#fff" stroke-width="2.67" />
-			<path
-				d="M16 4v1.33M16 26.67V28M4 16h1.33M26.67 16H28M7.5 7.5l.95.95M23.55 23.55l.95.95M7.5 24.5l.95-.95M23.55 8.45l.95-.95"
-				stroke="#fff"
-				stroke-width="2.67"
-				stroke-linecap="round"
-			/>
-		</svg>
-		<div class="track" style="--progress: {progress}">
-			<span class="fill"></span>
+			<svg
+				class="wedge"
+				width={trackWidth}
+				height="32"
+				viewBox="0 0 {trackWidth} 32"
+				aria-hidden="true"
+			>
+				<path class="wedge-track" d={trackPath} />
+				<path d={fillPath} fill="#000" fill-opacity="0.25" />
+				<path d={fillPath} fill="#fff" fill-opacity="0.75" />
+			</svg>
 			<span class="thumb"></span>
 			<input
 				type="range"
@@ -94,22 +121,7 @@
 					)}
 			/>
 		</div>
-		<svg
-			class="sun"
-			width="32"
-			height="32"
-			viewBox="0 0 32 32"
-			fill="none"
-			aria-hidden="true"
-		>
-			<circle cx="16" cy="16" r="6.67" fill="#fff" />
-			<path
-				d="M16 1.33v2.67M16 28v2.67M1.33 16H4M28 16h2.67M5.63 5.63l1.89 1.89M24.48 24.48l1.89 1.89M5.63 26.37l1.89-1.89M24.48 7.52l1.89-1.89"
-				stroke="#fff"
-				stroke-width="2.67"
-				stroke-linecap="round"
-			/>
-		</svg>
+		<img src={sunHighIcon} alt="" class="sun" width="32" height="32" />
 	</div>
 </div>
 
@@ -120,9 +132,11 @@
 		z-index: 30;
 	}
 
-	.back-btn {
+	.back-btn,
+	.reset-btn {
 		position: absolute;
-		top: 30px;
+		/* Sits under the window header, which stays visible on this screen. */
+		top: 72px;
 		left: 30px;
 		z-index: 2;
 		display: grid;
@@ -139,8 +153,17 @@
 			background-color 160ms ease,
 			transform 160ms var(--ease-spring);
 	}
-	.back-btn:active {
+	/* Lines up with the window controls above it, as in the design. */
+	.reset-btn {
+		left: auto;
+		right: 16px;
+	}
+	.back-btn:active,
+	.reset-btn:active:not(:disabled) {
 		transform: scale(0.94);
+	}
+	.reset-btn:disabled {
+		cursor: default;
 	}
 
 	/* Same face geometry as the connection screen. */
@@ -177,21 +200,16 @@
 		flex: 1;
 		min-width: 0;
 		height: 32px;
-		border-radius: 123px;
-		background: #00000040;
-		box-shadow: 0 0 25px #00000040;
-		/* The thumb travels inside the track, so keep 8px of slack at both ends. */
-		--thumb-x: calc(8px + (100% - 16px) * var(--progress));
 	}
-	.fill {
+	.wedge {
 		position: absolute;
-		top: 7px;
-		bottom: 7px;
-		left: 0;
-		width: calc(var(--thumb-x) + 8px);
-		border-radius: 123px;
-		background: #ffffffbf;
+		inset: 0;
+		overflow: visible;
 		pointer-events: none;
+	}
+	.wedge-track {
+		fill: #00000040;
+		filter: drop-shadow(0 0 12.5px #00000040);
 	}
 	.thumb {
 		position: absolute;
@@ -218,7 +236,8 @@
 	}
 
 	@media (hover: hover) and (pointer: fine) {
-		.back-btn:hover {
+		.back-btn:hover,
+		.reset-btn:hover:not(:disabled) {
 			background: #00000040;
 		}
 	}

@@ -81,6 +81,7 @@
 	}
 
 	.title-text {
+		line-height: 1.3;
 		white-space: nowrap;
 		overflow: hidden;
 		text-overflow: ellipsis;

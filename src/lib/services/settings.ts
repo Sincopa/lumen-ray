@@ -1,25 +1,7 @@
 import { writable } from 'svelte/store';
 import { invoke } from '@tauri-apps/api/core';
 import { runtime } from '../runtime';
-export type CoreEngine = 'lumen' | 'xray';
-export interface CoreCapabilities {
-	engine: CoreEngine;
-	experimental: boolean;
-	tun: boolean;
-	systemProxy: boolean;
-	udp: boolean;
-	liveRoutingUpdates: boolean;
-	protocols: string[];
-	geosite: boolean;
-	geoip: boolean;
-	applicationRouting: boolean;
-	reality: boolean;
-	xtlsVision: boolean;
-	killSwitch: boolean;
-}
 export interface NativeSettings {
-	coreEngine: CoreEngine;
-	coreEngines: CoreCapabilities[];
 	dnsPolicy: {
 		enabled: boolean;
 		direct: string;
@@ -48,8 +30,6 @@ export interface NativeSettings {
 	coreVersion: string;
 }
 const defaults: NativeSettings = {
-	coreEngine: 'xray',
-	coreEngines: [],
 	dnsPolicy: {
 		enabled: false,
 		direct: 'system',
@@ -99,7 +79,7 @@ export const settingsReady = ready;
 void ready.catch(() => {});
 let writes: Promise<void> = Promise.resolve();
 export async function updateNativeSettings(
-	patch: Partial<Omit<NativeSettings, 'coreVersion' | 'coreEngines'>>,
+	patch: Partial<Omit<NativeSettings, 'coreVersion'>>,
 ) {
 	if (!runtime.isTauri) return;
 	const operation = writes.then(async () => {

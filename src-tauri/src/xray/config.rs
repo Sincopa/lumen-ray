@@ -110,7 +110,8 @@ pub fn live_routing_plan(
     }))
 }
 
-#[cfg(windows)]
+/// Patch-only view of `live_routing_plan`, used by tests and the debug smoke run.
+#[cfg(all(windows, any(test, debug_assertions)))]
 pub fn live_routing_patch(
     repo_before: &Repository,
     repo_after: &Repository,

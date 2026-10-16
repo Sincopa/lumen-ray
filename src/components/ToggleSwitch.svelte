@@ -2,7 +2,6 @@
 	interface Props {
 		checked: boolean;
 		mode?: 'switch' | 'checkbox';
-		appearance?: 'default' | 'pill' | 'dot';
 		disabled?: boolean;
 		ariaLabel?: string;
 		class?: string;
@@ -12,7 +11,6 @@
 	let {
 		checked = $bindable(false),
 		mode = 'switch',
-		appearance = 'default',
 		disabled = false,
 		ariaLabel,
 		class: className = '',
@@ -30,8 +28,6 @@
 	<button
 		type="button"
 		class="switch-btn {className}"
-		class:design-pill={appearance === 'pill'}
-		class:design-dot={appearance === 'dot'}
 		class:enabled={checked}
 		role="switch"
 		aria-checked={checked}
@@ -55,29 +51,26 @@
 {/if}
 
 <style>
-	.switch-btn {
+	/* Figma toggle: 60x28 track, 24px grey knob; the track turns white when on. */
+	.switch-btn,
+	.switch {
 		position: relative;
 		display: inline-block;
-		width: 44px;
-		height: 24px;
+		width: 60px;
+		height: 28px;
+		flex-shrink: 0;
+	}
+
+	.switch-btn {
 		padding: 0;
 		border: none;
 		background: transparent;
 		cursor: pointer;
-		flex-shrink: 0;
 	}
 
 	.switch-btn:disabled {
 		opacity: 0.6;
 		cursor: not-allowed;
-	}
-
-	.switch {
-		position: relative;
-		display: inline-block;
-		width: 44px;
-		height: 24px;
-		flex-shrink: 0;
 	}
 
 	.switch input {
@@ -96,74 +89,46 @@
 		position: absolute;
 		cursor: pointer;
 		inset: 0;
-		background-color: rgba(0, 0, 0, 0.35);
-		transition: background-color 0.25s ease;
-		border-radius: 24px;
+		background-color: rgba(255, 255, 255, 0.02);
+		box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.15);
+		transition:
+			background-color 0.25s ease,
+			box-shadow 0.25s ease;
+		border-radius: 123px;
 	}
 
 	.slider:before {
 		position: absolute;
 		content: '';
-		height: 18px;
-		width: 18px;
-		left: 3px;
-		bottom: 3px;
-		background-color: #ffffff;
+		height: 24px;
+		width: 24px;
+		left: 2px;
+		top: 2px;
+		background-color: #7e7e7e;
 		transition: transform 0.25s cubic-bezier(0.22, 1, 0.36, 1);
 		border-radius: 50%;
-		box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+		box-shadow: 0 2px 7.7px rgba(0, 0, 0, 0.25);
 	}
 
 	input:checked + .slider,
 	.slider.checked {
-		background-color: rgba(0, 0, 0, 0.35);
+		background-color: #fff;
+		box-shadow: none;
 	}
 
 	input:checked + .slider:before,
 	.slider.checked:before {
-		transform: translateX(20px);
+		transform: translateX(32px);
 	}
 
 	input:disabled + .slider {
 		opacity: 0.6;
 		cursor: not-allowed;
 	}
-	.design-pill {
-		width: 60px;
-		height: 28px;
-	}
-	.design-pill .slider {
-		background: var(--design-panel);
-	}
-	.design-pill .slider::before {
-		width: 24px;
-		height: 24px;
-		left: 2px;
-		bottom: 2px;
-		background: #ffffff73;
-		box-shadow: none;
-	}
-	.design-pill .slider.checked::before {
-		transform: translateX(32px);
-		background: #fff;
-	}
-	.design-dot {
-		width: 28px;
-		height: 28px;
-	}
-	.design-dot .slider {
-		background: var(--design-glass);
-	}
-	.design-dot .slider::before {
-		width: 24px;
-		height: 24px;
-		left: 2px;
-		bottom: 2px;
-		background: transparent;
-		box-shadow: none;
-	}
-	.design-dot .slider.checked::before {
-		transform: none;
-		background: #fff;
+
+	input:focus-visible + .slider,
+	.switch-btn:focus-visible .slider {
+		outline: 2px solid rgba(255, 255, 255, 0.6);
+		outline-offset: 2px;
 	}
 </style>

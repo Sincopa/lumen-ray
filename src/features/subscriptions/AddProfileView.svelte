@@ -10,12 +10,22 @@
 	interface Props {
 		onClose: () => void;
 		onSuccess?: () => void;
+		/** Link handed over by a `lumen://import` deep link. */
+		initialSource?: string;
 	}
 
-	let { onClose, onSuccess }: Props = $props();
+	let { onClose, onSuccess, initialSource = '' }: Props = $props();
 
 	let name = $state('');
 	let source = $state('');
+
+	$effect(() => {
+		if (!initialSource) return;
+		// The field shows an https:// prefix, so it is left out of the value.
+		const rest = initialSource.replace(/^https:\/\//, '');
+		source =
+			rest !== initialSource && rest.includes('/') ? rest : initialSource;
+	});
 	let error = $state('');
 	let busy = $state(false);
 

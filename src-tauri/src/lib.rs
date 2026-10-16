@@ -141,7 +141,7 @@ pub fn run() {
         .manage(app::startup::FrontendReadiness::default())
         .plugin(tauri_plugin_single_instance::init(|app, args, _| {
             for arg in args {
-                commands::tools::queue_import_link(app, &arg);
+                commands::deep_link::queue_import_link(app, &arg);
             }
             if let Some(window) = app.get_webview_window("main") {
                 let _ = window.show();
@@ -162,14 +162,7 @@ pub fn run() {
         .plugin(tauri_plugin_notification::init())
         .invoke_handler(tauri::generate_handler![
             app::startup::frontend_ready,
-            commands::tools::export_backup,
-            commands::tools::take_import_link,
-            commands::tools::preview_backup,
-            commands::tools::restore_backup,
-            commands::tools::get_maintenance_history,
-            commands::tools::export_diagnostic_report,
-            commands::tools::inspect_destination,
-            commands::tools::get_active_connections,
+            commands::deep_link::take_import_link,
             vpn::connect,
             vpn::connect_exact,
             vpn::disconnect,
@@ -186,8 +179,7 @@ pub fn run() {
             commands::catalog::get_processes,
             commands::catalog::get_rule_icons,
             commands::catalog::ping_server,
-            commands::diagnostics::get_network_diagnostics,
-            commands::diagnostics::open_log_console,
+            commands::log_console::open_log_console,
             commands::notifications::send_lumen_notification,
             commands::settings::get_settings,
             commands::settings::set_settings,
@@ -273,13 +265,13 @@ pub fn run() {
             use tauri_plugin_deep_link::DeepLinkExt;
             if let Ok(Some(urls)) = app.deep_link().get_current() {
                 for url in urls {
-                    commands::tools::queue_import_link(app.handle(), url.as_str());
+                    commands::deep_link::queue_import_link(app.handle(), url.as_str());
                 }
             }
             let handle = app.handle().clone();
             app.deep_link().on_open_url(move |event| {
                 for url in event.urls() {
-                    commands::tools::queue_import_link(&handle, url.as_str());
+                    commands::deep_link::queue_import_link(&handle, url.as_str());
                 }
             });
             Ok(())

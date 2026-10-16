@@ -1,5 +1,5 @@
 //! Xray process, helper, standby and live-routing implementation.
-use super::{BackendFuture, BackendSession, CoreBackend, CoreCapabilities, CoreEngine};
+use super::{BackendFuture, BackendSession, CoreBackend};
 use crate::{
     app::state::AppState,
     domain::errors::{BackendError, Result},
@@ -745,12 +745,12 @@ mod live_switch_tests {
             preset_id: None,
             is_domain: true,
         });
-        let mut session = BackendSession::empty(CoreEngine::Xray);
+        let mut session = BackendSession::default();
         let result = async {
             XrayBackend
                 .connect(&state, &global, &first.id, &mut session)
                 .await?;
-            let started = xray(&mut session)?.started;
+            let started = session.started;
             assert!(started.is_some());
             // All -> Rules with a new rule, then a server switch, then back to All.
             assert_eq!(
@@ -762,7 +762,7 @@ mod live_switch_tests {
             XrayBackend
                 .connect(&state, &rules, &second.id, &mut session)
                 .await?;
-            let s = xray(&mut session)?;
+            let s = &mut session;
             assert_eq!(s.prepared_server_id.as_deref(), Some(second.id.as_str()));
             assert!(s.pending_live_switch.take().is_some());
             let mut toggled = rules.clone();
@@ -773,7 +773,7 @@ mod live_switch_tests {
                     .await?,
                 crate::engine::LiveRoutingStatus::Applied
             );
-            let s = xray(&mut session)?;
+            let s = &mut session;
             assert_eq!(
                 apply_live_rules(&state, &second.id, None, &global, s).await?,
                 crate::engine::LiveRoutingStatus::Applied
@@ -783,7 +783,7 @@ mod live_switch_tests {
             Ok::<_, BackendError>(())
         }
         .await;
-        stop(xray(&mut session).unwrap()).await.unwrap();
+        stop(&mut session).await.unwrap();
         result.unwrap();
     }
 }
@@ -1260,42 +1260,7 @@ pub async fn counters(client: &reqwest::Client, port: u16) -> Result<(u64, u64)>
 }
 
 pub struct XrayBackend;
-fn xray(session: &mut BackendSession) -> Result<&mut XraySession> {
-    match session {
-        BackendSession::Xray(s) => Ok(s),
-        _ => Err(BackendError::new(
-            "CORE_ENGINE_UNSUPPORTED",
-            "Session engine mismatch",
-        )),
-    }
-}
 impl CoreBackend for XrayBackend {
-    fn capabilities(&self) -> CoreCapabilities {
-        CoreCapabilities {
-            engine: CoreEngine::Xray,
-            experimental: false,
-            tun: cfg!(windows),
-            system_proxy: true,
-            udp: true,
-            live_routing_updates: cfg!(windows),
-            protocols: vec![
-                "vless",
-                "vmess",
-                "trojan",
-                "shadowsocks",
-                "wireguard",
-                "hysteria",
-                "socks",
-                "http",
-            ],
-            geosite: true,
-            geoip: true,
-            application_routing: cfg!(windows),
-            reality: true,
-            xtls_vision: true,
-            kill_switch: false,
-        }
-    }
     fn validate(&self, repo: &Repository, selected: &str) -> Result<()> {
         crate::xray::config::build(
             repo,
@@ -1335,7 +1300,7 @@ impl CoreBackend for XrayBackend {
         session: &'a mut BackendSession,
     ) -> BackendFuture<'a, ()> {
         Box::pin(async move {
-            let s = xray(session)?;
+            let s = session;
             let tun = repo.settings.network_mode == "tun";
             #[cfg(windows)]
             let hash = configuration_fingerprint(repo, selected, tun)?;
@@ -1494,7 +1459,7 @@ impl CoreBackend for XrayBackend {
         session: &'a mut BackendSession,
     ) -> BackendFuture<'a, ()> {
         Box::pin(async move {
-            let s = xray(session)?;
+            let s = session;
             if s.started.is_some() {
                 return Ok(());
             }
@@ -1599,7 +1564,7 @@ impl CoreBackend for XrayBackend {
         keep_warm: bool,
     ) -> BackendFuture<'a, ()> {
         Box::pin(async move {
-            let s = xray(session)?;
+            let s = session;
             #[cfg(windows)]
             if keep_warm {
                 if let Some(helper) = s.helper.as_mut().filter(|h| h.is_standby() && !h.exited()) {
@@ -1629,7 +1594,7 @@ impl CoreBackend for XrayBackend {
         Box::pin(async move {
             #[cfg(windows)]
             {
-                apply_live_rules(state, selected, Some(before), after, xray(session)?).await
+                apply_live_rules(state, selected, Some(before), after, session).await
             }
             #[cfg(not(windows))]
             {

@@ -247,11 +247,13 @@ impl SubscriptionClient {
         }
     }
 
+    #[cfg(any(test, all(windows, debug_assertions)))]
     pub fn with_identity(identity: DeviceIdentity) -> Self {
         Self::new(Arc::new(identity))
     }
 
     /// Creates an ephemeral subscription client for testing or standalone smoke verification.
+    #[cfg(any(test, all(windows, debug_assertions)))]
     pub fn ephemeral() -> Result<Self> {
         let seed = uuid::Uuid::new_v4().to_string();
         let hwid = crate::platform::device_identity::generate_hwid_from_seed(&seed);
@@ -262,10 +264,6 @@ impl SubscriptionClient {
             device_model: crate::platform::device_identity::read_device_model(),
         };
         Ok(Self::with_identity(identity))
-    }
-
-    pub fn user_agent(&self) -> &str {
-        &self.user_agent
     }
 
     pub fn through_proxy(&self, port: u16) -> Result<Self> {

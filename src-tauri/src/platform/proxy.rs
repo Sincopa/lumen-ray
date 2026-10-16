@@ -37,16 +37,6 @@ fn key() -> Result<RegKey> {
         .open_subkey_with_flags(KEY, KEY_READ | KEY_WRITE)
         .map_err(|_| error())
 }
-pub fn is_enabled() -> Result<bool> {
-    let key = RegKey::predef(HKEY_CURRENT_USER)
-        .open_subkey_with_flags(KEY, KEY_READ)
-        .map_err(|_| error())?;
-    let manual = key.get_value::<u32, _>("ProxyEnable").unwrap_or(0) != 0;
-    let pac = key
-        .get_value::<String, _>("AutoConfigURL")
-        .unwrap_or_default();
-    Ok(manual || !pac.trim().is_empty())
-}
 fn capture(key: &RegKey) -> Result<BTreeMap<String, Option<StoredValue>>> {
     let mut values = BTreeMap::new();
     for name in NAMES {

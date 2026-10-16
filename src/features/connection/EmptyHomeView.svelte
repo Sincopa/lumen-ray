@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { tick } from 'svelte';
 	import addIcon from '../../assets/plus.svg';
+	import pasteIcon from '../../assets/copy.svg';
 	import { catalog } from '../../lib/services';
 	import { errorCode } from '../../lib/services/errors';
 	import { t } from '../../lib/i18n';
@@ -15,6 +16,18 @@
 		editing = true;
 		error = '';
 		await tick();
+		input?.focus();
+	}
+
+	/** Fills the field from the clipboard; typing or Ctrl+V still works if it is blocked. */
+	async function paste() {
+		if (busy) return;
+		try {
+			const text = (await navigator.clipboard.readText()).trim();
+			if (text) source = text;
+		} catch {
+			/* Clipboard access refused. */
+		}
 		input?.focus();
 	}
 
@@ -51,7 +64,12 @@
 </script>
 
 <div class="empty-home-view">
-	<div class="profile-control" class:editing class:busy>
+	<div
+		class="profile-control"
+		class:editing
+		class:busy
+		class:filled={!!source.trim()}
+	>
 		<button
 			class="add-profile-btn"
 			class:hidden={editing}
@@ -66,7 +84,16 @@
 		</button>
 
 		<div class="source-editor" aria-hidden={!editing}>
-			<span class="input-dot" aria-hidden="true"></span>
+			<button
+				class="paste-btn"
+				type="button"
+				onclick={paste}
+				disabled={busy}
+				tabindex={editing ? 0 : -1}
+				aria-label={t('subscriptions.pasteLink')}
+			>
+				<img src={pasteIcon} alt="" width="34" height="34" />
+			</button>
 			<input
 				bind:this={input}
 				bind:value={source}
@@ -78,7 +105,7 @@
 				disabled={busy}
 				tabindex={editing ? 0 : -1}
 				aria-label={t('subscriptions.domainLink')}
-				placeholder={t('subscriptions.pasteLink')}
+				placeholder={t('subscriptions.addLink')}
 			/>
 			<button
 				class="submit-link"
@@ -130,9 +157,13 @@
 		width: min(100%, 229px);
 	}
 
+	/* Figma "Frame 2147223317": a faint pill that grows once a link is in. */
 	.profile-control.editing {
-		background: rgba(0, 0, 0, 0.28);
-		box-shadow: 0 8px 28px rgba(0, 0, 0, 0.22);
+		width: min(100%, 234px);
+		background: #ffffff05;
+	}
+	.profile-control.editing.filled {
+		width: min(100%, 300px);
 	}
 
 	.add-profile-btn,
@@ -191,8 +222,8 @@
 	.source-editor {
 		display: flex;
 		align-items: center;
-		gap: 12px;
-		padding: 0 10px 0 22px;
+		gap: 14px;
+		padding: 0 7px 0 6px;
 		opacity: 0;
 		transform: scale(1.08);
 		pointer-events: none;
@@ -207,16 +238,38 @@
 		pointer-events: auto;
 	}
 
-	.input-dot {
-		width: 28px;
-		height: 28px;
-		flex: 0 0 28px;
+	.paste-btn {
+		display: grid;
+		place-items: center;
+		width: 50px;
+		height: 50px;
+		flex: 0 0 50px;
+		padding: 0;
+		border: 0;
 		border-radius: 50%;
-		background: rgba(255, 255, 255, 0.22);
-		transition: transform 260ms var(--ease-spring);
+		background: #ffffff0d;
+		transition:
+			background-color 160ms ease,
+			transform 180ms var(--ease-spring);
 	}
 
-	.busy .input-dot {
+	.paste-btn img {
+		display: block;
+	}
+
+	.paste-btn:hover:not(:disabled) {
+		background: #ffffff1a;
+	}
+
+	.paste-btn:active:not(:disabled) {
+		transform: scale(0.94);
+	}
+
+	.paste-btn:disabled {
+		opacity: 1;
+	}
+
+	.busy .paste-btn img {
 		animation: importing 900ms ease-in-out infinite alternate;
 	}
 
@@ -231,12 +284,15 @@
 		background: transparent !important;
 		box-shadow: none !important;
 		color: rgba(255, 255, 255, 0.9);
-		font-size: 16px;
+		font-family: var(--font-family-base);
+		font-size: 18px;
+		letter-spacing: -0.04em;
 		user-select: text;
 	}
 
 	.source-editor input::placeholder {
-		color: rgba(255, 255, 255, 0.32);
+		color: rgba(255, 255, 255, 0.5);
+		opacity: 1;
 	}
 
 	.submit-link {
@@ -264,6 +320,11 @@
 		pointer-events: none;
 	}
 
+	/* Until a link is in, the placeholder gets the whole pill, as in the design. */
+	.profile-control:not(.filled) .submit-link {
+		display: none;
+	}
+
 	.import-error {
 		position: absolute;
 		margin-top: 96px;
@@ -285,7 +346,7 @@
 		.profile-control,
 		.add-profile-btn,
 		.source-editor,
-		.input-dot {
+		.paste-btn img {
 			animation: none;
 			transition-duration: 0ms;
 		}

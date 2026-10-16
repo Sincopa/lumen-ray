@@ -1,4 +1,5 @@
 <script lang="ts">
+	import nextIcon from '../../assets/chevron-right.svg';
 	import { t } from '../../lib/i18n';
 	import { reveal, pop, rise } from '../../lib/motion';
 	import IconButton from '../../components/IconButton.svelte';
@@ -182,20 +183,7 @@
 			onclick={submit}
 		>
 			<span>{t('common.continue')}</span>
-			<svg
-				width="34"
-				height="34"
-				viewBox="0 0 34 34"
-				fill="none"
-				aria-hidden="true"
-			>
-				<path
-					d="m13.25 9.5 7.1 7.1a.6.6 0 0 1 0 .8l-7.1 7.1"
-					stroke="currentColor"
-					stroke-width="1.7"
-					stroke-linecap="round"
-				/>
-			</svg>
+			<img src={nextIcon} alt="" width="34" height="34" />
 		</button>
 	</div>
 </section>
@@ -381,6 +369,11 @@
 		background: #262626;
 		color: #ffffff4d;
 		opacity: 1;
+	}
+	/* The chevron asset is dark; on the disabled pill it matches the dim label. */
+	.continue-btn:disabled img {
+		filter: brightness(0) invert(1);
+		opacity: 0.3;
 	}
 	.continue-btn:active:not(:disabled) {
 		transform: scale(0.97);
