@@ -1,4 +1,5 @@
 <script lang="ts">
+	import clearIcon from '../assets/clear.svg';
 	import { t } from '../lib/i18n';
 
 	interface Props {
@@ -60,20 +61,7 @@
 					input?.focus();
 				}}
 			>
-				<svg
-					width="32"
-					height="32"
-					viewBox="0 0 32 32"
-					fill="none"
-					aria-hidden="true"
-				>
-					<path
-						d="m10.6 10.6 10.8 10.8m0-10.8L10.6 21.4"
-						stroke="#fff"
-						stroke-width="1.6"
-						stroke-linecap="round"
-					/>
-				</svg>
+				<img src={clearIcon} alt="" width="32" height="32" />
 			</button>
 		{/if}
 	</div>

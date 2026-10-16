@@ -612,12 +612,6 @@ async fn apply_reload(
     })
     .await
     .map_err(|_| error())??;
-    if envelope.tunnel.repository.settings.core_engine != crate::engine::CoreEngine::Xray {
-        return Err(BackendError::new(
-            "CORE_ENGINE_UNSUPPORTED",
-            "This helper session requires Xray Core",
-        ));
-    }
     if routes.deactivate().is_err() || !super::network::routes_released() {
         return Err(error());
     }
@@ -698,13 +692,6 @@ async fn run_session(
     .map_err(|_| error())??;
     let assets_ready = worker_started.elapsed().as_millis() as u32;
     let request = envelope.tunnel;
-    // The existing worker owns Xray only. Never interpret a native-engine request as Xray.
-    if request.repository.settings.core_engine != crate::engine::CoreEngine::Xray {
-        return Err(BackendError::new(
-            "CORE_ENGINE_UNSUPPORTED",
-            "This helper session requires Xray Core",
-        ));
-    }
     let config = if standby {
         crate::xray::config::build_standby(
             &request.repository,

@@ -1,4 +1,6 @@
 <script lang="ts">
+	import backIcon from '../assets/chevron-left.svg';
+	import trashIcon from '../assets/trash-danger.svg';
 	import { onMount } from 'svelte';
 	import DesignOverlay from './DesignOverlay.svelte';
 
@@ -57,20 +59,7 @@
 					disabled={busy}
 					onclick={onCancel}
 				>
-					<svg
-						width="32"
-						height="32"
-						viewBox="0 0 32 32"
-						fill="none"
-						aria-hidden="true"
-					>
-						<path
-							d="M18.6 9.2 12.4 15.4a.85.85 0 0 0 0 1.2l6.2 6.2"
-							stroke="#fff"
-							stroke-width="1.6"
-							stroke-linecap="round"
-						/>
-					</svg>
+					<img src={backIcon} alt="" width="32" height="32" />
 				</button>
 				<button
 					type="button"
@@ -79,22 +68,7 @@
 					disabled={busy}
 					onclick={onConfirm}
 				>
-					<svg
-						width="32"
-						height="32"
-						viewBox="0 0 24 24"
-						fill="none"
-						aria-hidden="true"
-					>
-						<path
-							d="M7.28 10.26a.38.38 0 0 1 .38-.44h8.79c.23 0 .41.2.38.44l-.98 7.59a1.55 1.55 0 0 1-1.53 1.35H9.79a1.55 1.55 0 0 1-1.53-1.35l-.98-7.59Z"
-							fill="#b1313b"
-						/>
-						<path
-							d="M7.88 6.04a.38.38 0 0 0 .22.57l8.31 2.4a.38.38 0 0 0 .49-.37l.01-.71a.78.78 0 0 0-.56-.75L9.13 5.1a.78.78 0 0 0-.87.34l-.38.6Z"
-							fill="#b1313b"
-						/>
-					</svg>
+					<img src={trashIcon} alt="" width="32" height="32" />
 				</button>
 			</div>
 		{:else}

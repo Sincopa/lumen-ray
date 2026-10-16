@@ -4,9 +4,11 @@
 
 	interface Props {
 		active?: boolean;
+		/** Reports whether the shader is light or dark behind the window logo. */
+		onBackdropTone?: (tone: 'light' | 'dark') => void;
 	}
 
-	let { active = false }: Props = $props();
+	let { active = false, onBackdropTone }: Props = $props();
 
 	let canvas: HTMLCanvasElement;
 	let gl: WebGL2RenderingContext | null = null;
@@ -19,6 +21,43 @@
 	let vao: WebGLVertexArrayObject | null = null;
 	let uniforms: Record<string, WebGLUniformLocation> = {};
 	let lost = false;
+
+	// Logo area in CSS pixels of the window (header padding plus the wordmark).
+	const LOGO_AREA = { x: 25, y: 24, w: 64, h: 24 };
+	let backdropTone: 'light' | 'dark' = 'dark';
+	let toneFrame = 0;
+	let tonePixels = new Uint8Array(0);
+
+	function setBackdropTone(tone: 'light' | 'dark') {
+		if (tone === backdropTone) return;
+		backdropTone = tone;
+		onBackdropTone?.(tone);
+	}
+
+	/** Averages the brightness under the logo; the gap avoids flicker at the edge. */
+	function sampleBackdropTone() {
+		if (!gl || !onBackdropTone) return;
+		const scale = canvas.width / Math.max(1, canvas.clientWidth);
+		const w = Math.max(1, Math.round(LOGO_AREA.w * scale));
+		const h = Math.max(1, Math.round(LOGO_AREA.h * scale));
+		const x = Math.round(LOGO_AREA.x * scale);
+		const y = canvas.height - Math.round(LOGO_AREA.y * scale) - h;
+		if (x < 0 || y < 0 || x + w > canvas.width) return;
+		if (tonePixels.length !== w * h * 4) tonePixels = new Uint8Array(w * h * 4);
+		gl.readPixels(x, y, w, h, gl.RGBA, gl.UNSIGNED_BYTE, tonePixels);
+		let sum = 0;
+		let count = 0;
+		for (let i = 0; i < tonePixels.length; i += 16) {
+			sum +=
+				0.2126 * tonePixels[i] +
+				0.7152 * tonePixels[i + 1] +
+				0.0722 * tonePixels[i + 2];
+			count++;
+		}
+		const brightness = sum / count / 255;
+		if (brightness > 0.55) setBackdropTone('light');
+		else if (brightness < 0.45) setBackdropTone('dark');
+	}
 
 	const vsSource = `#version 300 es
     precision highp float;
@@ -735,6 +774,8 @@ void main(){
 		}
 
 		gl.drawArrays(gl.TRIANGLES, 0, 3);
+		// Read back right after drawing, about twice a second.
+		if (toneFrame++ % 15 === 0) sampleBackdropTone();
 		if (!reducedMotion) frameId = requestAnimationFrame(render);
 	}
 
@@ -755,6 +796,10 @@ void main(){
 			transitionElapsed = config.transition;
 		}
 		resume();
+	});
+	$effect(() => {
+		// Without the shader the window shows its dark base colour.
+		if (!shaderSettings.enabled) setBackdropTone('dark');
 	});
 	$effect(() => {
 		void shaderSettings.enabled;

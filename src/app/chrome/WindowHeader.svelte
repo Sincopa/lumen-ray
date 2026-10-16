@@ -11,6 +11,8 @@
 		title?: string;
 		showControls?: boolean;
 		darkSurface?: boolean;
+		/** The shader behind the logo is bright, so the logo turns dark. */
+		lightBackdrop?: boolean;
 		showQuickActions?: boolean;
 		isSettingsOpen?: boolean;
 		onOpenSettings?: () => void;
@@ -20,6 +22,7 @@
 		title = 'Lumen',
 		showControls = true,
 		darkSurface = false,
+		lightBackdrop = false,
 		showQuickActions = true,
 		isSettingsOpen = false,
 		onOpenSettings,
@@ -27,7 +30,7 @@
 
 	let failure = $state(false);
 
-	async function control(action: 'minimize' | 'toggleMaximize' | 'close') {
+	async function control(action: 'minimize' | 'close') {
 		if (!runtime.isTauri) return;
 		try {
 			await getCurrentWindow()[action]();
@@ -40,6 +43,7 @@
 <header
 	class="window-header"
 	class:dark-surface={darkSurface}
+	class:light-backdrop={lightBackdrop && !darkSurface}
 	data-tauri-drag-region
 >
 	<div class="logo">{title}</div>
@@ -72,13 +76,10 @@
 					<img src={minimizeIcon} alt="" width="21" height="21" />
 				</button>
 
-				<button
-					class="control-btn"
-					onclick={() => control('toggleMaximize')}
-					aria-label={t('common.maximize')}
-				>
+				<!-- Maximize is shown for the layout only; the window keeps its size. -->
+				<span class="control-btn inert" aria-hidden="true">
 					<img src={maximizeIcon} alt="" width="21" height="21" />
-				</button>
+				</span>
 
 				<button
 					class="control-btn close"
@@ -112,13 +113,15 @@
 		font-weight: 700;
 		font-size: 24px;
 		line-height: 1;
-		color: #00000080;
+		/* Follows the shader under it: light grey on dark, dark grey on bright. */
+		color: #ffffff80;
 		letter-spacing: -1.68px;
 		margin-left: 9px;
 		user-select: none;
+		transition: color 600ms ease;
 	}
-	.dark-surface .logo {
-		color: #ffffff80;
+	.light-backdrop .logo {
+		color: #00000080;
 	}
 	.header-right {
 		display: flex;
@@ -180,12 +183,12 @@
 		height: 28px;
 	}
 	.header-circle-btn:active,
-	.control-btn:active {
+	.control-btn:not(.inert):active {
 		transform: scale(0.94);
 	}
 	@media (hover: hover) and (pointer: fine) {
 		.header-circle-btn:hover,
-		.control-btn:hover {
+		.control-btn:not(.inert):hover {
 			background: #ffffff20;
 		}
 		.control-btn.close:hover {

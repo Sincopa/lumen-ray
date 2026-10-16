@@ -1,4 +1,6 @@
 <script lang="ts">
+	import closeBoldIcon from '../../assets/close-bold.svg';
+	import copyIcon from '../../assets/copy.svg';
 	import { onDestroy } from 'svelte';
 	import { SvelteSet } from 'svelte/reactivity';
 	import { createDeferredTask } from '../../lib/utils/deferredTask';
@@ -27,7 +29,6 @@
 	import chevronIcon from '../../assets/chevron-up.svg';
 	import backIcon from '../../assets/back.svg';
 	import checkIcon from '../../assets/check.svg';
-	import crossIcon from '../../assets/close.svg';
 	import { formatSubscriptionUpdatedAgo } from '../../lib/utils/time';
 
 	const focusTask = createDeferredTask();
@@ -41,8 +42,23 @@
 	const connectionStore = connection.state;
 	const subscriptionRefreshStatus = refreshStatus;
 
+	// Expanded cards survive restarts; only the chevron changes them.
+	const EXPANDED_KEY = 'lumen_expanded_subscriptions';
+	function loadExpanded(): string[] {
+		try {
+			const ids: unknown = JSON.parse(
+				localStorage.getItem(EXPANDED_KEY) ?? '[]',
+			);
+			return Array.isArray(ids)
+				? ids.filter((id): id is string => typeof id === 'string')
+				: [];
+		} catch {
+			return [];
+		}
+	}
+
 	// Local state
-	const expanded = new SvelteSet<string>();
+	const expanded = new SvelteSet<string>(loadExpanded());
 	let editingId = $state<string | null>(null);
 	let editName = $state('');
 	let editInputEl = $state<HTMLInputElement | null>(null);
@@ -77,11 +93,21 @@
 		}
 	}
 
-	function toggleSubscription(id: string) {
+	function selectSubscription(id: string) {
+		if (activeSubId !== id) void activateSubscription(id);
+	}
+
+	function toggleExpanded(id: string) {
 		if (expanded.has(id)) expanded.delete(id);
 		else expanded.add(id);
-		if (activeSubId !== id) {
-			void activateSubscription(id);
+		const known = new Set($catalogStore.subscriptions.map((sub) => sub.id));
+		try {
+			localStorage.setItem(
+				EXPANDED_KEY,
+				JSON.stringify([...expanded].filter((key) => known.has(key))),
+			);
+		} catch {
+			/* Storage is optional. */
 		}
 	}
 
@@ -284,15 +310,15 @@
 									onclick={cancelEditing}
 									aria-label={t('common.close')}
 								>
-									<img src={crossIcon} alt="" class="action-svg" />
+									<img src={closeBoldIcon} alt="" class="action-svg" />
 								</button>
 							</div>
 						{:else}
 							<button
 								in:swap
 								class="title-group"
-								aria-expanded={expanded.has(sub.id)}
-								onclick={() => toggleSubscription(sub.id)}
+								aria-pressed={activeSubId === sub.id}
+								onclick={() => selectSubscription(sub.id)}
 							>
 								<span class="sub-name">{sub.name}</span>
 								{#if activeSubId === sub.id}
@@ -323,17 +349,16 @@
 									ariaLabel={sub.name}
 									expanded={expanded.has(sub.id)}
 									class="card-chevron"
-									onclick={() => toggleSubscription(sub.id)}
+									onclick={() => toggleExpanded(sub.id)}
 								/>
 							</div>
 						{/if}
 					</div>
-					<button
-						type="button"
+					<div
 						class="card-body"
 						class:expanded={expanded.has(sub.id)}
-						aria-expanded={expanded.has(sub.id)}
-						onclick={() => toggleSubscription(sub.id)}
+						role="presentation"
+						onclick={() => selectSubscription(sub.id)}
 					>
 						{#if expanded.has(sub.id)}
 							<div class="card-details" transition:reveal>
@@ -364,7 +389,7 @@
 								{/if}
 							</div>
 						{/if}
-					</button>
+					</div>
 				</article>
 			</div>
 		{:else}<p>{t('subscriptions.empty')}</p>{/each}
@@ -453,31 +478,7 @@
 							{#if copyState === 'copied'}
 								<MaterialIcon name="check" size={20} />
 							{:else}
-								<svg
-									width="34"
-									height="34"
-									viewBox="0 0 34 34"
-									fill="none"
-									aria-hidden="true"
-								>
-									<rect
-										x="8.5"
-										y="11.9"
-										width="13.6"
-										height="13.6"
-										rx="1.36"
-										stroke="#fff"
-										stroke-width="0.68"
-									/>
-									<rect
-										x="11.9"
-										y="8.5"
-										width="13.6"
-										height="13.6"
-										rx="1.36"
-										fill="#fff"
-									/>
-								</svg>
+								<img src={copyIcon} alt="" width="34" height="34" />
 							{/if}
 						</span>
 					</button>
@@ -571,18 +572,18 @@
 		height: 28px;
 		gap: 8px;
 	}
+	/* Icons keep their built-in padding, as in the Figma frame. */
 	.card-rename-inline {
 		display: flex;
 		align-items: center;
-		gap: 8px;
+		gap: 10px;
 		width: 100%;
 		height: 100%;
+		margin-left: -7px;
 	}
 	.rename-icon {
-		width: 16px;
-		height: 16px;
-		filter: brightness(0) invert(1);
-		opacity: 0.6;
+		width: 28px;
+		height: 28px;
 		flex-shrink: 0;
 	}
 	.rename-input {
@@ -592,15 +593,15 @@
 		border: none !important;
 		outline: none !important;
 		box-shadow: none !important;
-		font-size: 14px;
+		font-size: 16px;
 		font-weight: 500;
 		color: #ffffff !important;
 		padding: 0 !important;
 		letter-spacing: -0.2px;
 	}
 	.rename-action-btn {
-		width: 24px;
-		height: 24px;
+		width: 28px;
+		height: 28px;
 		border-radius: 50%;
 		background: transparent;
 		border: none;
@@ -624,11 +625,19 @@
 	.rename-action-btn.cancel:hover {
 		background: rgba(243, 57, 57, 0.2);
 	}
+	.rename-action-btn.check {
+		width: 34px;
+		height: 34px;
+		margin: -3px 0;
+	}
 	.action-svg {
-		width: 14px;
-		height: 14px;
+		display: block;
+		width: 100%;
+		height: 100%;
+		opacity: 0.85;
+	}
+	.rename-action-btn.check .action-svg {
 		filter: brightness(0) invert(1);
-		opacity: 0.75;
 	}
 	.rename-action-btn:hover .action-svg {
 		opacity: 1;
@@ -644,9 +653,11 @@
 		text-align: left;
 		flex: 1;
 	}
+	/* Not cap-trimmed: the ellipsis clip would cut ascenders and descenders. */
 	.sub-name {
 		font-size: 16px;
 		font-weight: 500;
+		line-height: 1.3;
 		letter-spacing: 0;
 		overflow: hidden;
 		text-overflow: ellipsis;
@@ -669,13 +680,7 @@
 	}
 	.card-body {
 		margin-top: 0;
-		border-top: none;
-		border-right: 0;
-		border-bottom: 0;
-		border-left: 0;
-		background: transparent;
 		color: inherit;
-		padding: 0;
 		width: 100%;
 		text-align: left;
 		cursor: pointer;

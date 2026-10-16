@@ -164,8 +164,6 @@ fn default_server_selection() -> String {
 #[serde(rename_all = "camelCase")]
 pub struct Settings {
     #[serde(default)]
-    pub core_engine: crate::engine::CoreEngine,
-    #[serde(default)]
     pub dns_policy: crate::engine::dns::DnsPolicy,
     #[serde(default = "default_subscription_transport")]
     pub subscription_transport: String,
@@ -203,7 +201,6 @@ pub struct Settings {
 impl Default for Settings {
     fn default() -> Self {
         Self {
-            core_engine: Default::default(),
             network_mode: "tun".into(),
             dns_policy: Default::default(),
             subscription_transport: default_subscription_transport(),

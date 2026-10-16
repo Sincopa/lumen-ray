@@ -18,10 +18,6 @@ impl RuntimePaths {
         Self { root: root.into() }
     }
 
-    pub fn root(&self) -> &Path {
-        &self.root
-    }
-
     pub fn xray_dir(&self) -> PathBuf {
         self.root.join("xray")
     }
@@ -36,10 +32,6 @@ impl RuntimePaths {
 
     pub fn geosite_path(&self) -> PathBuf {
         self.xray_dir().join("geosite.dat")
-    }
-
-    pub fn xray_manifest_path(&self) -> PathBuf {
-        self.xray_dir().join("manifest.json")
     }
 
     pub fn drivers_dir(&self) -> PathBuf {

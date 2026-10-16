@@ -1,10 +1,12 @@
 <script lang="ts">
+	import chevronIcon from '../assets/chevron-right-small.svg';
 	import type { Snippet } from 'svelte';
-	import chevronIcon from '../assets/chevron-down.svg';
 
 	interface Props {
 		label: string;
 		description?: string;
+		/** Current value shown as a chip before the chevron. */
+		value?: string;
 		class?: string;
 		showChevron?: boolean;
 		onclick?: () => void;
@@ -14,6 +16,7 @@
 	let {
 		label,
 		description,
+		value,
 		class: className = '',
 		showChevron = false,
 		onclick,
@@ -21,109 +24,71 @@
 	}: Props = $props();
 </script>
 
+{#snippet content()}
+	<div class="item-text">
+		<span class="label">{label}</span>
+		{#if description}
+			<span class="desc">{description}</span>
+		{/if}
+	</div>
+	<div class="control-area">
+		{#if children}
+			{@render children()}
+		{/if}
+		{#if value}
+			<span class="value-chip">{value}</span>
+		{/if}
+		{#if showChevron}
+			<span class="chevron" aria-hidden="true">
+				<img src={chevronIcon} alt="" width="6" height="12" />
+			</span>
+		{/if}
+	</div>
+{/snippet}
+
 {#if onclick}
 	<button type="button" class="setting-item clickable {className}" {onclick}>
-		<div class="item-text">
-			<span class="label">{label}</span>
-			{#if description}
-				<span class="desc">{description}</span>
-			{/if}
-		</div>
-		<div class="control-area">
-			{#if children}
-				{@render children()}
-			{/if}
-			{#if showChevron}
-				<img
-					src={chevronIcon}
-					alt=""
-					width="16"
-					height="16"
-					class="chevron-icon"
-					aria-hidden="true"
-				/>
-			{/if}
-		</div>
+		{@render content()}
 	</button>
 {:else}
 	<div class="setting-item {className}">
-		<div class="item-text">
-			<span class="label">{label}</span>
-			{#if description}
-				<span class="desc">{description}</span>
-			{/if}
-		</div>
-		<div class="control-area">
-			{#if children}
-				{@render children()}
-			{/if}
-			{#if showChevron}
-				<img
-					src={chevronIcon}
-					alt=""
-					width="16"
-					height="16"
-					class="chevron-icon"
-					aria-hidden="true"
-				/>
-			{/if}
-		</div>
+		{@render content()}
 	</div>
 {/if}
 
 <style>
 	.setting-item {
+		position: relative;
 		width: 100%;
-		min-height: 48px;
+		min-height: 54px;
 		background: transparent;
 		border: none;
-		border-bottom: 1px solid rgba(255, 255, 255, 0.06);
-		padding: 8px 16px;
+		padding: 8px 0;
 		display: flex;
 		justify-content: space-between;
 		align-items: center;
 		gap: 12px;
 		box-sizing: border-box;
 		text-align: left;
-		transition: background 0.15s ease;
-	}
-
-	:global(.settings-group > .setting-item:first-child),
-	:global(.settings-group > button.setting-item:first-child) {
-		border-top-left-radius: 16px;
-		border-top-right-radius: 16px;
-	}
-
-	:global(.settings-group > .setting-item:last-child),
-	:global(.settings-group > button.setting-item:last-child) {
-		border-bottom-left-radius: 16px;
-		border-bottom-right-radius: 16px;
-		border-bottom: none;
+		color: #fff;
 	}
 
 	.setting-item.clickable {
 		cursor: pointer;
 	}
 
-	.setting-item.clickable:hover {
-		background: rgba(0, 0, 0, 0.4);
-	}
-
-	.setting-item.clickable:active {
-		background: rgba(0, 0, 0, 0.5);
-	}
-
 	.item-text {
 		display: flex;
 		flex-direction: column;
-		gap: 2px;
+		gap: 4px;
 		min-width: 0;
 	}
 
 	.label {
 		font-family: var(--font-family-base);
 		font-size: 14px;
-		font-weight: 500;
+		font-weight: 400;
+		letter-spacing: -0.02em;
 		color: #ffffff;
 		white-space: nowrap;
 		overflow: hidden;
@@ -140,26 +105,42 @@
 		display: flex;
 		align-items: center;
 		justify-content: center;
-		gap: 8px;
+		gap: 6px;
 		flex-shrink: 0;
 		align-self: center;
 	}
 
-	.chevron-icon {
-		width: 14px;
-		height: 14px;
-		transform: translateX(0) rotate(-90deg);
-		opacity: 0.65;
-		flex-shrink: 0;
-		align-self: center;
-		display: block;
+	.value-chip {
+		display: inline-flex;
+		align-items: center;
+		height: 33px;
+		padding: 0 12px;
+		border-radius: 123px;
+		background: rgba(0, 0, 0, 0.15);
+		font-family: var(--font-family-base);
+		font-size: 12px;
+		white-space: nowrap;
+		color: #fff;
+	}
+
+	.chevron {
+		display: grid;
+		place-items: center;
+		width: 30px;
+		height: 30px;
+		opacity: 0.5;
 		transition:
 			opacity 0.15s ease,
 			transform 0.15s ease;
 	}
 
-	.setting-item.clickable:hover .chevron-icon {
-		opacity: 1;
-		transform: translateX(2px) rotate(-90deg);
+	@media (hover: hover) and (pointer: fine) {
+		.setting-item.clickable:hover .chevron {
+			opacity: 0.9;
+			transform: translateX(2px);
+		}
+	}
+	.setting-item.clickable:active .chevron {
+		transform: translateX(2px);
 	}
 </style>

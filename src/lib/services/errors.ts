@@ -1,5 +1,4 @@
 export type ErrorCode =
-	| 'lumenUnsupported'
 	| 'routingConflict'
 	| 'tunAdapterTimeout'
 	| 'ruleUpdateFailed'
@@ -26,7 +25,6 @@ export class ServiceError extends Error {
 
 export function errorCode(error: unknown): ErrorCode {
 	const codes: ErrorCode[] = [
-		'lumenUnsupported',
 		'routingConflict',
 		'tunAdapterTimeout',
 		'ruleUpdateFailed',
@@ -51,9 +49,6 @@ export function errorCode(error: unknown): ErrorCode {
 				? error.code
 				: error;
 	const nativeCodes: Record<string, ErrorCode> = {
-		LUMEN_UNSUPPORTED_CONFIGURATION: 'lumenUnsupported',
-		LUMEN_START_FAILED: 'unavailable',
-		CORE_ENGINE_UNSUPPORTED: 'unavailable',
 		ROUTING_CONFLICT: 'routingConflict',
 		INVALID_SERVER: 'invalidServer',
 		INVALID_RULE: 'invalidRule',
@@ -90,8 +85,6 @@ export function errorCode(error: unknown): ErrorCode {
 		INVALID_CONFIG: 'unavailable',
 		DNS_UNAVAILABLE: 'unavailable',
 		METRICS_UNAVAILABLE: 'unavailable',
-		BACKUP_FAILED: 'storage',
-		BACKUP_INVALID: 'storage',
 		ALREADY_RUNNING: 'unavailable',
 		UPDATE_FAILED: 'unavailable',
 		UPDATE_UNAVAILABLE: 'unavailable',

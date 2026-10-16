@@ -1,5 +1,5 @@
 pub use crate::engine::Session;
-use crate::engine::{backend, BackendSession};
+use crate::engine::backend;
 use crate::{
     app::state::AppState,
     domain::errors::{BackendError, Result},
@@ -14,7 +14,6 @@ use tauri::Emitter;
 #[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ConnectionInfo {
-    pub engine: crate::engine::CoreEngine,
     pub server_id: String,
     pub ip: String,
     pub protocol: String,
@@ -87,24 +86,16 @@ pub async fn prewarm(state: &Arc<AppState>) {
     if session.started().is_some() {
         return;
     }
-    if session.engine() != repo.settings.core_engine {
-        if let Err(error) = stop(&mut session).await {
-            log::warn!("Core preparation cleanup: {}", error.code);
-            return;
-        }
-        session.backend = BackendSession::empty(repo.settings.core_engine);
-    }
     let selected = match repo.selected_server_id.as_ref() {
         Some(id) => connection_candidates(state, id).await.into_iter().next(),
         None => None,
     };
-    if let Err(error) = backend(repo.settings.core_engine)
+    if let Err(error) = backend()
         .prewarm(state, &repo, selected.as_deref(), &mut session.backend)
         .await
     {
         log::warn!(
-            "engine={:?} preparation failed: {} ({})",
-            repo.settings.core_engine,
+            "Core preparation failed: {} ({})",
             error.code,
             error.message
         );
@@ -124,7 +115,7 @@ pub async fn apply_live_rules(
         .await
         .map_err(|_| BackendError::new("BUSY", "Connection manager is shutting down"))?;
     let mut session = state.session.lock().await;
-    backend(session.engine())
+    backend()
         .update_routing(state, selected, before, after, &mut session.backend)
         .await
 }
@@ -162,19 +153,16 @@ async fn connect_with_selection(
     } else {
         None
     };
-    let requested_engine = state.repository.read().await.settings.core_engine;
-    if requested_engine == crate::engine::CoreEngine::Xray {
-        publish(
-            state,
-            app,
-            Snapshot {
-                status: "connecting".into(),
-                info: None,
-                error: None,
-            },
-        )
-        .await;
-    }
+    publish(
+        state,
+        app,
+        Snapshot {
+            status: "connecting".into(),
+            info: None,
+            error: None,
+        },
+    )
+    .await;
     let candidates = if best {
         // Isolated probe cores can take seconds and can compete with the TUN
         // helper for Windows ports and CPU. Use cached quality and try the
@@ -185,41 +173,8 @@ async fn connect_with_selection(
     } else {
         vec![id]
     };
-    // Reject unsupported Lumen profiles before changing the visible connection or
-    // taking down the current backend. Best-server selection may contain mixed protocols.
-    let candidates = if requested_engine == crate::engine::CoreEngine::Lumen {
-        let repo = state.repository.read().await;
-        let mut supported = Vec::new();
-        let mut first_error = None;
-        for candidate in candidates {
-            match backend(crate::engine::CoreEngine::Lumen).validate(&repo, &candidate) {
-                Ok(()) => supported.push(candidate),
-                Err(error) => {
-                    first_error.get_or_insert(error);
-                }
-            }
-        }
-        if supported.is_empty() {
-            return Err(first_error.unwrap_or_else(BackendError::invalid));
-        }
-        supported
-    } else {
-        candidates
-    };
     if state.connection_generation.load(Ordering::Acquire) != generation {
         return Err(cancelled());
-    }
-    if requested_engine == crate::engine::CoreEngine::Lumen {
-        publish(
-            state,
-            app,
-            Snapshot {
-                status: "connecting".into(),
-                info: None,
-                error: None,
-            },
-        )
-        .await;
     }
     let mut session = std::mem::take(&mut *state.session.lock().await);
     log::info!(
@@ -281,8 +236,7 @@ async fn connect_with_selection(
             (previous_server.as_deref(), previous_snapshot.as_ref())
         {
             if session.started().is_some()
-                && matches!(&session.backend, BackendSession::Xray(active)
-                    if active.prepared_server_id.as_deref() == Some(previous))
+                && session.backend.prepared_server_id.as_deref() == Some(previous)
             {
                 publish(state, app, snapshot.clone()).await;
                 restored = true;
@@ -318,7 +272,7 @@ async fn connect_with_selection(
     *state.session.lock().await = session;
     if let Err(error) = &result {
         log::warn!(
-            "engine={requested_engine:?} connection failed code={}",
+            "Connection failed code={}",
             error.code
         );
         if !restored && state.connection_generation.load(Ordering::Acquire) == generation {
@@ -382,7 +336,6 @@ async fn connect_session_with_repository(
     repo: &crate::storage::repository::Repository,
 ) -> Result<()> {
     let session_at = Instant::now();
-    let engine = repo.settings.core_engine;
     let protocol = protocol_name(repo, &id)?;
     let mut result = crate::engine::connect(state, repo, &id, session).await;
     let proxy_port = session.proxy_port();
@@ -410,7 +363,7 @@ async fn connect_session_with_repository(
         }
     }
     log::info!(
-        "engine={engine:?} local startup completed {} ms",
+        "Local startup completed {} ms",
         session_at.elapsed().as_millis()
     );
     // The new path is already carrying traffic. Show connected, then verify.
@@ -419,7 +372,6 @@ async fn connect_session_with_repository(
     let connected = |ip: String| Snapshot {
         status: "connected".into(),
         info: Some(ConnectionInfo {
-            engine,
             server_id: id.clone(),
             ip,
             protocol: protocol.into(),
@@ -454,7 +406,8 @@ async fn connect_session_with_repository(
         result = Err(cancelled());
     }
     #[cfg(windows)]
-    if let BackendSession::Xray(active) = &mut session.backend {
+    {
+        let active = &mut session.backend;
         if active.pending_live_switch.is_some() {
             if result.is_ok() {
                 active.pending_live_switch = None;
@@ -535,7 +488,7 @@ pub(super) async fn release_to_standby(session: &mut Session) -> Result<()> {
         proxy.restore()?;
         session.system_proxy = None;
     }
-    backend(session.engine())
+    backend()
         .disconnect(&mut session.backend, true)
         .await?;
     #[cfg(windows)]
@@ -552,7 +505,7 @@ async fn release(session: &mut Session, cause: &BackendError) -> Result<()> {
     // permission again and can drop the default route after the reader is gone.
     #[cfg(windows)]
     if tun_helper_alive(session) {
-        return backend(session.engine())
+        return backend()
             .disconnect(&mut session.backend, true)
             .await;
     }
@@ -564,21 +517,18 @@ async fn release(session: &mut Session, cause: &BackendError) -> Result<()> {
         proxy.restore()?;
         session.system_proxy = None;
     }
-    backend(session.engine())
+    backend()
         .disconnect(&mut session.backend, true)
         .await
 }
 #[cfg(windows)]
 fn tun_helper_alive(session: &Session) -> bool {
-    matches!(
-        &session.backend,
-        crate::engine::BackendSession::Xray(session)
-            if session.is_tun
-                && session
-                    .helper
-                    .as_ref()
-                    .is_some_and(|helper| !helper.exited() && helper.is_standby())
-    )
+    session.backend.is_tun
+        && session
+            .backend
+            .helper
+            .as_ref()
+            .is_some_and(|helper| !helper.exited() && helper.is_standby())
 }
 fn keeps_prepared_core(code: &str) -> bool {
     matches!(code, "CANCELLED" | "SERVER_UNREACHABLE" | "IP_UNAVAILABLE")
@@ -593,7 +543,7 @@ pub async fn stop(session: &mut Session) -> Result<()> {
         proxy.restore()?;
         session.system_proxy = None;
     }
-    backend(session.engine())
+    backend()
         .disconnect(&mut session.backend, false)
         .await
 }
@@ -644,7 +594,7 @@ async fn disconnect_session(
     let shutdown = if session.has_system_proxy() {
         stop(session).await
     } else {
-        backend(session.engine())
+        backend()
             .disconnect(&mut session.backend, true)
             .await
     };

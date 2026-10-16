@@ -10,6 +10,7 @@ import { runtime } from '../lib/runtime';
 import { APP_HEIGHT, APP_WIDTH } from '../lib/constants/app';
 import { nativeSettings, settingsReady } from '../lib/services/settings';
 import { applicationUpdate } from '../lib/services/applicationUpdate';
+import { importPreview } from '../lib/services/importPreview';
 import {
 	pingAllServers,
 	refreshAllSubscriptions,
@@ -56,14 +57,10 @@ function notify(kind: 'disconnect' | 'reconnect' | 'expiry' | 'update') {
 }
 
 async function startMaintenance() {
-	const ready = await Promise.allSettled([
-		settingsReady,
-		catalog.getServers(),
-	]);
+	const ready = await Promise.allSettled([settingsReady, catalog.getServers()]);
 	if (ready.some((result) => result.status === 'rejected')) return;
 	const settings = get(nativeSettings);
-	if (settings.pingPolicy === 'startup')
-		void pingAllServers().catch(() => {});
+	if (settings.pingPolicy === 'startup') void pingAllServers().catch(() => {});
 	if (settings.updateIntervalHours > 0)
 		void refreshAllSubscriptions().catch(() => {});
 }
@@ -192,7 +189,14 @@ export function installLifecycle() {
 		let unlisten: (() => void) | undefined;
 		const read = async () => {
 			const value = await invoke<string | null>('take_import_link');
-			if (!disposed && value) shell.pendingImport = value;
+			if (disposed || !value) return;
+			// The link only fills the add-profile form; importing still needs a confirm.
+			try {
+				shell.pendingImport = importPreview(value).input;
+				shell.importing = true;
+			} catch {
+				/* Ignore malformed links. */
+			}
 		};
 		void listen('import://pending', () => {
 			void read().catch(() => {});

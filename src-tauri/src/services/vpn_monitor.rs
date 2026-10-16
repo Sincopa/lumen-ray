@@ -24,10 +24,7 @@ async fn reassert_routes(state: &AppState, generation: u64) -> bool {
     if session.started().is_none() || session.generation != generation {
         return false;
     }
-    let crate::engine::BackendSession::Xray(xray) = &mut session.backend else {
-        return false;
-    };
-    match crate::engine::xray::reassert_routes(xray).await {
+    match crate::engine::xray::reassert_routes(&mut session.backend).await {
         Ok(()) => {
             log::warn!("Tunnel routes reinstalled after Windows stopped selecting LumenTun");
             true
@@ -82,7 +79,7 @@ pub fn monitor(state: Arc<AppState>, app: tauri::AppHandle) {
                     let mut failed_id = None;
                     if session.failed() {
                         failed_id = active_id.clone();
-                        log::warn!("engine={:?} backend stopped unexpectedly", session.engine());
+                        log::warn!("Core stopped unexpectedly");
                         let _=stop(&mut session).await;
                         *state.traffic.write().await=Default::default();
                         if active_id.is_some() {

@@ -36,18 +36,6 @@ async fn ping_inner(state: &AppState, id: &str) -> Result<serde_json::Value> {
     };
 
     let mut repo = state.repository.read().await.clone();
-    if repo.settings.core_engine == crate::engine::CoreEngine::Lumen {
-        repo.settings.network_mode = "proxy".into();
-        let result = match crate::engine::lumen::LumenBackend::start_native(&repo, id).await {
-            Ok(session) => {
-                let value = probe_target(session.port, &repo.settings.ping_url).await;
-                session.shutdown().await;
-                value
-            }
-            Err(_) => None,
-        };
-        return Ok(result.map_or(serde_json::json!("timeout"), |v| serde_json::json!(v)));
-    }
     // Port discovery releases its temporary listeners before Xray binds them.
     // Serialize only that short startup window so concurrent probes cannot be
     // assigned the same just-released Windows ephemeral ports.

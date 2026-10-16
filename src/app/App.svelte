@@ -1,7 +1,6 @@
 <script lang="ts">
 	import { fade } from 'svelte/transition';
 	import { screen, rise } from '../lib/motion';
-	import AdvancedTools from '../features/settings/AdvancedTools.svelte';
 	import BackgroundShader from './chrome/BackgroundShader.svelte';
 	import WindowHeader from './chrome/WindowHeader.svelte';
 	import BottomNav from './chrome/BottomNav.svelte';
@@ -28,6 +27,7 @@
 	const applicationUpdateState = applicationUpdate.state;
 
 	let connectionState = $derived($connectionStore.status);
+	let backdropTone = $state<'light' | 'dark'>('dark');
 	let info = $derived($connectionStore.info);
 	let hasSubscriptions = $derived($catalogStore.subscriptions.length > 0);
 	let routingMode = $derived($catalogStore.routingMode);
@@ -51,19 +51,25 @@
 
 <main class="app-viewport">
 	<!-- Native WebGL2 Background Fluid Light Shader -->
-	<BackgroundShader active={connectionState === 'connected'} />
+	<BackgroundShader
+		active={connectionState === 'connected'}
+		onBackdropTone={(tone) => (backdropTone = tone)}
+	/>
 
 	{#if shell.brightnessOpen}
 		<BrightnessView
 			{connectionState}
-			onClose={() => (shell.brightnessOpen = false)}
+			onClose={() => {
+				// Brightness is opened from settings, so leaving it goes back there.
+				shell.brightnessOpen = false;
+				shell.goToTab('settings');
+			}}
 		/>
 	{/if}
 
 	<div
-		class="app-ui"
+		class="app-ui design-screen"
 		class:brightness-hidden={shell.brightnessOpen}
-		class:design-screen={shell.currentTab !== 'settings' || shell.importing}
 		class:dim-backdrop={shell.currentTab !== 'home' ||
 			!hasSubscriptions ||
 			shell.importing}
@@ -71,15 +77,14 @@
 		<!-- Top Desktop Window Bar -->
 		<WindowHeader
 			title="Lumen"
-			showQuickActions={(shell.currentTab === 'home' &&
-				hasSubscriptions &&
-				!shell.importing) ||
-				shell.currentTab === 'settings'}
+			showQuickActions={shell.currentTab !== 'settings' && !shell.importing}
 			darkSurface={shell.currentTab !== 'home' ||
 				!hasSubscriptions ||
 				shell.importing}
+			lightBackdrop={backdropTone === 'light'}
 			isSettingsOpen={shell.currentTab === 'settings'}
 			onOpenSettings={() => {
+				shell.brightnessOpen = false;
 				shell.goToTab(shell.currentTab === 'settings' ? 'home' : 'settings');
 			}}
 		/>
@@ -103,9 +108,14 @@
 					out:fade={{ duration: 120 }}
 				>
 					<AddProfileView
-						onClose={() => (shell.importing = false)}
+						initialSource={shell.pendingImport}
+						onClose={() => {
+							shell.importing = false;
+							shell.pendingImport = '';
+						}}
 						onSuccess={() => {
 							shell.importing = false;
+							shell.pendingImport = '';
 							shell.goToTab('home');
 						}}
 					/>
@@ -150,15 +160,17 @@
 							/>
 						{:else if shell.currentTab === 'settings'}
 							<SettingsView
+								onClose={() =>
+									shell.goToTab(
+										shell.prevTab === 'settings' ? 'home' : shell.prevTab,
+									)}
 								onOpenBrightness={() => {
 									shell.brightnessOpen = true;
 									shell.goToTab('home');
 								}}
 							/>
 						{:else if shell.currentTab === 'rules'}
-							<RulesView
-								onChromeChange={(mode) => (shell.ruleChrome = mode)}
-							/>
+							<RulesView onChromeChange={(mode) => (shell.ruleChrome = mode)} />
 						{/if}
 					</div>
 				{/key}
@@ -166,7 +178,7 @@
 		</div>
 
 		<!-- Bottom Navigation Bar -->
-		{#if !shell.importing && (shell.currentTab !== 'rules' || shell.ruleChrome === 'default')}
+		{#if !shell.importing && shell.currentTab !== 'settings' && (shell.currentTab !== 'rules' || shell.ruleChrome === 'default')}
 			<BottomNav
 				currentTab={shell.currentTab}
 				{routingMode}
@@ -180,13 +192,6 @@
 		{/if}
 	</div>
 </main>
-
-{#if shell.pendingImport}<AdvancedTools
-		initialImport={shell.pendingImport}
-		onClose={() => {
-			shell.pendingImport = '';
-		}}
-	/>{/if}
 
 <style>
 	.demo-notice {
@@ -228,18 +233,10 @@
 			var(--radius-window-bottom) var(--radius-window-bottom);
 		transition: background-color 0.3s ease;
 	}
-	/* Trim text to cap height. Edge and WebView2 support the same geometry. */
-	.design-screen
-		:global(
-			:is(
-				.logo,
-				.title-text,
-				.sub-name,
-				.metric-label,
-				.metric-val,
-				.updated-time
-			)
-		),
+	/* Trim text to cap height. Edge and WebView2 support the same geometry.
+	   Ellipsis titles (.title-text, .sub-name) keep their line box: the clip
+	   would cut ascenders and descenders. */
+	.design-screen :global(:is(.logo, .metric-label, .metric-val, .updated-time)),
 	.design-screen :global(.server-text > span),
 	.design-screen :global(.action-pill > span) {
 		text-box-trim: trim-both;
@@ -275,8 +272,16 @@
 		backdrop-filter: none;
 	}
 
+	/* The brightness screen keeps the window header; everything else hides. */
 	.app-ui.brightness-hidden {
+		z-index: 40;
+		pointer-events: none;
+	}
+	.app-ui.brightness-hidden > :global(:not(.window-header)) {
 		visibility: hidden;
+	}
+	.app-ui.brightness-hidden > :global(.window-header) {
+		pointer-events: auto;
 	}
 
 	.view-content {
