@@ -63,21 +63,12 @@ pub fn backend() -> &'static dyn CoreBackend {
 
 pub type BackendSession = xray::XraySession;
 
+#[derive(Default)]
 pub struct Session {
     pub generation: u64,
     pub backend: BackendSession,
     #[cfg(windows)]
     pub system_proxy: Option<crate::platform::proxy::SystemProxy>,
-}
-impl Default for Session {
-    fn default() -> Self {
-        Self {
-            generation: 0,
-            backend: BackendSession::default(),
-            #[cfg(windows)]
-            system_proxy: None,
-        }
-    }
 }
 impl Session {
     pub(crate) fn rollback_repository(&self, repo: &Repository) -> Repository {

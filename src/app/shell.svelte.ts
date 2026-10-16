@@ -5,11 +5,7 @@ import { t } from '../lib/i18n';
 import { runtime } from '../lib/runtime';
 
 export type TabName =
-	| 'home'
-	| 'subscriptions'
-	| 'servers'
-	| 'settings'
-	| 'rules';
+	'home' | 'subscriptions' | 'servers' | 'settings' | 'rules';
 
 const tabOrder: Record<TabName, number> = {
 	home: 0,
