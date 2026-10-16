@@ -24,10 +24,10 @@ async fn reassert_routes(state: &AppState, generation: u64) -> bool {
     if session.started().is_none() || session.generation != generation {
         return false;
     }
-    let crate::core::BackendSession::Xray(xray) = &mut session.backend else {
+    let crate::engine::BackendSession::Xray(xray) = &mut session.backend else {
         return false;
     };
-    match crate::core::xray::reassert_routes(xray).await {
+    match crate::engine::xray::reassert_routes(xray).await {
         Ok(()) => {
             log::warn!("Tunnel routes reinstalled after Windows stopped selecting LumenTun");
             true

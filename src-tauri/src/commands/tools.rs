@@ -62,7 +62,7 @@ pub async fn restore_backup(
             .await
             .map_err(|_| BackendError::new("BACKUP_FAILED", "Backup operation failed"))??;
     if let Some(id) = &repo.selected_server_id {
-        crate::core::backend(repo.settings.core_engine)
+        crate::engine::backend(repo.settings.core_engine)
             .validate_runtime(&state, &repo, id)
             .await?;
     }
@@ -77,7 +77,7 @@ pub async fn restore_backup(
     state.latencies.write().await.clear();
     state.server_quality.write().await.clear();
     let _ = app.emit("catalog://changed", &catalog);
-    crate::update_tray_menu(&app, &state);
+    crate::app::tray::update_tray_menu(&app, &state);
     Ok(catalog)
 }
 #[tauri::command]

@@ -612,7 +612,7 @@ async fn apply_reload(
     })
     .await
     .map_err(|_| error())??;
-    if envelope.tunnel.repository.settings.core_engine != crate::core::CoreEngine::Xray {
+    if envelope.tunnel.repository.settings.core_engine != crate::engine::CoreEngine::Xray {
         return Err(BackendError::new(
             "CORE_ENGINE_UNSUPPORTED",
             "This helper session requires Xray Core",
@@ -633,10 +633,10 @@ async fn apply_reload(
     )?;
     let next = serde_json::to_vec(&config).map_err(|_| error())?;
     let runtime = resolve_resources()?;
-    let bundled = if envelope.tunnel.core_version == crate::xray::core::VERSION {
-        crate::xray::core::prepare_for_tunnel(&runtime, data)?
+    let bundled = if envelope.tunnel.core_version == crate::xray::bundle::VERSION {
+        crate::xray::bundle::prepare_for_tunnel(&runtime, data)?
     } else {
-        crate::xray::core::prepare(&runtime, data)?;
+        crate::xray::bundle::prepare(&runtime, data)?;
         crate::xray::updater::prepare(&envelope.tunnel.core_version, &data.join("core")).await?
     };
     crate::xray::geo::install_trusted_snapshot(data, envelope.geo, &geoip, &geosite)?;
@@ -699,7 +699,7 @@ async fn run_session(
     let assets_ready = worker_started.elapsed().as_millis() as u32;
     let request = envelope.tunnel;
     // The existing worker owns Xray only. Never interpret a native-engine request as Xray.
-    if request.repository.settings.core_engine != crate::core::CoreEngine::Xray {
+    if request.repository.settings.core_engine != crate::engine::CoreEngine::Xray {
         return Err(BackendError::new(
             "CORE_ENGINE_UNSUPPORTED",
             "This helper session requires Xray Core",
@@ -727,13 +727,13 @@ async fn run_session(
     let staging = super::staging::Directory::create()?;
     let data = tempfile::tempdir_in(staging.path()).map_err(|_| error())?;
     // The authenticated pipe supplies the Geo snapshot; avoid initializing bundled Geo here.
-    let bundled_core = if request.core_version == crate::xray::core::VERSION {
-        crate::xray::core::prepare_for_tunnel(&runtime, data.path())?
+    let bundled_core = if request.core_version == crate::xray::bundle::VERSION {
+        crate::xray::bundle::prepare_for_tunnel(&runtime, data.path())?
     } else {
         // Updated cores are still validated against a complete bundled fallback.
-        crate::xray::core::prepare(&runtime, data.path())?
+        crate::xray::bundle::prepare(&runtime, data.path())?
     };
-    let mut core = if request.core_version == crate::xray::core::VERSION {
+    let mut core = if request.core_version == crate::xray::bundle::VERSION {
         bundled_core
     } else {
         crate::xray::updater::prepare(&request.core_version, &data.path().join("core")).await?

@@ -202,7 +202,7 @@ pub fn build_user_agent() -> String {
     format!(
         "Lumen/{} Clash/1.19 Xray/{}",
         env!("CARGO_PKG_VERSION"),
-        crate::xray::core::VERSION
+        crate::xray::bundle::VERSION
     )
 }
 
@@ -647,7 +647,7 @@ mod tests {
     fn user_agent_contains_actual_versions() {
         let ua = build_user_agent();
         assert!(ua.starts_with(&format!("Lumen/{}", env!("CARGO_PKG_VERSION"))));
-        assert!(ua.contains(&format!("Xray/{}", crate::xray::core::VERSION)));
+        assert!(ua.contains(&format!("Xray/{}", crate::xray::bundle::VERSION)));
         assert!(ua.contains("Clash/1.19"));
     }
 }

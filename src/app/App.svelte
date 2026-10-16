@@ -1,62 +1,32 @@
 <script lang="ts">
-	import { onMount } from 'svelte';
-	import AdvancedTools from '../lib/features/settings/AdvancedTools.svelte';
-	let pendingImport = $state('');
 	import { fade } from 'svelte/transition';
 	import { screen, rise } from '../lib/motion';
-	import BackgroundShader from '../lib/components/BackgroundShader.svelte';
-	import WindowHeader from '../lib/components/WindowHeader.svelte';
-	import BottomNav from '../lib/components/BottomNav.svelte';
-	import ConnectionView from '../lib/features/connection/ConnectionView.svelte';
-	import EmptyHomeView from '../lib/features/connection/EmptyHomeView.svelte';
-	import BrightnessView from '../lib/features/connection/BrightnessView.svelte';
-	import SubscriptionsView from '../lib/features/subscriptions/SubscriptionsView.svelte';
-	import ServersView from '../lib/features/servers/ServersView.svelte';
-	import SettingsView from '../lib/features/settings/SettingsView.svelte';
-	import RulesView from '../lib/features/rules/RulesView.svelte';
-	import AddProfileView from '../lib/features/subscriptions/AddProfileView.svelte';
+	import AdvancedTools from '../features/settings/AdvancedTools.svelte';
+	import BackgroundShader from './chrome/BackgroundShader.svelte';
+	import WindowHeader from './chrome/WindowHeader.svelte';
+	import BottomNav from './chrome/BottomNav.svelte';
+	import ConnectionView from '../features/connection/ConnectionView.svelte';
+	import EmptyHomeView from '../features/connection/EmptyHomeView.svelte';
+	import BrightnessView from '../features/connection/BrightnessView.svelte';
+	import SubscriptionsView from '../features/subscriptions/SubscriptionsView.svelte';
+	import ServersView from '../features/servers/ServersView.svelte';
+	import SettingsView from '../features/settings/SettingsView.svelte';
+	import RulesView from '../features/rules/RulesView.svelte';
+	import AddProfileView from '../features/subscriptions/AddProfileView.svelte';
 	import { catalog, connection } from '../lib/services';
-	import { errorCode } from '../lib/services/errors';
 	import { t } from '../lib/i18n';
-	import { shaderSettings } from '../lib/stores/shaderSettings.svelte';
 	import { runtime } from '../lib/runtime';
-	import { APP_WIDTH, APP_HEIGHT } from '../lib/constants/app';
-	import { getCurrentWindow } from '@tauri-apps/api/window';
-	import { invoke } from '@tauri-apps/api/core';
-	import { LogicalSize } from '@tauri-apps/api/dpi';
-	import { listen } from '@tauri-apps/api/event';
-	import { nativeSettings, settingsReady } from '../lib/services/settings';
 	import { applicationUpdate } from '../lib/services/applicationUpdate';
-	import {
-		pingAllServers,
-		refreshAllSubscriptions,
-	} from '../lib/services/maintenance';
-	import { i18n } from '../lib/i18n';
+	import { shell } from './shell.svelte';
+	import { installLifecycle } from './lifecycle.svelte';
 
-	type TabName = 'home' | 'subscriptions' | 'servers' | 'settings' | 'rules';
-
-	const tabOrder: Record<TabName, number> = {
-		home: 0,
-		subscriptions: 1,
-		servers: 2,
-		rules: 3,
-		settings: 4,
-	};
+	installLifecycle();
 
 	const connectionStore = connection.state;
 	const catalogStore = catalog.state;
 	const persistenceError = catalog.persistenceError;
 	const applicationUpdateState = applicationUpdate.state;
 
-	// Local state
-	let currentTab = $state<TabName>('home');
-	let prevTab = $state<TabName>('home');
-	let importing = $state(false);
-	let actionError = $state('');
-	let ruleChrome = $state<'default' | 'selection' | 'picker'>('default');
-	let brightnessOpen = $state(false);
-
-	// Derived state
 	let connectionState = $derived($connectionStore.status);
 	let info = $derived($connectionStore.info);
 	let hasSubscriptions = $derived($catalogStore.subscriptions.length > 0);
@@ -77,267 +47,40 @@
 			(typeof selectedSubscription?.daysRemaining === 'number' &&
 				selectedSubscription.daysRemaining <= 0),
 	);
-
-	/** Resize the native window to the UI scale. In the browser, zoom the viewport instead. */
-	async function applyScale(scale: number) {
-		const w = Math.round(APP_WIDTH * scale);
-		const h = Math.round(APP_HEIGHT * scale);
-
-		document.documentElement.style.setProperty('--ui-zoom', String(scale));
-
-		if (runtime.isTauri) {
-			try {
-				await getCurrentWindow().setSize(new LogicalSize(w, h));
-			} catch (e) {
-				console.error('[scale] Failed to resize Tauri window:', e);
-			}
-		}
-	}
-
-	// Reactively resize whenever uiScale changes
-	$effect(() => {
-		void applyScale(shaderSettings.uiScale);
-	});
-
-	function notify(kind: 'disconnect' | 'reconnect' | 'expiry' | 'update') {
-		if (!runtime.isTauri) return Promise.resolve();
-		return invoke<void>('send_lumen_notification', {
-			kind,
-			language: i18n.currentLanguage,
-		});
-	}
-
-	async function startMaintenance() {
-		const ready = await Promise.allSettled([
-			settingsReady,
-			catalog.getServers(),
-		]);
-		if (ready.some((result) => result.status === 'rejected')) return;
-		if ($nativeSettings.pingPolicy === 'startup')
-			void pingAllServers().catch(() => {});
-		if ($nativeSettings.updateIntervalHours > 0)
-			void refreshAllSubscriptions().catch(() => {});
-	}
-
-	onMount(() => {
-		if (runtime.isTauri) {
-			void invoke('frontend_ready').catch(() => {});
-		}
-		void connection.initialize();
-		if (runtime.isTauri) {
-			void startMaintenance();
-		}
-		void applicationUpdate.check({ silent: true });
-
-		const handleContextMenu = (e: MouseEvent) => {
-			e.preventDefault();
-		};
-		const handleKeyDown = (e: KeyboardEvent) => {
-			if (e.key === 'Tab') {
-				e.preventDefault();
-			}
-		};
-		window.addEventListener('contextmenu', handleContextMenu);
-		window.addEventListener('keydown', handleKeyDown);
-
-		let unlistenNavigate: (() => void) | undefined;
-		if (runtime.isTauri) {
-			listen('navigate:settings', () => {
-				goToTab('settings');
-			}).then((unlisten) => {
-				unlistenNavigate = unlisten;
-			});
-		}
-
-		return () => {
-			window.removeEventListener('contextmenu', handleContextMenu);
-			window.removeEventListener('keydown', handleKeyDown);
-			unlistenNavigate?.();
-		};
-	});
-
-	$effect(() => {
-		const hours = $nativeSettings.updateIntervalHours ?? 24;
-		if (hours <= 0) return;
-		const timer = setInterval(
-			() => {
-				void refreshAllSubscriptions().catch(() => {});
-			},
-			hours * 3600 * 1000,
-		);
-		return () => {
-			clearInterval(timer);
-		};
-	});
-
-	$effect(() => {
-		if (
-			runtime.isTauri &&
-			currentTab === 'servers' &&
-			$nativeSettings.pingPolicy === 'list'
-		) {
-			void pingAllServers().catch(() => {});
-		}
-	});
-
-	let wasConnected = false;
-	let interrupted = false;
-	$effect(() => {
-		const status = $connectionStore.status;
-		if (status === 'connected') {
-			if (interrupted) void notify('reconnect').catch(() => {});
-			wasConnected = true;
-			interrupted = false;
-		} else if (status === 'error' && wasConnected) {
-			wasConnected = false;
-			interrupted = true;
-			void notify('disconnect').catch(() => {});
-		} else if (status === 'disconnected') {
-			wasConnected = false;
-			interrupted = false;
-		}
-	});
-
-	$effect(() => {
-		const version = $applicationUpdateState.version;
-		if (!runtime.isTauri || !$nativeSettings.notifyUpdate || !version) return;
-		const key = `lumen-update-notified-${version}`;
-		if (localStorage.getItem(key)) return;
-		localStorage.setItem(key, '1');
-		void notify('update').catch(() => localStorage.removeItem(key));
-	});
-
-	$effect(() => {
-		if (!runtime.isTauri || !$nativeSettings.notifyExpiry) return;
-		const marked: string[] = [];
-		for (const subscription of $catalogStore.subscriptions) {
-			if (typeof subscription.daysRemaining !== 'number') continue;
-			const key = `lumen-expiry-notified-${subscription.id}`;
-			if (subscription.daysRemaining > 7) {
-				localStorage.removeItem(key);
-				continue;
-			}
-			if (localStorage.getItem(key)) continue;
-			localStorage.setItem(key, '1');
-			marked.push(key);
-		}
-		if (marked.length)
-			void notify('expiry').catch(() => {
-				for (const key of marked) localStorage.removeItem(key);
-			});
-	});
-
-	// Action handlers
-	const toggleConnection = () => {
-		connection.toggle($catalogStore.selectedServerId);
-	};
-
-	async function chooseServer(server: { id: string }) {
-		if ($connectionStore.busy) return;
-		const wasActive =
-			connectionState === 'connected' || connectionState === 'connecting';
-		try {
-			if (wasActive) {
-				if ($connectionStore.info?.serverId !== server.id) {
-					await connection.switchServer(server.id);
-				}
-				if (
-					!runtime.isTauri &&
-					$connectionStore.status === 'connected' &&
-					$connectionStore.info?.serverId === server.id
-				) {
-					// The native backend persists successful switches; the demo uses local storage.
-					await catalog.selectServer(server.id);
-				}
-			} else {
-				await catalog.selectServer(server.id);
-			}
-			goToTab('home');
-		} catch (e) {
-			actionError = t('errors.' + errorCode(e));
-		}
-	}
-
-	async function changeMode(mode: 'global' | 'rules') {
-		// The backend orders this after an in-flight connection; the button
-		// reflects the new mode immediately.
-		try {
-			await catalog.setRoutingMode(mode);
-		} catch (e) {
-			actionError = t('errors.' + errorCode(e));
-		}
-	}
-
-	function goToTab(tab: TabName) {
-		if (tab === currentTab) return;
-		prevTab = currentTab;
-		currentTab = tab;
-		if (tab !== 'rules') {
-			ruleChrome = 'default';
-		}
-	}
-
-	// Direction: +1 = slide right→left (going deeper), -1 = slide left→right (going back)
-	function getDir(to: string, from: string) {
-		return (tabOrder[to as TabName] ?? 0) > (tabOrder[from as TabName] ?? 0)
-			? 1
-			: -1;
-	}
-	onMount(() => {
-		if (!runtime.isTauri) return;
-		let disposed = false;
-		let unlisten: (() => void) | undefined;
-		const read = async () => {
-			const value = await invoke<string | null>('take_import_link');
-			if (!disposed && value) pendingImport = value;
-		};
-		void listen('import://pending', () => {
-			void read().catch(() => {});
-		})
-			.then((off) => {
-				if (disposed) {
-					off();
-					return;
-				}
-				unlisten = off;
-				return read();
-			})
-			.catch(() => {});
-		return () => {
-			disposed = true;
-			unlisten?.();
-		};
-	});
 </script>
 
 <main class="app-viewport">
 	<!-- Native WebGL2 Background Fluid Light Shader -->
 	<BackgroundShader active={connectionState === 'connected'} />
 
-	{#if brightnessOpen}
+	{#if shell.brightnessOpen}
 		<BrightnessView
 			{connectionState}
-			onClose={() => (brightnessOpen = false)}
+			onClose={() => (shell.brightnessOpen = false)}
 		/>
 	{/if}
 
 	<div
 		class="app-ui"
-		class:brightness-hidden={brightnessOpen}
-		class:design-screen={currentTab !== 'settings' || importing}
-		class:dim-backdrop={currentTab !== 'home' || !hasSubscriptions || importing}
+		class:brightness-hidden={shell.brightnessOpen}
+		class:design-screen={shell.currentTab !== 'settings' || shell.importing}
+		class:dim-backdrop={shell.currentTab !== 'home' ||
+			!hasSubscriptions ||
+			shell.importing}
 	>
 		<!-- Top Desktop Window Bar -->
 		<WindowHeader
 			title="Lumen"
-			showQuickActions={(currentTab === 'home' &&
+			showQuickActions={(shell.currentTab === 'home' &&
 				hasSubscriptions &&
-				!importing) ||
-				currentTab === 'settings'}
-			darkSurface={currentTab !== 'home' || !hasSubscriptions || importing}
-			isSettingsOpen={currentTab === 'settings'}
+				!shell.importing) ||
+				shell.currentTab === 'settings'}
+			darkSurface={shell.currentTab !== 'home' ||
+				!hasSubscriptions ||
+				shell.importing}
+			isSettingsOpen={shell.currentTab === 'settings'}
 			onOpenSettings={() => {
-				goToTab(currentTab === 'settings' ? 'home' : 'settings');
+				shell.goToTab(shell.currentTab === 'settings' ? 'home' : 'settings');
 			}}
 		/>
 
@@ -347,36 +90,36 @@
 			<p role="alert" transition:rise>{t('errors.storage')}</p>
 		{/if}
 
-		{#if actionError}
-			<p role="alert" transition:rise>{actionError}</p>
+		{#if shell.actionError}
+			<p role="alert" transition:rise>{shell.actionError}</p>
 		{/if}
 
 		<!-- Tab Views with directional fly transitions -->
 		<div class="view-content">
-			{#if importing}
+			{#if shell.importing}
 				<div
 					class="tab-view"
 					in:screen={{ dir: 1 }}
 					out:fade={{ duration: 120 }}
 				>
 					<AddProfileView
-						onClose={() => (importing = false)}
+						onClose={() => (shell.importing = false)}
 						onSuccess={() => {
-							importing = false;
-							goToTab('home');
+							shell.importing = false;
+							shell.goToTab('home');
 						}}
 					/>
 				</div>
 			{:else}
-				{#key currentTab}
+				{#key shell.currentTab}
 					<div
 						class="tab-view"
 						in:screen|global={{
-							dir: getDir(currentTab, prevTab),
+							dir: shell.direction(shell.currentTab, shell.prevTab),
 						}}
 						out:fade|global={{ duration: 120 }}
 					>
-						{#if currentTab === 'home'}
+						{#if shell.currentTab === 'home'}
 							{#if !hasSubscriptions}
 								<EmptyHomeView />
 							{:else}
@@ -388,32 +131,34 @@
 									busy={$connectionStore.busy}
 									error={$connectionStore.error}
 									onRetry={() => connection.initialize()}
-									onToggle={toggleConnection}
-									onSelectServer={() => goToTab('servers')}
+									onToggle={shell.toggleConnection}
+									onSelectServer={() => shell.goToTab('servers')}
 									updateVersion={$applicationUpdateState.version}
 									updating={$applicationUpdateState.status === 'downloading'}
 									onInstallUpdate={() => void applicationUpdate.install()}
 									{subscriptionExpired}
 								/>
 							{/if}
-						{:else if currentTab === 'subscriptions'}
+						{:else if shell.currentTab === 'subscriptions'}
 							<SubscriptionsView />
-						{:else if currentTab === 'servers'}
+						{:else if shell.currentTab === 'servers'}
 							<ServersView
 								selectedId={$catalogStore.selectedServerId ?? ''}
 								disabled={$connectionStore.busy}
-								onSelect={chooseServer}
-								onManageSubscription={() => goToTab('subscriptions')}
+								onSelect={shell.chooseServer}
+								onManageSubscription={() => shell.goToTab('subscriptions')}
 							/>
-						{:else if currentTab === 'settings'}
+						{:else if shell.currentTab === 'settings'}
 							<SettingsView
 								onOpenBrightness={() => {
-									brightnessOpen = true;
-									goToTab('home');
+									shell.brightnessOpen = true;
+									shell.goToTab('home');
 								}}
 							/>
-						{:else if currentTab === 'rules'}
-							<RulesView onChromeChange={(mode) => (ruleChrome = mode)} />
+						{:else if shell.currentTab === 'rules'}
+							<RulesView
+								onChromeChange={(mode) => (shell.ruleChrome = mode)}
+							/>
 						{/if}
 					</div>
 				{/key}
@@ -421,25 +166,25 @@
 		</div>
 
 		<!-- Bottom Navigation Bar -->
-		{#if !importing && (currentTab !== 'rules' || ruleChrome === 'default')}
+		{#if !shell.importing && (shell.currentTab !== 'rules' || shell.ruleChrome === 'default')}
 			<BottomNav
-				{currentTab}
+				currentTab={shell.currentTab}
 				{routingMode}
 				{hasSubscriptions}
-				showAdd={currentTab === 'subscriptions' ||
-					(currentTab === 'home' && subscriptionExpired)}
-				onTabChange={goToTab}
-				onModeChange={changeMode}
-				onActionClick={() => (importing = true)}
+				showAdd={shell.currentTab === 'subscriptions' ||
+					(shell.currentTab === 'home' && subscriptionExpired)}
+				onTabChange={shell.goToTab}
+				onModeChange={shell.changeMode}
+				onActionClick={() => (shell.importing = true)}
 			/>
 		{/if}
 	</div>
 </main>
 
-{#if pendingImport}<AdvancedTools
-		initialImport={pendingImport}
+{#if shell.pendingImport}<AdvancedTools
+		initialImport={shell.pendingImport}
 		onClose={() => {
-			pendingImport = '';
+			shell.pendingImport = '';
 		}}
 	/>{/if}
 

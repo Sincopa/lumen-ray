@@ -20,7 +20,7 @@ pub struct CoreProcess {
     handle: OwnedHandle,
     pid: u32,
     _job: super::windows::ProcessJob,
-    _logs: Option<crate::diagnostics::CoreLogs>,
+    _logs: Option<crate::xray::logs::CoreLogs>,
 }
 fn error() -> BackendError {
     BackendError::new("CORE_START_FAILED", "Could not launch managed Xray process")
@@ -95,11 +95,11 @@ impl CoreProcess {
     pub fn diagnostic_category(&self) -> Option<&'static str> {
         self._logs
             .as_ref()
-            .and_then(crate::diagnostics::CoreLogs::last_category)
+            .and_then(crate::xray::logs::CoreLogs::last_category)
     }
     pub async fn spawn(core: &Path, config: &[u8]) -> Result<Self> {
         let (mut process, input, output) = Self::launch(core)?;
-        process._logs = Some(crate::diagnostics::CoreLogs::from_reader(
+        process._logs = Some(crate::xray::logs::CoreLogs::from_reader(
             tokio::fs::File::from_std(output),
         ));
         let mut input = tokio::fs::File::from_std(input);
@@ -117,7 +117,7 @@ impl CoreProcess {
             .filter(|(key, _)| {
                 let k = key.to_string_lossy();
                 !k.eq_ignore_ascii_case("XRAY_LOCATION_ASSET")
-                    && !crate::core::xray::GO_RUNTIME_ENV
+                    && !crate::engine::xray::GO_RUNTIME_ENV
                         .iter()
                         .any(|(name, _)| k.eq_ignore_ascii_case(name))
             })
@@ -127,7 +127,7 @@ impl CoreProcess {
             crate::xray::geo::assets_for_core(core).into_os_string(),
         ));
         vars.extend(
-            crate::core::xray::GO_RUNTIME_ENV
+            crate::engine::xray::GO_RUNTIME_ENV
                 .iter()
                 .map(|(name, value)| (name.into(), value.into())),
         );
@@ -243,7 +243,7 @@ impl CoreProcess {
         let executable = std::env::current_exe()?;
         let result = tokio::time::timeout(
             Duration::from_secs(2),
-            crate::core::xray::command(&executable)
+            crate::engine::xray::command(&executable)
                 .args(["--lumen-signal", &self.pid.to_string()])
                 .stdout(std::process::Stdio::null())
                 .stderr(std::process::Stdio::null())

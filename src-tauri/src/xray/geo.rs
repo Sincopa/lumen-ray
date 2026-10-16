@@ -517,7 +517,7 @@ mod tests {
     fn bundled_and_updated_assets_are_verified_and_resolved_from_same_generation() {
         let data = tempfile::tempdir().unwrap();
         let rt = runtime();
-        let core = crate::xray::core::prepare(&rt, data.path()).unwrap();
+        let core = crate::xray::bundle::prepare(&rt, data.path()).unwrap();
         assert_eq!(assets_for_core(&core), active_dir(data.path()).unwrap());
         let (meta, ip, site) = snapshot(data.path()).unwrap();
         install_snapshot(data.path(), &core, meta, &ip, &site).unwrap();

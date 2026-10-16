@@ -14,7 +14,7 @@ fn private_geo_video_check() {
         .expect("Select a server first");
     let resources = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("resources/core");
     let isolated = tempfile::tempdir().unwrap();
-    let core = core::prepare(&resources, isolated.path()).unwrap();
+    let core = bundle::prepare(&resources, isolated.path()).unwrap();
     for mode in ["baseline-rules", "global", "fixed-rules"] {
         let mut repo = saved.clone();
         repo.routing_mode = if mode == "global" { "global" } else { "rules" }.into();
@@ -106,7 +106,7 @@ async fn private_subscription_config_validation() {
         diagnostic_count
     );
     let directory = tempfile::tempdir().unwrap();
-    let core = core::prepare(
+    let core = bundle::prepare(
         std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("resources/core"),
         directory.path(),
     )
@@ -120,9 +120,9 @@ async fn private_subscription_config_validation() {
         let bytes =
             serde_json::to_vec(&config::build(&repo, &node.id, 10808, 10809, false).unwrap())
                 .unwrap();
-        if let Err(error) = crate::core::xray::validate(&core, &bytes).await {
+        if let Err(error) = crate::engine::xray::validate(&core, &bytes).await {
             use tokio::io::AsyncWriteExt;
-            let mut child = crate::core::xray::command(&core)
+            let mut child = crate::engine::xray::command(&core)
                 .args(["run", "-test", "-config", "stdin:"])
                 .stdin(std::process::Stdio::piped())
                 .stdout(std::process::Stdio::piped())
@@ -180,7 +180,7 @@ async fn private_proxy_traffic_smoke() {
     let body = client.fetch(source.trim()).await.unwrap();
     let parsed = parser::parse(&body, "smoke").unwrap();
     let directory = tempfile::tempdir().unwrap();
-    let core = core::prepare(
+    let core = bundle::prepare(
         std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("resources/core"),
         directory.path(),
     )
@@ -208,13 +208,13 @@ async fn private_proxy_traffic_smoke() {
         let bytes =
             serde_json::to_vec(&config::build(&repo, &node.id, proxy, metrics, false).unwrap())
                 .unwrap();
-        crate::core::xray::validate(&core, &bytes).await.unwrap();
-        let mut session = crate::core::xray::XraySession::default();
-        let result = crate::core::xray::start(&core, &mut session, &bytes, proxy, metrics).await;
+        crate::engine::xray::validate(&core, &bytes).await.unwrap();
+        let mut session = crate::engine::xray::XraySession::default();
+        let result = crate::engine::xray::start(&core, &mut session, &bytes, proxy, metrics).await;
         if result.is_ok() {
             let second = vpn_service::public_ip(proxy).await;
-            let counters = crate::core::xray::counters(&client, metrics).await;
-            crate::core::xray::stop(&mut session).await.unwrap();
+            let counters = crate::engine::xray::counters(&client, metrics).await;
+            crate::engine::xray::stop(&mut session).await.unwrap();
             assert!(second.is_ok());
             let (up, down) = counters.unwrap();
             assert!(up > 0 && down > 0);
@@ -227,7 +227,7 @@ async fn private_proxy_traffic_smoke() {
             connected = true;
             break;
         }
-        crate::core::xray::stop(&mut session).await.unwrap();
+        crate::engine::xray::stop(&mut session).await.unwrap();
         eprintln!("Node {index}: unreachable (credentials redacted)");
     }
     assert!(
@@ -242,14 +242,14 @@ async fn private_proxy_traffic_smoke() {
 fn tunnel_asset_staging_benchmark() {
     let resources = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("resources/core");
     let source = tempfile::tempdir().unwrap();
-    core::prepare(&resources, source.path()).unwrap();
+    bundle::prepare(&resources, source.path()).unwrap();
     let (metadata, geoip, geosite) = crate::xray::geo::snapshot(source.path()).unwrap();
     for _ in 0..3 {
         let target = tempfile::tempdir().unwrap();
         let started = std::time::Instant::now();
         crate::xray::geo::ensure_initialized(&resources, target.path()).unwrap();
         let geo_initialized = started.elapsed().as_millis();
-        core::prepare(&resources, target.path()).unwrap();
+        bundle::prepare(&resources, target.path()).unwrap();
         let prepared = started.elapsed().as_millis();
         crate::xray::geo::install_trusted_snapshot(
             target.path(),
@@ -267,7 +267,7 @@ fn tunnel_asset_staging_benchmark() {
 
         let fast = tempfile::tempdir().unwrap();
         let fast_started = std::time::Instant::now();
-        let executable = core::prepare_for_tunnel(&resources, fast.path()).unwrap();
+        let executable = bundle::prepare_for_tunnel(&resources, fast.path()).unwrap();
         let fast_core = fast_started.elapsed().as_millis();
         assert!(executable.is_file());
         assert!(executable.parent().unwrap().join("wintun.dll").is_file());

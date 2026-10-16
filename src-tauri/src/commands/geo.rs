@@ -39,7 +39,7 @@ pub async fn update_geo_databases(
         let repo = state.repository.read().await.clone();
         if let Some(id) = &repo.selected_server_id {
             let config = crate::xray::config::build(&repo, id, 10808, 10809, false)?;
-            crate::core::xray::validate(
+            crate::engine::xray::validate(
                 &core,
                 &serde_json::to_vec(&config)
                     .map_err(|_| crate::domain::errors::BackendError::invalid())?,

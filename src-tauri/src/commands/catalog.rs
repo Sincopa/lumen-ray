@@ -26,7 +26,7 @@ async fn restore_catalog_if_unchanged(
         *state.repository.write().await = before.clone();
         let catalog = service::snapshot(before, &*state.latencies.read().await);
         let _ = app.emit("catalog://changed", catalog);
-        crate::update_tray_menu(app, state);
+        crate::app::tray::update_tray_menu(app, state);
     }
     Ok(())
 }
@@ -76,7 +76,7 @@ pub async fn apply_mutation(
     };
     let value = service::mutate(state, mutation).await?;
     disconnect_removed_server(state, app).await?;
-    crate::update_tray_menu(app, state);
+    crate::app::tray::update_tray_menu(app, state);
     let id = if reconnect {
         state
             .snapshot
@@ -93,8 +93,8 @@ pub async fn apply_mutation(
         if let Some(before) = previous.as_ref() {
             let after = state.repository.read().await.clone();
             match crate::services::vpn_service::apply_live_rules(state, &id, before, &after).await {
-                Ok(crate::core::LiveRoutingStatus::Applied) => return Ok(value),
-                Ok(crate::core::LiveRoutingStatus::NeedsConnect) => {
+                Ok(crate::engine::LiveRoutingStatus::Applied) => return Ok(value),
+                Ok(crate::engine::LiveRoutingStatus::NeedsConnect) => {
                     let still_connected = state
                         .snapshot
                         .read()
@@ -111,7 +111,7 @@ pub async fn apply_mutation(
                     }
                     // The core is down or the tunnel mode changed. Reconnect.
                 }
-                Ok(crate::core::LiveRoutingStatus::KeepTunnel) => {
+                Ok(crate::engine::LiveRoutingStatus::KeepTunnel) => {
                     log::warn!("Routing change kept the running tunnel");
                     rollback_live_routing(state, app, previous.as_ref(), &after).await?;
                     return Err(BackendError::new(
@@ -179,7 +179,7 @@ async fn publish_routing_if_changed(
     }
     #[cfg(windows)]
     match crate::services::vpn_service::apply_live_rules(state, &id, before, after).await {
-        Ok(crate::core::LiveRoutingStatus::Applied) => {
+        Ok(crate::engine::LiveRoutingStatus::Applied) => {
             log::info!("Applied subscription routing without reconnecting");
         }
         Ok(_) => log::warn!("Subscription routing is saved. Reconnect to apply it"),
@@ -206,7 +206,7 @@ pub async fn import_subscription(
     let result = service::apply_import(&state, prepared).await?;
     let after = state.repository.read().await.clone();
     publish_routing_if_changed(state.inner(), &before, &after).await;
-    crate::update_tray_menu(&app, &state);
+    crate::app::tray::update_tray_menu(&app, &state);
     let warm_state = state.inner().clone();
     tauri::async_runtime::spawn(async move {
         crate::services::vpn_service::prewarm(&warm_state).await;
@@ -280,7 +280,7 @@ pub async fn refresh_subscription(
         publish_routing_if_changed(state.inner(), &before, &after).await;
     }
     disconnect_removed_server(&state, &app).await?;
-    crate::update_tray_menu(&app, &state);
+    crate::app::tray::update_tray_menu(&app, &state);
     let warm_state = state.inner().clone();
     tauri::async_runtime::spawn(async move {
         crate::services::vpn_service::prewarm(&warm_state).await;

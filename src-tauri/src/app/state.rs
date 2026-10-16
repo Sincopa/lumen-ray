@@ -78,7 +78,7 @@ impl AppState {
         }
         #[cfg(windows)]
         crate::platform::proxy::SystemProxy::recover(&data)?;
-        let core = crate::xray::core::prepare(resources.into(), &data)?;
+        let core = crate::xray::bundle::prepare(resources.into(), &data)?;
         let device_identity = Arc::new(
             crate::platform::device_identity::DeviceIdentityManager::new(
                 data.join("identity.dpapi"),
