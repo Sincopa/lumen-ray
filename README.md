@@ -7,11 +7,19 @@ Windows app for a VPN or proxy subscription you already have.
 ## Screenshots
 
 <p align="center">
+  <a href="docs/screenshots/empty.png"><img src="docs/screenshots/empty.png" width="195" alt="No subscription yet: paste a link" /></a>
   <a href="docs/screenshots/home.png"><img src="docs/screenshots/home.png" width="195" alt="Home" /></a>
+  <a href="docs/screenshots/connected.png"><img src="docs/screenshots/connected.png" width="195" alt="Connected" /></a>
   <a href="docs/screenshots/servers.png"><img src="docs/screenshots/servers.png" width="195" alt="Servers" /></a>
+</p>
+<p align="center">
   <a href="docs/screenshots/subscriptions.png"><img src="docs/screenshots/subscriptions.png" width="195" alt="Subscriptions" /></a>
   <a href="docs/screenshots/rules.png"><img src="docs/screenshots/rules.png" width="195" alt="Rules" /></a>
+  <a href="docs/screenshots/settings.png"><img src="docs/screenshots/settings.png" width="195" alt="Settings" /></a>
+  <a href="docs/screenshots/settings-network.png"><img src="docs/screenshots/settings-network.png" width="195" alt="Network settings" /></a>
 </p>
+
+No subscription yet, home, connected and servers; then subscriptions, rules and settings.
 
 ## Start
 
