@@ -51,8 +51,6 @@ src-tauri/resources/core/*.dll
 .vscode/*
 !.vscode/extensions.json
 .idea/
-.cursor/
-.claude/
 .DS_Store
 Thumbs.db
 ehthumbs.db
@@ -69,6 +67,3 @@ installers/
 
 # Local development utilities
 scripts/
-tests/
-playwright.config.ts
-vitest.config.ts

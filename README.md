@@ -2,7 +2,7 @@
 
 Windows app for a VPN or proxy subscription you already have.
 
-**[Download for Windows x64](https://github.com/Sincopa/lumen-ray/releases/latest)** · [Report a bug](https://github.com/Sincopa/lumen-ray/issues) · [Apache 2.0](LICENSE)
+**[Download for Windows x64](https://github.com/Sincopa/lumen-ray/releases/latest)** · [Report a bug](https://github.com/Sincopa/lumen-ray/issues) · [Proprietary (All Rights Reserved)](LICENSE)
 
 ## Screenshots
 
@@ -52,4 +52,4 @@ npm run tauri:dev
 
 `npm run build:release` writes the installer and the portable ZIP to `release/`.
 
-Apache 2.0. Xray, Wintun, and the fonts keep their own license files in the repository.
+Proprietary, All Rights Reserved. See [LICENSE](LICENSE). Xray, Wintun, and the fonts keep their own license files in the repository.

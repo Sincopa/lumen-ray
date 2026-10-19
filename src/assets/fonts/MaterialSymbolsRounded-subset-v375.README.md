@@ -1,9 +1,0 @@
-Material Symbols Rounded, Google Fonts v375, subset of the icons used by Lumen.
-
-Source: https://developers.google.com/fonts/docs/material_symbols
-License: Apache License 2.0 (see the repository LICENSE).
-SHA-256: 4a04600e825122d617b6702836855e2547d249a80fab314e1981c0308ca95939
-
-Included ligatures: alt_route, auto_awesome, block, check, content_copy,
-description, expand_less, expand_more, home, info, pin_drop, public, shield,
-sync_alt, travel_explore, tune, vpn_lock.

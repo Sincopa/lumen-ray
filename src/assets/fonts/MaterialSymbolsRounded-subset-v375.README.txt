@@ -1,7 +1,7 @@
 Material Symbols Rounded, Google Fonts v375, subset of the icons used by Lumen.
 
 Source: https://developers.google.com/fonts/docs/material_symbols
-License: Apache License 2.0 (see the repository LICENSE).
+License: Apache License 2.0 (https://www.apache.org/licenses/LICENSE-2.0).
 SHA-256: 4a04600e825122d617b6702836855e2547d249a80fab314e1981c0308ca95939
 
 Included ligatures: alt_route, auto_awesome, block, check, content_copy,

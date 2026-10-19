@@ -19,12 +19,12 @@
 	let name = $state('');
 	let source = $state('');
 
+	// The field shows an https:// prefix, so it is left out of the value.
+	const stripHttps = (value: string) => value.replace(/^\s*https:\/\//i, '');
+
 	$effect(() => {
 		if (!initialSource) return;
-		// The field shows an https:// prefix, so it is left out of the value.
-		const rest = initialSource.replace(/^https:\/\//, '');
-		source =
-			rest !== initialSource && rest.includes('/') ? rest : initialSource;
+		source = stripHttps(initialSource);
 	});
 	let error = $state('');
 	let busy = $state(false);
@@ -46,8 +46,7 @@
 			!cleanSource.startsWith('[') &&
 			!cleanSource.includes('proxies:') &&
 			cleanSource.includes('.') &&
-			cleanSource.includes('/') &&
-			!cleanSource.includes(' ')
+			!/\s/.test(cleanSource)
 		) {
 			cleanSource = `https://${cleanSource}`;
 		}
@@ -96,7 +95,10 @@
 			placeholder={t('subscriptions.domainLinkPlaceholder')}
 			bind:value={source}
 			invalid={!!error}
-			oninput={() => (error = '')}
+			oninput={() => {
+				source = stripHttps(source);
+				error = '';
+			}}
 		/>
 		{#if error}
 			<p class="error-msg" role="alert">{error}</p>

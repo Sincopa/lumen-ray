@@ -1,6 +1,13 @@
 //! Startup diagnostics must work before Tauri (and therefore WebView2) starts.
-//! Reports contain categories only: never subscriptions, arguments or panic payloads.
+//! Reports contain categories only: never subscriptions or arguments. Panic
+//! messages are included only after `redact_panic_message` strips URLs,
+//! addresses and long tokens.
 use std::sync::atomic::{AtomicBool, Ordering};
+
+/// Set once the UI has loaded: later panics are runtime failures, not startup ones.
+static LAUNCHED: AtomicBool = AtomicBool::new(false);
+/// A panicking loop must not stack up dialogs.
+static PANIC_REPORTED: AtomicBool = AtomicBool::new(false);
 use std::{
     io::Write,
     path::{Path, PathBuf},
@@ -13,6 +20,7 @@ pub struct FrontendReadiness(AtomicBool);
 #[tauri::command]
 pub fn frontend_ready(readiness: tauri::State<'_, FrontendReadiness>) {
     if !readiness.0.swap(true, Ordering::SeqCst) {
+        LAUNCHED.store(true, Ordering::SeqCst);
         record("FRONTEND_READY");
     }
 }
@@ -128,18 +136,18 @@ pub fn report(failure: Failure) {
     if download {
         message.push_str("\n\nОткрыть страницу загрузки WebView2 на сайте Microsoft?");
     }
-    show_dialog(&message, download);
+    show_dialog("Lumen — ошибка запуска", &message, download);
 }
 
 #[cfg(windows)]
-fn show_dialog(message: &str, download: bool) {
+fn show_dialog(title: &str, message: &str, download: bool) {
     use windows_sys::Win32::UI::{
         Shell::ShellExecuteW,
         WindowsAndMessaging::{MessageBoxW, IDYES, MB_ICONERROR, MB_OK, MB_YESNO},
     };
     let wide = |value: &str| value.encode_utf16().chain(Some(0)).collect::<Vec<_>>();
     let body = wide(message);
-    let title = wide("Lumen — ошибка запуска");
+    let title = wide(title);
     // A native Windows dialog works even when no WebView2 or Tauri window exists.
     let result = unsafe {
         MessageBoxW(
@@ -166,24 +174,94 @@ fn show_dialog(message: &str, download: bool) {
 }
 
 #[cfg(not(windows))]
-fn show_dialog(message: &str, _download: bool) {
-    eprintln!("{message}");
+fn show_dialog(title: &str, message: &str, _download: bool) {
+    eprintln!("{title}\n{message}");
+}
+
+/// Keeps the words of a panic message that cannot carry user data. A panic
+/// payload may embed a subscription URL, server address or key, so URLs,
+/// anything with `@`, and long tokens (UUIDs, keys, base64) are replaced.
+pub fn redact_panic_message(message: &str) -> String {
+    let mut text = message
+        .split_whitespace()
+        .map(|word| {
+            if word.contains("://") || word.contains('@') || word.chars().count() > 32 {
+                "[скрыто]"
+            } else {
+                word
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(" ");
+    if let Some((cut, _)) = text.char_indices().nth(200) {
+        text.truncate(cut);
+        text.push('…');
+    }
+    text
 }
 
 pub fn install_panic_handler() {
     std::panic::set_hook(Box::new(|info| {
-        // The payload may contain a subscription URL or credentials. Do not log it.
-        if let Some(location) = info.location() {
-            record(&format!(
-                "APPLICATION_PANIC source={} line={}",
+        let place = info.location().map(|location| {
+            format!(
+                "{}:{}",
                 Path::new(location.file())
                     .file_name()
                     .unwrap_or_default()
                     .to_string_lossy(),
                 location.line(),
-            ));
+            )
+        });
+        let reason = info
+            .payload_as_str()
+            .map(redact_panic_message)
+            .filter(|reason| !reason.is_empty());
+        let thread = std::thread::current()
+            .name()
+            .unwrap_or("unnamed")
+            .to_owned();
+        let launched = LAUNCHED.load(Ordering::SeqCst);
+        let path = record(&format!(
+            "APPLICATION_PANIC phase={} source={} thread={thread} reason={}",
+            if launched { "runtime" } else { "startup" },
+            place.as_deref().unwrap_or("unknown"),
+            reason.as_deref().unwrap_or("unknown"),
+        ));
+        if PANIC_REPORTED.swap(true, Ordering::SeqCst) {
+            return;
         }
-        report(classify("APPLICATION_PANIC"));
+        let mut details = format!("Место: {}", place.as_deref().unwrap_or("неизвестно"));
+        if let Some(reason) = &reason {
+            details.push_str(&format!("\nПричина: {reason}"));
+        }
+        let log = path
+            .map(|path| format!("\n\nЖурнал: {}", path.display()))
+            .unwrap_or_default();
+        let (title, message) = if launched {
+            (
+                "Lumen — внутренняя ошибка",
+                format!(
+                    "Lumen работает, но его фоновая служба остановилась из-за ошибки в программе.\nКод: APPLICATION_PANIC\n{details}\n\nVPN может перестать пропускать трафик или переподключаться. Отключите VPN и перезапустите Lumen. Отправьте этот текст и журнал разработчику.{log}"
+                ),
+            )
+        } else {
+            (
+                "Lumen — ошибка запуска",
+                format!(
+                    "Lumen не удалось запустить.\nКод: APPLICATION_PANIC\n{details}\n\n{}{log}",
+                    classify("APPLICATION_PANIC").advice,
+                ),
+            )
+        };
+        if launched {
+            // The panicking thread may be an async worker: a modal dialog on it
+            // would stall unrelated tasks until the user presses OK.
+            let _ = std::thread::Builder::new()
+                .name("lumen-panic-dialog".into())
+                .spawn(move || show_dialog(title, &message, false));
+        } else {
+            show_dialog(title, &message, false);
+        }
     }));
 }
 
@@ -239,6 +317,21 @@ mod tests {
         assert_eq!(failure.code, "INITIALIZATION_FAILED");
         assert!(!failure.advice.contains("secret.example"));
         assert!(!failure.advice.contains("password"));
+    }
+
+    #[test]
+    fn panic_messages_keep_the_reason_but_not_user_data() {
+        assert_eq!(
+            redact_panic_message("overflow when subtracting duration from instant"),
+            "overflow when subtracting duration from instant"
+        );
+        let redacted = redact_panic_message(
+            "bad node vless://0b1c2d3e-4f50-6172-8394-a5b6c7d8e9f0@vpn.example:443 key=QUJDREVGR0hJSktMTU5PUFFSU1RVVldYWVo0123456789",
+        );
+        assert!(redacted.starts_with("bad node [скрыто]"));
+        assert!(!redacted.contains("vpn.example"));
+        assert!(!redacted.contains("QUJD"));
+        assert!(redact_panic_message(&"слово ".repeat(100)).chars().count() <= 201);
     }
 
     #[test]

@@ -62,8 +62,10 @@ pub fn monitor(state: Arc<AppState>, app: tauri::AppHandle) {
         let mut unhealthy = 0u8;
         // The VPN server stopped answering while the tunnel itself still works.
         let mut degraded = false;
+        // `Instant::now() - 120s` panics on Windows during the first two minutes
+        // after boot (autostart), so "never reasserted" is `None`.
         #[cfg(windows)]
-        let mut last_reassert = Instant::now() - Duration::from_secs(120);
+        let mut last_reassert: Option<Instant> = None;
         let mut ticker = tokio::time::interval(Duration::from_secs(1));
         ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
         loop {
@@ -123,8 +125,8 @@ pub fn monitor(state: Arc<AppState>, app: tauri::AppHandle) {
                                 // route Windows selects. Reinstall it in place instead of counting
                                 // down to a disconnect.
                                 #[cfg(windows)]
-                                if is_tun && probe.routes.is_err() && last_reassert.elapsed() >= Duration::from_secs(60) {
-                                    last_reassert = Instant::now();
+                                if is_tun && probe.routes.is_err() && last_reassert.is_none_or(|at| at.elapsed() >= Duration::from_secs(60)) {
+                                    last_reassert = Some(Instant::now());
                                     if reassert_routes(&state, active_generation).await {
                                         probe = super::health::probe(proxy_port, is_tun).await;
                                     }

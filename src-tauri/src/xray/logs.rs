@@ -71,7 +71,8 @@ async fn drain(
 ) {
     let mut buffer = [0u8; 4096];
     let mut line = Vec::with_capacity(4096);
-    let mut last = std::time::Instant::now() - std::time::Duration::from_secs(1);
+    // Subtracting from `Instant::now()` can panic on Windows right after boot.
+    let mut last: Option<std::time::Instant> = None;
     loop {
         let count = match output.read(&mut buffer).await {
             Ok(0) | Err(_) => break,
@@ -83,9 +84,9 @@ async fn drain(
                     if let Ok(mut value) = last_category.lock() {
                         *value = Some(cat);
                     }
-                    if last.elapsed().as_secs() >= 1 {
+                    if last.is_none_or(|at| at.elapsed().as_secs() >= 1) {
                         log::warn!("Xray: {cat}");
-                        last = std::time::Instant::now();
+                        last = Some(std::time::Instant::now());
                     }
                 }
                 line.clear();
