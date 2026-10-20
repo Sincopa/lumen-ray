@@ -30,46 +30,67 @@ pub async fn ping(state: &AppState, id: String) -> Result<serde_json::Value> {
     Ok(value)
 }
 async fn ping_inner(state: &AppState, id: &str) -> Result<serde_json::Value> {
-    let _permit = match PROBES.acquire().await {
-        Ok(p) => p,
-        Err(_) => return Ok(serde_json::json!("timeout")),
-    };
+    #[cfg(windows)]
+    {
+        let Some(core) = isolated_core(state, id).await else {
+            return Ok(serde_json::json!("timeout"));
+        };
+        let ping_url = state.repository.read().await.settings.ping_url.clone();
+        let result = probe_target(core.proxy_port, ping_url.trim()).await;
+        core.stop().await;
+        Ok(match result {
+            Some(elapsed) => serde_json::json!(elapsed),
+            None => serde_json::json!("timeout"),
+        })
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = (state, id);
+        Ok(serde_json::json!("timeout"))
+    }
+}
 
+/// A short-lived core that serves one node on a local SOCKS port (TCP and UDP).
+/// Dropping it ends the process with its job object.
+#[cfg(windows)]
+pub(crate) struct IsolatedCore {
+    pub proxy_port: u16,
+    child: crate::platform::process::CoreProcess,
+    _permit: tokio::sync::SemaphorePermit<'static>,
+}
+
+#[cfg(windows)]
+impl IsolatedCore {
+    pub async fn stop(mut self) {
+        let _ = self.child.kill().await;
+    }
+}
+
+#[cfg(windows)]
+pub(crate) async fn isolated_core(state: &AppState, id: &str) -> Option<IsolatedCore> {
+    let permit = PROBES.acquire().await.ok()?;
     let mut repo = state.repository.read().await.clone();
-    // Port discovery releases its temporary listeners before Xray binds them.
-    // Serialize only that short startup window so concurrent probes cannot be
-    // assigned the same just-released Windows ephemeral ports.
     // A probe only needs its SOCKS inbound and the node's outbound. With routing
     // rules each probe loaded the ~620k-domain antifilter list (seconds of CPU and
     // ~120 MB per process), and 25 of them at startup starved the tunnel.
     repo.rules.clear();
     repo.routing_mode = "global".into();
+    repo.discord_voice_routes.clear();
     repo.settings.dns_policy.enabled = false;
     if repo.settings.dns_server == "system" {
         repo.settings.dns_server = crate::storage::repository::Settings::default().dns_server;
     }
+    // Port discovery releases its temporary listeners before Xray binds them.
+    // Serialize only that short startup window so concurrent probes cannot be
+    // assigned the same just-released Windows ephemeral ports.
     let startup = PROBE_STARTUP.lock().await;
-    let (proxy, metrics) = match crate::engine::xray::ports() {
-        Ok(p) => p,
-        Err(_) => return Ok(serde_json::json!("timeout")),
-    };
-    let config = match crate::xray::config::build(&repo, id, proxy, metrics, false) {
-        Ok(c) => c,
-        Err(_) => return Ok(serde_json::json!("timeout")),
-    };
-    let bytes = match serde_json::to_vec(&config) {
-        Ok(b) => b,
-        Err(_) => return Ok(serde_json::json!("timeout")),
-    };
+    let (proxy, metrics) = crate::engine::xray::ports().ok()?;
+    let config = crate::xray::config::build(&repo, id, proxy, metrics, false).ok()?;
+    let bytes = serde_json::to_vec(&config).ok()?;
     let core = state.core.read().await.clone();
-
-    #[cfg(windows)]
-    let mut child = match crate::platform::process::CoreProcess::spawn(&core, &bytes).await {
-        Ok(c) => c,
-        Err(_) => return Ok(serde_json::json!("timeout")),
-    };
-    #[cfg(not(windows))]
-    return Ok(serde_json::json!("timeout"));
+    let mut child = crate::platform::process::CoreProcess::spawn(&core, &bytes)
+        .await
+        .ok()?;
 
     // Wait for the local SOCKS proxy port to accept connections
     let mut ready = false;
@@ -87,21 +108,15 @@ async fn ping_inner(state: &AppState, id: &str) -> Result<serde_json::Value> {
         tokio::time::sleep(Duration::from_millis(30)).await;
     }
     drop(startup);
-
-    let result = if ready {
-        probe_target(proxy, repo.settings.ping_url.trim()).await
-    } else {
-        None
-    };
-
-    let _ = child.kill().await;
-
-    let val = match result {
-        Some(elapsed) => serde_json::json!(elapsed),
-        None => serde_json::json!("timeout"),
-    };
-
-    Ok(val)
+    if !ready {
+        let _ = child.kill().await;
+        return None;
+    }
+    Some(IsolatedCore {
+        proxy_port: proxy,
+        child,
+        _permit: permit,
+    })
 }
 
 /// Whole-probe budget, including the cold first request through the tunnel.

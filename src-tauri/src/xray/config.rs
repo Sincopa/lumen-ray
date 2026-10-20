@@ -321,6 +321,34 @@ pub fn build(
     if repo.settings.bypass_lan {
         rules.push(json!({"type":"field","ip":["127.0.0.0/8","10.0.0.0/8","172.16.0.0/12","192.168.0.0/16","169.254.0.0/16","::1/128","fc00::/7","fe80::/10"],"outboundTag":"direct"}));
     }
+    // Some exits carry TCP and ordinary UDP but drop Discord's voice servers, and
+    // a Discord call then sits on "No Route". The connect-time check records such
+    // a server with another server that does carry Discord media, or `direct`
+    // when none does. Direct is the last resort: Russian ISPs cut a screen share
+    // within about a minute there, while low-rate voice survives. Discord's
+    // signalling, chat and downloads keep the selected server either way.
+    // Network and port are matched before the process.
+    if let Some(route) = repo
+        .discord_voice_routes
+        .get(selected)
+        .filter(|_| !discord_blocked(repo))
+    {
+        let fallback = (route != "direct")
+            .then(|| repo.nodes.iter().find(|node| node.id == *route))
+            .flatten()
+            .filter(|node| node.id != selected && node.balancer.is_none())
+            .and_then(|node| outbound(node, &node.id).ok().map(|ob| (node, ob)));
+        let tag = match fallback {
+            Some((node, ob)) => {
+                if !outbounds.iter().any(|existing| existing["tag"] == node.id) {
+                    outbounds.push(ob);
+                }
+                node.id.clone()
+            }
+            None => "direct".to_string(),
+        };
+        rules.push(json!({"type":"field","network":"udp","port":DISCORD_VOICE_PORTS,"process":process_names(DISCORD_PROCESSES),"outboundTag":tag}));
+    }
     let mut nodes = None;
     let mut outbound_tags: Option<std::collections::HashSet<String>> = None;
     for rule in crate::services::catalog_service::ordered_rules(&repo.rules) {
@@ -519,6 +547,26 @@ pub fn build(
         metrics: json!({"tag":"metrics","listen":format!("127.0.0.1:{metrics_port}")}),
         observatory,
     })
+}
+/// Discord voice media: current servers listen on 19294-19344, older ones on 50000-50100.
+const DISCORD_VOICE_PORTS: &str = "19294-19344,50000-50100";
+const DISCORD_PROCESSES: &str = "Discord.exe,DiscordPTB.exe,DiscordCanary.exe";
+
+/// A rule that blocks the Discord application must also keep its voice off the direct path.
+fn discord_blocked(repo: &Repository) -> bool {
+    repo.routing_mode == "rules"
+        && repo.rules.iter().any(|rule| {
+            rule.enabled
+                && rule.server_id == "block"
+                && rule.matcher == crate::storage::repository::RuleMatcher::Application
+                && rule.name.split(',').any(|name| {
+                    let name = name.trim().replace('\\', "/");
+                    let file = name.rsplit('/').next().unwrap_or(&name);
+                    DISCORD_PROCESSES
+                        .split(',')
+                        .any(|discord| file.eq_ignore_ascii_case(discord))
+                })
+        })
 }
 /// Xray compares a process name case-sensitively with the executable on disk,
 /// while Windows names are not: an `example.exe` rule must also match `Example.exe`.

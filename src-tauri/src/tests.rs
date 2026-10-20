@@ -144,6 +144,121 @@ fn discord_uses_the_vpn_and_other_traffic_stays_direct() {
     assert!(rules.iter().all(|rule| rule["network"] != "udp"));
 }
 #[test]
+fn discord_media_leaves_a_server_that_drops_it() {
+    use crate::services::catalog_service::generate_preset_rules;
+    let node = uri::parse(VLESS, "sub").unwrap();
+    let fallback = uri::parse(
+        "vless://00000000-0000-4000-8000-000000000002@fallback.example.com:443?type=tcp&security=tls&sni=fallback.example.com#Fallback",
+        "sub",
+    )
+    .unwrap();
+    let mut repo = Repository {
+        nodes: vec![node.clone(), fallback.clone()],
+        routing_mode: "rules".into(),
+        ..Default::default()
+    };
+    repo.rules = generate_preset_rules("russia-optimized", "subscription").unwrap();
+    let config_of = |repo: &Repository| {
+        serde_json::to_value(config::build(repo, &node.id, 10808, 10809, true).unwrap()).unwrap()
+    };
+    let is_voice =
+        |rule: &&serde_json::Value| rule["network"] == "udp" && rule["process"].is_array();
+    let voice_of = |config: &serde_json::Value| {
+        config["routing"]["rules"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(is_voice)
+            .cloned()
+    };
+    assert!(voice_of(&config_of(&repo)).is_none());
+
+    // Another server carries Discord media: its outbound joins the config.
+    let before = repo.clone();
+    repo.discord_voice_routes
+        .insert(node.id.clone(), fallback.id.clone());
+    let config = config_of(&repo);
+    let rules = config["routing"]["rules"].as_array().unwrap();
+    let voice = rules.iter().position(|rule| is_voice(&rule)).unwrap();
+    let discord = rules
+        .iter()
+        .position(|rule| rule["process"][0] == "Discord.exe" && rule["network"].is_null())
+        .unwrap();
+    assert!(voice < discord);
+    assert_eq!(rules[voice]["outboundTag"], fallback.id.as_str());
+    assert_eq!(rules[voice]["port"], "19294-19344,50000-50100");
+    for name in [
+        "Discord.exe",
+        "discord.exe",
+        "DiscordPTB.exe",
+        "DiscordCanary.exe",
+    ] {
+        assert!(rules[voice]["process"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|value| value == name));
+    }
+    assert!(config["outbounds"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|outbound| outbound["tag"] == fallback.id.as_str()));
+    // The probe inbound keeps measuring the selected exit itself.
+    let probe = rules
+        .iter()
+        .position(|rule| rule["inboundTag"][0] == "probe")
+        .unwrap();
+    assert!(probe < voice);
+    #[cfg(windows)]
+    {
+        let plan = config::live_routing_plan(&before, &repo, &node.id, true)
+            .unwrap()
+            .unwrap();
+        assert_eq!(plan.added_outbounds.len(), 1);
+        assert_eq!(plan.added_outbounds[0]["tag"], fallback.id.as_str());
+    }
+
+    let mut direct = repo.clone();
+    direct
+        .discord_voice_routes
+        .insert(node.id.clone(), "direct".into());
+    assert_eq!(
+        voice_of(&config_of(&direct)).unwrap()["outboundTag"],
+        "direct"
+    );
+
+    // A fallback that left the subscription degrades to the direct path.
+    let mut missing = repo.clone();
+    missing
+        .discord_voice_routes
+        .insert(node.id.clone(), "gone".into());
+    assert_eq!(
+        voice_of(&config_of(&missing)).unwrap()["outboundTag"],
+        "direct"
+    );
+
+    let mut global = repo.clone();
+    global.routing_mode = "global".into();
+    assert!(voice_of(&config_of(&global)).is_some());
+
+    let mut other = repo.clone();
+    other.discord_voice_routes = [("another-server".to_string(), "direct".to_string())].into();
+    assert!(voice_of(&config_of(&other)).is_none());
+
+    let mut blocked = repo.clone();
+    blocked.rules.push(crate::storage::repository::Rule {
+        id: "block-discord".into(),
+        name: "C:\\Apps\\discord.exe".into(),
+        matcher: crate::storage::repository::RuleMatcher::Application,
+        server_id: "block".into(),
+        enabled: true,
+        preset_id: None,
+        is_domain: false,
+    });
+    assert!(voice_of(&config_of(&blocked)).is_none());
+}
+#[test]
 fn subscription_routing_from_clash_and_incy() {
     use base64::Engine;
     let yaml = r#"proxies:

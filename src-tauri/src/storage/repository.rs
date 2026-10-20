@@ -242,6 +242,11 @@ pub struct Repository {
     pub routing_mode: String,
     #[serde(default)]
     pub settings: Settings,
+    /// Servers whose exit did not answer Discord's voice servers on the last
+    /// connect, mapped to the route Discord voice and streams take instead:
+    /// another server that answered, or `direct`. The rest of Discord keeps the VPN.
+    #[serde(default)]
+    pub discord_voice_routes: BTreeMap<String, String>,
 }
 impl Default for Repository {
     fn default() -> Self {
@@ -257,6 +262,7 @@ impl Default for Repository {
             selected_servers: BTreeMap::new(),
             routing_mode: "global".into(),
             settings: Settings::default(),
+            discord_voice_routes: BTreeMap::new(),
         }
     }
 }

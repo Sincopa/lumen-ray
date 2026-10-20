@@ -422,6 +422,10 @@ async fn connect_session_with_repository(
     match result {
         Ok(()) => {
             session.generation = generation;
+            // Discord voice reaches Lumen only through the TUN adapter.
+            if is_tun {
+                super::discord_voice::schedule(state.clone(), id.clone(), proxy_port, generation);
+            }
             if verified_ip.is_none() {
                 let state = state.clone();
                 let app = app.clone();

@@ -314,7 +314,40 @@ pub async fn mutate(state: &AppState, mutation: Mutation) -> Result<Value> {
     *state.repository.write().await = next;
     Ok(result)
 }
+/// Record the route Discord voice and streams take while `server_id` is the exit:
+/// another server's id, `direct`, or `None` when the server carries them itself.
+/// Returns the repository before and after the change, or `None` if nothing changed.
+pub async fn set_discord_voice_route(
+    state: &AppState,
+    server_id: &str,
+    route: Option<String>,
+) -> Result<Option<(Repository, Repository)>> {
+    let _guard = state.mutations.lock().await;
+    let before = state.repository.read().await.clone();
+    if before.discord_voice_routes.get(server_id) == route.as_ref()
+        || !before.nodes.iter().any(|node| node.id == server_id)
+    {
+        return Ok(None);
+    }
+    let mut next = before.clone();
+    match route {
+        Some(route) => {
+            next.discord_voice_routes
+                .insert(server_id.to_owned(), route);
+        }
+        None => {
+            next.discord_voice_routes.remove(server_id);
+        }
+    }
+    state.store.save(&next)?;
+    *state.repository.write().await = next.clone();
+    Ok(Some((before, next)))
+}
 fn reconcile(repo: &mut Repository) {
+    let node_ids: std::collections::HashSet<_> = repo.nodes.iter().map(|n| n.id.clone()).collect();
+    repo.discord_voice_routes.retain(|id, route| {
+        node_ids.contains(id) && (route == "direct" || node_ids.contains(route))
+    });
     let sub_ids: std::collections::HashSet<_> =
         repo.subscriptions.iter().map(|s| s.id.clone()).collect();
     repo.selected_servers.retain(|sub_id, server_id| {
@@ -575,8 +608,8 @@ pub fn generate_preset_rules(preset_id: &str, target_proxy: &str) -> Result<Vec<
     let mut rules = match preset_id {
         // Russian sites and the rest of the system stay direct. Only the
         // blocking lists, YouTube, Telegram and the Discord process use the VPN.
-        // A final MATCH would tunnel the whole system, and VLESS Vision cannot
-        // carry Discord's voice UDP, so that traffic must not be forced in.
+        // A final MATCH would tunnel the whole system. Servers that drop Discord
+        // voice are detected on connect; see `discord_voice`.
         "russia-optimized" => Ok(vec![
             Rule {
                 id: format!("{preset_id}-geoip-private"),
