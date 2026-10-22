@@ -41,6 +41,8 @@ export const ERROR_CODES = [
 	'processFailed',
 	'logConsoleFailed',
 	'notificationFailed',
+	'platformUnsupported',
+	'autostartUnavailable',
 	'unknown',
 ] as const;
 
@@ -99,6 +101,8 @@ const NATIVE_CODES: Record<string, ErrorCode> = {
 	PROCESS_FAILED: 'processFailed',
 	LOG_CONSOLE_FAILED: 'logConsoleFailed',
 	NOTIFICATION_FAILED: 'notificationFailed',
+	PLATFORM_UNSUPPORTED: 'platformUnsupported',
+	AUTOSTART_UNAVAILABLE: 'autostartUnavailable',
 };
 
 export function errorCode(error: unknown): ErrorCode {

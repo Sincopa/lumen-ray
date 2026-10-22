@@ -46,6 +46,7 @@ pub fn verify_embedded_frontend(context: &tauri::Context<tauri::Wry>) -> Result<
     Ok(())
 }
 
+#[cfg(windows)]
 pub const WEBVIEW_DOWNLOAD: &str = "https://developer.microsoft.com/microsoft-edge/webview2/";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -54,32 +55,41 @@ pub struct Failure {
     pub advice: &'static str,
 }
 
+/// Advice that names Windows-only files, folders or UI has a macOS wording.
+fn platform(windows: &'static str, macos: &'static str) -> &'static str {
+    if cfg!(target_os = "macos") {
+        macos
+    } else {
+        windows
+    }
+}
+
 pub fn classify(message: &str) -> Failure {
     let (code, advice) = if message.contains("CORE_NOT_FOUND") {
-        ("CORE_NOT_FOUND", "Не найдены или повреждены файлы Xray/Wintun. Распакуйте весь portable-архив в отдельную папку: рядом с Lumen.exe должна быть папка runtime. Проверьте, не переместил ли антивирус файлы в карантин.")
+        ("CORE_NOT_FOUND", platform("Не найдены или повреждены файлы Xray/Wintun. Распакуйте весь portable-архив в отдельную папку: рядом с Lumen.exe должна быть папка runtime. Проверьте, не переместил ли антивирус файлы в карантин.", "Не найдены или повреждены файлы Xray в приложении Lumen. Удалите Lumen из папки «Программы» и установите его заново из загруженного образа диска."))
     } else if message.contains("GEO_UPDATE_FAILED") {
-        ("GEO_UPDATE_FAILED", "Не удалось прочитать или проверить базы GeoIP/GeoSite. Распакуйте полный архив заново и проверьте доступ к папке данных Lumen.")
+        ("GEO_UPDATE_FAILED", platform("Не удалось прочитать или проверить базы GeoIP/GeoSite. Распакуйте полный архив заново и проверьте доступ к папке данных Lumen.", "Не удалось прочитать или проверить базы GeoIP/GeoSite. Установите Lumen заново и проверьте доступ к папке ~/Library/Application Support/app.lumen.desktop."))
     } else if message.contains("STORAGE_VERSION") {
         (
             "STORAGE_VERSION",
             "Данные сохранены более новой версией Lumen. Установите последнюю версию приложения.",
         )
     } else if message.contains("STORAGE_FAILED") || message.contains("SECRET_STORE_FAILED") {
-        ("STORAGE_FAILED", "Не удалось прочитать или сохранить данные Lumen. Проверьте свободное место и доступ к %LOCALAPPDATA%\\app.lumen.desktop. Зашифрованные данные нельзя переносить из другого аккаунта Windows.")
+        ("STORAGE_FAILED", platform("Не удалось прочитать или сохранить данные Lumen. Проверьте свободное место и доступ к %LOCALAPPDATA%\\app.lumen.desktop. Зашифрованные данные нельзя переносить из другого аккаунта Windows.", "Не удалось прочитать или сохранить данные Lumen. Проверьте свободное место, доступ к ~/Library/Application Support/app.lumen.desktop и разрешите Lumen доступ к связке ключей. Зашифрованные данные нельзя переносить из другой учётной записи macOS."))
     } else if message.contains("ALREADY_RUNNING") {
-        ("ALREADY_RUNNING", "Lumen уже запущен. Откройте его через значок в системном трее. Если окно не появляется, завершите только процесс Lumen и повторите запуск.")
+        ("ALREADY_RUNNING", platform("Lumen уже запущен. Откройте его через значок в системном трее. Если окно не появляется, завершите только процесс Lumen и повторите запуск.", "Lumen уже запущен. Откройте его через значок в строке меню. Если окно не появляется, завершите Lumen в Мониторе активности и повторите запуск."))
     } else if message.contains("WEBVIEW2_UNAVAILABLE") {
         ("WEBVIEW2_UNAVAILABLE", "Microsoft Edge WebView2 Runtime не найден или недоступен. Установите или восстановите Evergreen Runtime с сайта Microsoft, затем запустите Lumen снова.")
     } else if message.contains("WEBVIEW_INIT_FAILED") {
-        ("WEBVIEW_INIT_FAILED", "Не удалось создать окно WebView2. Восстановите WebView2 Runtime и проверьте доступ к папке данных Lumen. Если ошибка повторяется, отправьте журнал запуска разработчику.")
+        ("WEBVIEW_INIT_FAILED", platform("Не удалось создать окно WebView2. Восстановите WebView2 Runtime и проверьте доступ к папке данных Lumen. Если ошибка повторяется, отправьте журнал запуска разработчику.", "Не удалось создать окно Lumen. Перезагрузите Mac и проверьте доступ к папке данных Lumen. Если ошибка повторяется, отправьте журнал запуска разработчику."))
     } else if message.contains("FRONTEND_NOT_EMBEDDED") {
-        ("FRONTEND_NOT_EMBEDDED", "В этой сборке отсутствует встроенный интерфейс Lumen. Скачайте исправленную portable-версию приложения.")
+        ("FRONTEND_NOT_EMBEDDED", platform("В этой сборке отсутствует встроенный интерфейс Lumen. Скачайте исправленную portable-версию приложения.", "В этой сборке отсутствует встроенный интерфейс Lumen. Скачайте исправленную версию приложения."))
     } else if message.contains("FRONTEND_LOAD_FAILED") {
-        ("FRONTEND_LOAD_FAILED", "Интерфейс Lumen не загрузился. Перезапустите приложение. Если ошибка повторяется, восстановите WebView2 Runtime и отправьте журнал запуска разработчику.")
+        ("FRONTEND_LOAD_FAILED", platform("Интерфейс Lumen не загрузился. Перезапустите приложение. Если ошибка повторяется, восстановите WebView2 Runtime и отправьте журнал запуска разработчику.", "Интерфейс Lumen не загрузился. Перезапустите приложение. Если ошибка повторяется, отправьте журнал запуска разработчику."))
     } else if message.contains("APPLICATION_PANIC") {
         ("APPLICATION_PANIC", "В приложении произошла внутренняя ошибка. Повторите запуск. Если ошибка повторяется, отправьте журнал запуска разработчику.")
     } else {
-        ("INITIALIZATION_FAILED", "Не удалось инициализировать Lumen. Распакуйте полный portable-архив заново и запустите Lumen.exe. Если ошибка повторяется, отправьте журнал запуска разработчику.")
+        ("INITIALIZATION_FAILED", platform("Не удалось инициализировать Lumen. Распакуйте полный portable-архив заново и запустите Lumen.exe. Если ошибка повторяется, отправьте журнал запуска разработчику.", "Не удалось инициализировать Lumen. Установите Lumen заново в папку «Программы» и запустите его. Если ошибка повторяется, отправьте журнал запуска разработчику."))
     };
     Failure { code, advice }
 }
@@ -88,6 +98,10 @@ fn log_candidates() -> Vec<PathBuf> {
     let mut paths = Vec::new();
     if let Some(local) = std::env::var_os("LOCALAPPDATA") {
         paths.push(PathBuf::from(local).join("app.lumen.desktop/logs/startup.log"));
+    }
+    #[cfg(target_os = "macos")]
+    if let Some(home) = std::env::var_os("HOME").filter(|home| !home.is_empty()) {
+        paths.push(PathBuf::from(home).join("Library/Logs/app.lumen.desktop/startup.log"));
     }
     paths.push(std::env::temp_dir().join("lumen-startup.log"));
     paths
@@ -173,7 +187,33 @@ fn show_dialog(title: &str, message: &str, download: bool) {
     }
 }
 
-#[cfg(not(windows))]
+#[cfg(target_os = "macos")]
+fn show_dialog(title: &str, message: &str, _download: bool) {
+    // Text reaches AppleScript as argv, never as script source, so nothing needs escaping.
+    let shown = std::process::Command::new("/usr/bin/osascript")
+        .args([
+            "-e",
+            "on run argv",
+            "-e",
+            "activate",
+            "-e",
+            "display alert (item 1 of argv) message (item 2 of argv) as critical buttons {\"OK\"} default button 1",
+            "-e",
+            "end run",
+            title,
+            message,
+        ])
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .is_ok_and(|status| status.success());
+    if !shown {
+        eprintln!("{title}\n{message}");
+    }
+}
+
+#[cfg(not(any(windows, target_os = "macos")))]
 fn show_dialog(title: &str, message: &str, _download: bool) {
     eprintln!("{title}\n{message}");
 }

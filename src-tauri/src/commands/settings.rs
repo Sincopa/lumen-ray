@@ -1,3 +1,7 @@
+#[cfg(target_os = "macos")]
+use crate::platform::autostart;
+#[cfg(windows)]
+use crate::platform::windows as autostart;
 use crate::{
     app::state::AppState,
     domain::errors::{BackendError, Result},
@@ -14,9 +18,9 @@ pub struct SettingsDto {
 #[tauri::command]
 pub async fn get_settings(state: tauri::State<'_, Arc<AppState>>) -> Result<SettingsDto> {
     let mut settings = state.repository.read().await.settings.clone();
-    #[cfg(windows)]
+    #[cfg(any(windows, target_os = "macos"))]
     {
-        settings.auto_start = crate::platform::windows::is_autostart();
+        settings.auto_start = autostart::is_autostart();
     }
     Ok(SettingsDto {
         settings,
@@ -31,12 +35,12 @@ pub async fn set_settings(
 ) -> Result<SettingsDto> {
     let _transaction = state.updates.lock().await;
     validate_settings(&settings)?;
-    #[cfg(windows)]
+    #[cfg(any(windows, target_os = "macos"))]
     {
-        if settings.auto_start != crate::platform::windows::is_autostart() {
-            crate::platform::windows::set_autostart(settings.auto_start)?;
+        if settings.auto_start != autostart::is_autostart() {
+            autostart::set_autostart(settings.auto_start)?;
         }
-        settings.auto_start = crate::platform::windows::is_autostart();
+        settings.auto_start = autostart::is_autostart();
     }
     let changed;
     let previous;
@@ -105,7 +109,7 @@ pub async fn set_settings(
 
 #[tauri::command]
 pub async fn reset_network_settings(state: tauri::State<'_, Arc<AppState>>) -> Result<()> {
-    #[cfg(windows)]
+    #[cfg(any(windows, target_os = "macos"))]
     {
         crate::platform::proxy::SystemProxy::recover(&state.data)?;
     }
@@ -124,6 +128,12 @@ pub(crate) fn validate_settings(settings: &Settings) -> Result<()> {
         return Err(BackendError::new(
             "INVALID_CONFIG",
             "Unknown networking mode",
+        ));
+    }
+    if cfg!(target_os = "macos") && settings.network_mode == "tun" {
+        return Err(BackendError::new(
+            "PLATFORM_UNSUPPORTED",
+            "TUN mode is not available on macOS yet",
         ));
     }
     let dns = settings.dns_server.parse::<std::net::IpAddr>();

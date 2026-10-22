@@ -15,42 +15,42 @@ use tokio::{io::AsyncWriteExt, process::Command};
 #[derive(Default)]
 pub struct XraySession {
     pub is_tun: bool,
-    #[cfg(windows)]
+    #[cfg(any(windows, target_os = "macos"))]
     pub child: Option<crate::platform::process::CoreProcess>,
-    #[cfg(not(windows))]
+    #[cfg(not(any(windows, target_os = "macos")))]
     pub child: Option<tokio::process::Child>,
     #[cfg(windows)]
     pub helper: Option<crate::platform::helper::Helper>,
     pub proxy_port: u16,
     pub metrics_port: u16,
     pub started: Option<Instant>,
-    #[cfg(windows)]
+    #[cfg(any(windows, target_os = "macos"))]
     pub prepared_server_id: Option<String>,
-    #[cfg(windows)]
+    #[cfg(any(windows, target_os = "macos"))]
     pub prepared_config_hash: Option<[u8; 32]>,
-    #[cfg(windows)]
+    #[cfg(any(windows, target_os = "macos"))]
     pub prepared_core_version: Option<String>,
-    #[cfg(windows)]
+    #[cfg(any(windows, target_os = "macos"))]
     pub prepared_geo_hash: Option<[u8; 32]>,
-    #[cfg(windows)]
+    #[cfg(any(windows, target_os = "macos"))]
     pub base_server_id: Option<String>,
-    #[cfg(windows)]
+    #[cfg(any(windows, target_os = "macos"))]
     base_outbound_hash: Option<[u8; 32]>,
-    #[cfg(windows)]
+    #[cfg(any(windows, target_os = "macos"))]
     pub active_proxy_tag: Option<String>,
-    #[cfg(windows)]
+    #[cfg(any(windows, target_os = "macos"))]
     pub live_outbound_tags: Vec<(String, String, [u8; 32])>,
-    #[cfg(windows)]
+    #[cfg(any(windows, target_os = "macos"))]
     pub pending_live_switch: Option<LiveSwitchRollback>,
     /// Repository the running core's routing currently reflects (sources removed).
-    #[cfg(windows)]
+    #[cfg(any(windows, target_os = "macos"))]
     prepared_repository: Option<Arc<Repository>>,
     /// Repository the running core was started with; it owns the loaded outbounds.
-    #[cfg(windows)]
+    #[cfg(any(windows, target_os = "macos"))]
     base_repository: Option<Arc<Repository>>,
 }
 
-#[cfg(windows)]
+#[cfg(any(windows, target_os = "macos"))]
 pub struct LiveSwitchRollback {
     previous_server_id: String,
     previous_config_hash: [u8; 32],
@@ -59,7 +59,7 @@ pub struct LiveSwitchRollback {
     routing_patch: serde_json::Value,
 }
 
-#[cfg(windows)]
+#[cfg(any(windows, target_os = "macos"))]
 fn stripped(repo: &Repository) -> Arc<Repository> {
     let mut repo = repo.clone();
     repo.sources.clear();
@@ -68,20 +68,32 @@ fn stripped(repo: &Repository) -> Arc<Repository> {
 
 /// The control API is reachable while the core process runs: an active or
 /// prepared TUN helper, or the system-proxy core of a connected session.
-#[cfg(windows)]
+#[cfg(any(windows, target_os = "macos"))]
 fn api_available(session: &XraySession) -> bool {
+    #[cfg(windows)]
     if session.is_tun {
-        session
+        return session
             .helper
             .as_ref()
-            .is_some_and(|helper| !helper.exited())
-    } else {
-        session.started.is_some()
-            && session
-                .child
-                .as_ref()
-                .is_some_and(|child| matches!(child.try_wait(), Ok(None)))
+            .is_some_and(|helper| !helper.exited());
     }
+    // macOS has no TUN helper yet, so a TUN session never has a live API.
+    !session.is_tun
+        && session.started.is_some()
+        && session
+            .child
+            .as_ref()
+            .is_some_and(|child| matches!(child.try_wait(), Ok(None)))
+}
+/// TUN on macOS needs a privileged helper that does not exist yet.
+fn supported(repo: &Repository) -> Result<()> {
+    if cfg!(target_os = "macos") && repo.settings.network_mode == "tun" {
+        return Err(BackendError::new(
+            "PLATFORM_UNSUPPORTED",
+            "TUN mode is not available on macOS yet",
+        ));
+    }
+    Ok(())
 }
 /// Go runtime tuning for every xray child. A large geosite category (antifilter has
 /// ~620k domains) keeps ~120 MB live; a GOMEMLIMIT below that made the GC run
@@ -196,7 +208,7 @@ pub(crate) fn ports() -> Result<(u16, u16)> {
     }
     Err(error())
 }
-#[cfg(windows)]
+#[cfg(any(windows, target_os = "macos"))]
 fn configuration_fingerprint(
     repo: &crate::storage::repository::Repository,
     selected: &str,
@@ -225,14 +237,14 @@ fn configuration_fingerprint(
     Ok(hasher.finalize().into())
 }
 
-#[cfg(windows)]
+#[cfg(any(windows, target_os = "macos"))]
 fn geo_fingerprint(data: &std::path::Path) -> Option<[u8; 32]> {
     std::fs::read(crate::xray::geo::metadata_path(data))
         .ok()
         .map(|bytes| Sha256::digest(bytes).into())
 }
 
-#[cfg(windows)]
+#[cfg(any(windows, target_os = "macos"))]
 fn assets_match(session: &XraySession, version: &str, geo: Option<[u8; 32]>) -> bool {
     session.prepared_core_version.as_deref() == Some(version) && session.prepared_geo_hash == geo
 }
@@ -286,7 +298,7 @@ fn note_prepared(
     session.is_tun = true;
 }
 
-#[cfg(windows)]
+#[cfg(any(windows, target_os = "macos"))]
 fn outbound_fingerprint(repo: &Repository, selected: &str) -> Result<[u8; 32]> {
     let node = repo
         .nodes
@@ -299,7 +311,7 @@ fn outbound_fingerprint(repo: &Repository, selected: &str) -> Result<[u8; 32]> {
     Ok(hasher.finalize().into())
 }
 
-#[cfg(windows)]
+#[cfg(any(windows, target_os = "macos"))]
 fn cached_outbound_matches(session: &XraySession, selected: &str, hash: [u8; 32]) -> bool {
     if session.base_server_id.as_deref() == Some(selected) {
         return session.base_outbound_hash == Some(hash);
@@ -315,7 +327,7 @@ fn cached_outbound_matches(session: &XraySession, selected: &str, hash: [u8; 32]
 /// TUN, or a connected system proxy) without restarting it.
 /// `NeedsConnect` is only a network-mode change or a core that is not running.
 /// Any other miss leaves the tunnel up (`KeepTunnel`).
-#[cfg(windows)]
+#[cfg(any(windows, target_os = "macos"))]
 pub async fn apply_live_rules(
     state: &Arc<AppState>,
     selected: &str,
@@ -398,7 +410,7 @@ pub async fn apply_live_rules(
 
 /// Bring a running core to the requested server and routing through its API.
 /// Errors are reported as `false`: a restart remains the supported fallback.
-#[cfg(windows)]
+#[cfg(any(windows, target_os = "macos"))]
 async fn update_running_core(
     state: &Arc<AppState>,
     repo: &Repository,
@@ -422,7 +434,7 @@ async fn update_running_core(
     })
 }
 
-#[cfg(windows)]
+#[cfg(any(windows, target_os = "macos"))]
 fn replace_primary_proxy_tag(value: &mut serde_json::Value, tag: &str) {
     match value {
         serde_json::Value::Object(fields) => {
@@ -446,14 +458,14 @@ fn replace_primary_proxy_tag(value: &mut serde_json::Value, tag: &str) {
     }
 }
 
-#[cfg(windows)]
+#[cfg(any(windows, target_os = "macos"))]
 struct LiveSwitchPlan {
     outbound: serde_json::Value,
     forward_patch: serde_json::Value,
     rollback_patch: serde_json::Value,
 }
 
-#[cfg(windows)]
+#[cfg(any(windows, target_os = "macos"))]
 #[allow(clippy::too_many_arguments)]
 fn live_switch_plan(
     base_repo: &Repository,
@@ -528,7 +540,7 @@ fn live_switch_plan(
     }))
 }
 
-#[cfg(all(test, windows))]
+#[cfg(all(test, any(windows, target_os = "macos")))]
 mod live_switch_tests {
     use super::*;
 
@@ -601,6 +613,7 @@ mod live_switch_tests {
         assert!(!cached_outbound_matches(&session, &node.id, rotated));
     }
 
+    #[cfg(windows)]
     #[test]
     fn live_helper_is_reloaded_instead_of_launched() {
         assert_eq!(helper_plan(true, true), HelperPlan::Reuse);
@@ -788,7 +801,7 @@ mod live_switch_tests {
     }
 }
 
-#[cfg(windows)]
+#[cfg(any(windows, target_os = "macos"))]
 async fn switch_server_live(
     state: &Arc<AppState>,
     repo: &Repository,
@@ -901,7 +914,7 @@ async fn switch_server_live(
     Ok(true)
 }
 
-#[cfg(windows)]
+#[cfg(any(windows, target_os = "macos"))]
 pub async fn rollback_live_server_switch(
     state: &Arc<AppState>,
     session: &mut XraySession,
@@ -919,7 +932,7 @@ pub async fn rollback_live_server_switch(
     Ok(true)
 }
 
-#[cfg(windows)]
+#[cfg(any(windows, target_os = "macos"))]
 async fn run_live_outbound_add(
     core: &std::path::Path,
     api_port: u16,
@@ -966,7 +979,7 @@ async fn run_live_outbound_add(
     Ok(())
 }
 
-#[cfg(windows)]
+#[cfg(any(windows, target_os = "macos"))]
 pub(crate) async fn run_live_routing_patch(
     core: &std::path::Path,
     api_port: u16,
@@ -985,7 +998,7 @@ pub(crate) async fn run_live_routing_patch(
     first
 }
 
-#[cfg(windows)]
+#[cfg(any(windows, target_os = "macos"))]
 async fn run_live_routing_patch_once(
     core: &std::path::Path,
     api_port: u16,
@@ -1038,6 +1051,7 @@ async fn run_live_routing_patch_once(
     }
     Ok(())
 }
+#[cfg(windows)]
 async fn start_tunnel(
     session: &mut XraySession,
     data: &std::path::Path,
@@ -1134,7 +1148,7 @@ pub(crate) async fn start(
     metrics_port: u16,
 ) -> Result<()> {
     let core_at = Instant::now();
-    #[cfg(windows)]
+    #[cfg(any(windows, target_os = "macos"))]
     {
         session.child = Some(crate::platform::process::CoreProcess::spawn(core, bytes).await?);
         log::info!(
@@ -1142,7 +1156,7 @@ pub(crate) async fn start(
             core_at.elapsed().as_millis()
         );
     }
-    #[cfg(not(windows))]
+    #[cfg(not(any(windows, target_os = "macos")))]
     return Err(BackendError::new(
         "PLATFORM_UNSUPPORTED",
         "This build supports Windows networking only",
@@ -1212,7 +1226,7 @@ pub async fn stop(session: &mut XraySession) -> Result<()> {
         }
     }
     if !retained {
-        #[cfg(windows)]
+        #[cfg(any(windows, target_os = "macos"))]
         {
             session.prepared_server_id = None;
             session.prepared_config_hash = None;
@@ -1262,6 +1276,7 @@ pub async fn counters(client: &reqwest::Client, port: u16) -> Result<(u64, u64)>
 pub struct XrayBackend;
 impl CoreBackend for XrayBackend {
     fn validate(&self, repo: &Repository, selected: &str) -> Result<()> {
+        supported(repo)?;
         crate::xray::config::build(
             repo,
             selected,
@@ -1278,6 +1293,7 @@ impl CoreBackend for XrayBackend {
         selected: &'a str,
     ) -> BackendFuture<'a, ()> {
         Box::pin(async move {
+            supported(repo)?;
             let config = crate::xray::config::build(
                 repo,
                 selected,
@@ -1301,8 +1317,9 @@ impl CoreBackend for XrayBackend {
     ) -> BackendFuture<'a, ()> {
         Box::pin(async move {
             let s = session;
+            supported(repo)?;
             let tun = repo.settings.network_mode == "tun";
-            #[cfg(windows)]
+            #[cfg(any(windows, target_os = "macos"))]
             let hash = configuration_fingerprint(repo, selected, tun)?;
             let core = state.core.read().await.clone();
             let version = core
@@ -1310,11 +1327,11 @@ impl CoreBackend for XrayBackend {
                 .and_then(|p| p.file_name())
                 .and_then(|s| s.to_str())
                 .unwrap_or(crate::xray::bundle::VERSION);
-            #[cfg(windows)]
+            #[cfg(any(windows, target_os = "macos"))]
             let current_geo = geo_fingerprint(&state.data);
             // A running core (active or prepared TUN, connected proxy) takes server
             // and routing changes through its API. Its geo data is already loaded.
-            #[cfg(windows)]
+            #[cfg(any(windows, target_os = "macos"))]
             if s.is_tun == tun
                 && api_available(s)
                 && assets_match(s, version, current_geo)
@@ -1369,7 +1386,7 @@ impl CoreBackend for XrayBackend {
                 #[allow(unused_mut)]
                 let mut config =
                     crate::xray::config::build(repo, selected, proxy_port, metrics_port, false)?;
-                #[cfg(windows)]
+                #[cfg(any(windows, target_os = "macos"))]
                 crate::xray::config::enable_api(&mut config, metrics_port)?;
                 serde_json::to_vec(&config).map_err(|_| {
                     BackendError::new("INVALID_CONFIG", "Could not serialize Xray config")
@@ -1420,6 +1437,7 @@ impl CoreBackend for XrayBackend {
             }
             s.is_tun = tun;
             if tun {
+                #[cfg(windows)]
                 return start_tunnel(
                     s,
                     &state.data,
@@ -1427,13 +1445,14 @@ impl CoreBackend for XrayBackend {
                     selected.into(),
                     (proxy_port, metrics_port),
                     version.into(),
-                    #[cfg(windows)]
                     hash,
                 )
                 .await;
+                #[cfg(not(windows))]
+                return Err(BackendError::new("TUN_FAILED", "Tunnel was not ready"));
             }
             start(&core, s, &bytes, proxy_port, metrics_port).await?;
-            #[cfg(windows)]
+            #[cfg(any(windows, target_os = "macos"))]
             {
                 let repository = stripped(repo);
                 s.base_server_id = Some(selected.into());
@@ -1466,6 +1485,9 @@ impl CoreBackend for XrayBackend {
             if repo.settings.network_mode != "tun" || selected.is_none() {
                 return stop(s).await;
             }
+            supported(repo)?;
+            #[cfg(not(windows))]
+            let _ = state;
             #[cfg(windows)]
             {
                 let selected = selected.ok_or_else(BackendError::invalid)?;
@@ -1565,6 +1587,8 @@ impl CoreBackend for XrayBackend {
     ) -> BackendFuture<'a, ()> {
         Box::pin(async move {
             let s = session;
+            #[cfg(not(windows))]
+            let _ = keep_warm;
             #[cfg(windows)]
             if keep_warm {
                 if let Some(helper) = s.helper.as_mut().filter(|h| h.is_standby() && !h.exited()) {
@@ -1592,11 +1616,11 @@ impl CoreBackend for XrayBackend {
         session: &'a mut BackendSession,
     ) -> BackendFuture<'a, crate::engine::LiveRoutingStatus> {
         Box::pin(async move {
-            #[cfg(windows)]
+            #[cfg(any(windows, target_os = "macos"))]
             {
                 apply_live_rules(state, selected, Some(before), after, session).await
             }
-            #[cfg(not(windows))]
+            #[cfg(not(any(windows, target_os = "macos")))]
             {
                 Ok(crate::engine::LiveRoutingStatus::NeedsConnect)
             }

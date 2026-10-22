@@ -25,6 +25,8 @@ artifacts/
 diagnostics/
 src-tauri/resources/core/*.exe
 src-tauri/resources/core/*.dll
+# Universal macOS core built by src-tauri/build/prepare-core-macos.sh
+src-tauri/runtime/xray/xray
 **/runtime-config*.json
 *.key
 *.p12

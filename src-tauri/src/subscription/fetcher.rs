@@ -259,7 +259,7 @@ impl SubscriptionClient {
         let hwid = crate::platform::device_identity::generate_hwid_from_seed(&seed);
         let identity = DeviceIdentity {
             hwid,
-            device_os: "Windows".to_string(),
+            device_os: crate::platform::device_identity::DEVICE_OS.to_string(),
             ver_os: crate::platform::device_identity::read_os_version(),
             device_model: crate::platform::device_identity::read_device_model(),
         };

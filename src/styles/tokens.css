@@ -84,6 +84,18 @@ body,
 	min-width: 0;
 	background: transparent;
 }
+/* The opaque native window clips its own corners on macOS. */
+:root[data-platform='macos'] {
+	--radius-window: 0px;
+	--radius-window-bottom: 0px;
+}
+:root[data-platform='macos'] body {
+	background: #08080b;
+}
+/* The traffic lights are fixed to the window top, so the UI is too. */
+:root[data-platform='macos'] #app {
+	place-items: start center;
+}
 #app {
 	display: grid;
 	place-items: center;

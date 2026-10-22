@@ -237,7 +237,8 @@ pub fn install(app: &tauri::App, state: &Arc<AppState>) -> tauri::Result<()> {
     let mut tray_builder = tauri::tray::TrayIconBuilder::with_id("main-tray")
         .menu(&initial_menu)
         .tooltip("Lumen")
-        .show_menu_on_left_click(false)
+        // A menu bar item opens its menu on click; the Windows tray icon toggles the window.
+        .show_menu_on_left_click(cfg!(target_os = "macos"))
         .on_menu_event(|app, event| {
             let id = event.id().as_ref().to_string();
             let state = app
@@ -250,6 +251,9 @@ pub fn install(app: &tauri::App, state: &Arc<AppState>) -> tauri::Result<()> {
             });
         })
         .on_tray_icon_event(|tray, event| {
+            if cfg!(target_os = "macos") {
+                return;
+            }
             if let tauri::tray::TrayIconEvent::Click {
                 button: tauri::tray::MouseButton::Left,
                 button_state: tauri::tray::MouseButtonState::Up,
@@ -271,6 +275,14 @@ pub fn install(app: &tauri::App, state: &Arc<AppState>) -> tauri::Result<()> {
             }
         });
 
+    // The menu bar draws a template image in the system's own light or dark color.
+    #[cfg(target_os = "macos")]
+    {
+        tray_builder = tray_builder
+            .icon(tauri::include_image!("icons/tray-template.png"))
+            .icon_as_template(true);
+    }
+    #[cfg(not(target_os = "macos"))]
     if let Some(icon) = app.default_window_icon() {
         tray_builder = tray_builder.icon(icon.clone());
     }

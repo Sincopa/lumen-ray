@@ -1,6 +1,8 @@
 import { writable } from 'svelte/store';
 import { invoke } from '@tauri-apps/api/core';
 import { runtime } from '../runtime';
+import { supportsTun } from '../platform';
+import { errorCode } from './errors';
 export interface NativeSettings {
 	dnsPolicy: {
 		enabled: boolean;
@@ -98,13 +100,27 @@ export async function updateNativeSettings(
 				// The last confirmed snapshot remains the safe local value.
 			}
 			nativeSettings.set(saved);
-			settingsError.set('unavailable');
+			// A Mac app run from its disk image can be fixed by the user.
+			settingsError.set(
+				errorCode(error) === 'autostartUnavailable'
+					? 'autostartUnavailable'
+					: 'unavailable',
+			);
 			throw error;
 		}
 	});
 	writes = operation.catch(() => {});
 	return writes;
 }
+
+// A saved TUN mode would fail to connect where TUN is unavailable.
+if (!supportsTun)
+	void ready
+		.then(() => {
+			if (current.networkMode === 'tun')
+				return updateNativeSettings({ networkMode: 'proxy' });
+		})
+		.catch(() => {});
 
 export async function resetNetworkSettings(): Promise<void> {
 	if (runtime.isTauri) {

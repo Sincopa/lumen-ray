@@ -102,7 +102,7 @@ pub async fn prewarm(state: &Arc<AppState>) {
     }
 }
 
-#[cfg(windows)]
+#[cfg(any(windows, target_os = "macos"))]
 pub async fn apply_live_rules(
     state: &Arc<AppState>,
     selected: &str,
@@ -340,7 +340,7 @@ async fn connect_session_with_repository(
     let mut result = crate::engine::connect(state, repo, &id, session).await;
     let proxy_port = session.proxy_port();
     let is_tun = session.is_tun();
-    #[cfg(windows)]
+    #[cfg(any(windows, target_os = "macos"))]
     if result.is_ok() && !is_tun {
         let port = session.http_port();
         if session
@@ -405,7 +405,7 @@ async fn connect_session_with_repository(
     if state.connection_generation.load(Ordering::Acquire) != generation {
         result = Err(cancelled());
     }
-    #[cfg(windows)]
+    #[cfg(any(windows, target_os = "macos"))]
     {
         let active = &mut session.backend;
         if active.pending_live_switch.is_some() {
@@ -487,7 +487,7 @@ fn protocol_name(repo: &crate::storage::repository::Repository, id: &str) -> Res
 pub(super) async fn release_to_standby(session: &mut Session) -> Result<()> {
     // The stopped listener must not stay the Windows proxy: browsers would lose
     // every site until the user disconnected by hand.
-    #[cfg(windows)]
+    #[cfg(any(windows, target_os = "macos"))]
     if let Some(proxy) = session.system_proxy.as_ref() {
         proxy.restore()?;
         session.system_proxy = None;
@@ -516,7 +516,7 @@ async fn release(session: &mut Session, cause: &BackendError) -> Result<()> {
     if !keeps_prepared_core(cause.code) {
         return stop(session).await;
     }
-    #[cfg(windows)]
+    #[cfg(any(windows, target_os = "macos"))]
     if let Some(proxy) = session.system_proxy.as_ref() {
         proxy.restore()?;
         session.system_proxy = None;
@@ -542,7 +542,7 @@ pub async fn public_ip(proxy_port: u16) -> Result<String> {
 }
 pub async fn stop(session: &mut Session) -> Result<()> {
     // Keep the listener alive if restoring proxy ownership fails.
-    #[cfg(windows)]
+    #[cfg(any(windows, target_os = "macos"))]
     if let Some(proxy) = session.system_proxy.as_ref() {
         proxy.restore()?;
         session.system_proxy = None;
@@ -624,7 +624,7 @@ async fn disconnect_session(
 /// DHCP are up; a single attempt then failed verification and the tunnel stayed
 /// down until the user restarted the app. Wait for a network, then retry.
 pub async fn auto_connect(state: &Arc<AppState>, app: &tauri::AppHandle, id: String) {
-    #[cfg(windows)]
+    #[cfg(any(windows, target_os = "macos"))]
     {
         let deadline = Instant::now() + Duration::from_secs(90);
         let mut waited = false;

@@ -109,8 +109,9 @@
 
 	const normalizedQuery = $derived(searchQuery.toLowerCase());
 	const selectedNames = $derived(new Set(selected));
+	// A macOS app is saved as its bundle folder so its helper processes match too.
 	function processKey(process: ProcessItem) {
-		return process.name;
+		return process.id.endsWith('.app/') ? process.id : process.name;
 	}
 	let filteredProcesses = $derived(
 		processes.filter(

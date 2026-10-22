@@ -16,6 +16,21 @@ pub const LUMEN_HWID_SALT: &[u8] = b"lumen-ray-device-identity-v1";
 /// Cap for the DPAPI identity file. Larger files are rejected.
 pub const MAX_IDENTITY_FILE_SIZE: usize = 4096;
 
+#[cfg(not(target_os = "macos"))]
+pub const HWID_PREFIX: &str = "win-";
+#[cfg(target_os = "macos")]
+pub const HWID_PREFIX: &str = "mac-";
+
+#[cfg(not(target_os = "macos"))]
+pub const DEVICE_OS: &str = "Windows";
+#[cfg(target_os = "macos")]
+pub const DEVICE_OS: &str = "macOS";
+
+#[cfg(not(target_os = "macos"))]
+const PROTECTOR: &str = "Windows DPAPI";
+#[cfg(target_os = "macos")]
+const PROTECTOR: &str = "macOS Keychain";
+
 /// Accepted length of an `x-hwid` value.
 pub const MIN_HWID_LEN: usize = 10;
 pub const MAX_HWID_LEN: usize = 64;
@@ -24,13 +39,13 @@ fn hwid_error(message: impl Into<String>) -> BackendError {
     BackendError::new("HWID_UNAVAILABLE", message)
 }
 
-/// `win-` plus 10 to 64 characters from `[A-Za-z0-9=-]`.
+/// `HWID_PREFIX` plus 10 to 64 characters from `[A-Za-z0-9=-]`.
 pub fn is_valid_hwid(hwid: &str) -> bool {
     let len = hwid.len();
     if !(MIN_HWID_LEN..=MAX_HWID_LEN).contains(&len) {
         return false;
     }
-    if !hwid.starts_with("win-") {
+    if !hwid.starts_with(HWID_PREFIX) {
         return false;
     }
     hwid.chars()
@@ -40,7 +55,7 @@ pub fn is_valid_hwid(hwid: &str) -> bool {
 /// Short form for logs, for example `win-abcd...1234`.
 pub fn mask_hwid(hwid: &str) -> String {
     if hwid.len() <= 12 {
-        "win-***".to_string()
+        format!("{HWID_PREFIX}***")
     } else {
         format!("{}...{}", &hwid[..8], &hwid[hwid.len() - 4..])
     }
@@ -56,7 +71,7 @@ pub fn is_safe_header_value(s: &str) -> bool {
             .all(|c| c.is_ascii() && !c.is_ascii_control())
 }
 
-/// `win-` and 32 hex chars from the first 16 bytes of SHA-256(salt || seed).
+/// `HWID_PREFIX` and 32 hex chars from the first 16 bytes of SHA-256(salt || seed).
 pub fn generate_hwid_from_seed(seed: &str) -> String {
     let mut hasher = Sha256::new();
     hasher.update(LUMEN_HWID_SALT);
@@ -68,7 +83,7 @@ pub fn generate_hwid_from_seed(seed: &str) -> String {
         use std::fmt::Write as _;
         let _ = write!(hex, "{:02x}", byte);
     }
-    format!("win-{hex}")
+    format!("{HWID_PREFIX}{hex}")
 }
 
 /// `HKLM\SOFTWARE\Microsoft\Cryptography\MachineGuid`.
@@ -95,9 +110,57 @@ pub fn read_machine_seed() -> Option<String> {
     }
 }
 
-#[cfg(not(windows))]
+/// `IOPlatformUUID`, stable across reinstalls of macOS on this Mac.
+#[cfg(target_os = "macos")]
+pub fn read_machine_seed() -> Option<String> {
+    let output = std::process::Command::new("/usr/sbin/ioreg")
+        .args(["-rd1", "-c", "IOPlatformExpertDevice"])
+        .stderr(std::process::Stdio::null())
+        .output()
+        .ok()?;
+    platform_uuid(&String::from_utf8_lossy(&output.stdout))
+}
+
+#[cfg(any(target_os = "macos", test))]
+pub(crate) fn platform_uuid(ioreg: &str) -> Option<String> {
+    ioreg.lines().find_map(|line| {
+        let (key, value) = line.split_once('=')?;
+        if key.trim() != "\"IOPlatformUUID\"" {
+            return None;
+        }
+        let value = value.trim().strip_prefix('"')?.strip_suffix('"')?.trim();
+        (!value.is_empty()).then(|| value.to_string())
+    })
+}
+
+#[cfg(not(any(windows, target_os = "macos")))]
 pub fn read_machine_seed() -> Option<String> {
     None
+}
+
+#[cfg(target_os = "macos")]
+fn sysctl(name: &std::ffi::CStr) -> Option<String> {
+    let mut buffer = [0u8; 256];
+    let mut size = buffer.len();
+    let status = unsafe {
+        libc::sysctlbyname(
+            name.as_ptr(),
+            buffer.as_mut_ptr().cast(),
+            &mut size,
+            std::ptr::null_mut(),
+            0,
+        )
+    };
+    if status != 0 {
+        return None;
+    }
+    let value = std::ffi::CStr::from_bytes_until_nul(&buffer[..size.min(buffer.len())])
+        .ok()?
+        .to_str()
+        .ok()?
+        .trim()
+        .to_string();
+    is_safe_header_value(&value).then_some(value)
 }
 
 /// Registry version, for example `10.0.26200`. Falls back to `10.0`.
@@ -142,7 +205,12 @@ pub fn read_os_version() -> String {
     "10.0".to_string()
 }
 
-#[cfg(not(windows))]
+#[cfg(target_os = "macos")]
+pub fn read_os_version() -> String {
+    sysctl(c"kern.osproductversion").unwrap_or_else(|| "0.0".to_string())
+}
+
+#[cfg(not(any(windows, target_os = "macos")))]
 pub fn read_os_version() -> String {
     "10.0".to_string()
 }
@@ -208,7 +276,12 @@ pub fn read_device_model() -> Option<String> {
     }
 }
 
-#[cfg(not(windows))]
+#[cfg(target_os = "macos")]
+pub fn read_device_model() -> Option<String> {
+    sysctl(c"hw.model")
+}
+
+#[cfg(not(any(windows, target_os = "macos")))]
 pub fn read_device_model() -> Option<String> {
     None
 }
@@ -264,7 +337,7 @@ impl DeviceIdentityStore {
         let decrypted = self
             .secret_store
             .unprotect(&encrypted)
-            .map_err(|_| hwid_error("Windows DPAPI failed to decrypt device identity"))?;
+            .map_err(|_| hwid_error(format!("{PROTECTOR} failed to decrypt device identity")))?;
 
         let hwid = String::from_utf8(decrypted)
             .map_err(|_| hwid_error("Decrypted device identity is not valid UTF-8"))?;
@@ -293,7 +366,7 @@ impl DeviceIdentityStore {
         let encrypted = self
             .secret_store
             .protect(hwid.as_bytes())
-            .map_err(|_| hwid_error("Windows DPAPI failed to protect device identity"))?;
+            .map_err(|_| hwid_error(format!("{PROTECTOR} failed to protect device identity")))?;
 
         let mut temp = tempfile::NamedTempFile::new_in(parent)
             .map_err(|_| hwid_error("Failed to create temporary identity file"))?;
@@ -376,12 +449,49 @@ impl DeviceIdentityManager {
 
         let identity = DeviceIdentity {
             hwid,
-            device_os: "Windows".to_string(),
+            device_os: DEVICE_OS.to_string(),
             ver_os: read_os_version(),
             device_model: read_device_model(),
         };
 
         *guard = Some(identity.clone());
         Ok(identity)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn platform_uuid_is_read_from_ioreg() {
+        let text = "+-o J516sAP  <class IOPlatformExpertDevice>\n    {\n      \"IOPlatformSerialNumber\" = \"C02XXXX\"\n      \"IOPlatformUUID\" = \"0A1B2C3D-4E5F-6071-8293-A4B5C6D7E8F9\"\n    }\n";
+        assert_eq!(
+            platform_uuid(text).as_deref(),
+            Some("0A1B2C3D-4E5F-6071-8293-A4B5C6D7E8F9")
+        );
+        assert_eq!(platform_uuid("\"IOPlatformUUID\" = \"\""), None);
+        assert_eq!(platform_uuid(""), None);
+    }
+
+    #[test]
+    fn hwid_uses_the_platform_prefix() {
+        let hwid = generate_hwid_from_seed("seed");
+        assert!(hwid.starts_with(HWID_PREFIX));
+        assert!(is_valid_hwid(&hwid));
+        assert!(is_valid_hwid(&format!("{HWID_PREFIX}0123456789abcdef")));
+        for other in ["win-", "mac-"].into_iter().filter(|p| *p != HWID_PREFIX) {
+            assert!(!is_valid_hwid(&format!("{other}0123456789abcdef")));
+        }
+        assert!(mask_hwid("short").starts_with(HWID_PREFIX));
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn mac_identity_sources_are_readable() {
+        assert!(read_machine_seed().is_some_and(|seed| seed.len() >= 32));
+        let major = read_os_version().split('.').next().map(str::parse::<u32>);
+        assert!(major.is_some_and(|major| major.is_ok_and(|major| major >= 11)));
+        assert!(read_device_model().is_some());
     }
 }

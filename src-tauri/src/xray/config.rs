@@ -59,7 +59,7 @@ pub fn enable_api(config: &mut XrayConfig, metrics_port: u16) -> Result<()> {
 }
 
 /// Routing replacement plus node outbounds that the running core does not have yet.
-#[cfg(windows)]
+#[cfg(any(windows, target_os = "macos"))]
 pub struct LiveRoutingPlan {
     pub patch: Value,
     pub added_outbounds: Vec<Value>,
@@ -68,7 +68,7 @@ pub struct LiveRoutingPlan {
 /// Xray replaces the complete rule set atomically through RoutingService.
 /// Inbounds, DNS, and the router strategy must stay identical. A rule that
 /// points at a server which is not loaded yet adds that outbound first.
-#[cfg(windows)]
+#[cfg(any(windows, target_os = "macos"))]
 pub fn live_routing_plan(
     repo_before: &Repository,
     repo_after: &Repository,
@@ -111,7 +111,10 @@ pub fn live_routing_plan(
 }
 
 /// Patch-only view of `live_routing_plan`, used by tests and the debug smoke run.
-#[cfg(all(windows, any(test, debug_assertions)))]
+#[cfg(any(
+    all(windows, debug_assertions),
+    all(test, any(windows, target_os = "macos"))
+))]
 pub fn live_routing_patch(
     repo_before: &Repository,
     repo_after: &Repository,
@@ -249,11 +252,11 @@ pub fn build(
     let dns_servers = if repo.settings.dns_policy.enabled {
         vec![repo.settings.dns_policy.bootstrap.clone()]
     } else if repo.settings.dns_server == "system" {
-        #[cfg(windows)]
+        #[cfg(any(windows, target_os = "macos"))]
         {
             crate::platform::network::system_dns()?
         }
-        #[cfg(not(windows))]
+        #[cfg(not(any(windows, target_os = "macos")))]
         {
             return Err(BackendError::new(
                 "PLATFORM_UNSUPPORTED",
@@ -562,6 +565,18 @@ fn discord_blocked(repo: &Repository) -> bool {
                 && rule.name.split(',').any(|name| {
                     let name = name.trim().replace('\\', "/");
                     let file = name.rsplit('/').next().unwrap_or(&name);
+                    // A macOS rule names the app bundle folder or the bare app name.
+                    #[cfg(target_os = "macos")]
+                    let file = {
+                        let bundle = name.trim_end_matches('/');
+                        let bundle = bundle.rsplit('/').next().unwrap_or(bundle);
+                        let stem = bundle.strip_suffix(".app").unwrap_or(bundle);
+                        if stem.contains('.') {
+                            file.to_owned()
+                        } else {
+                            format!("{stem}.exe")
+                        }
+                    };
                     DISCORD_PROCESSES
                         .split(',')
                         .any(|discord| file.eq_ignore_ascii_case(discord))
@@ -587,6 +602,15 @@ pub(crate) fn process_names(value: &str) -> Vec<String> {
                 .map(|first| first.to_uppercase().chain(chars).collect::<String>())
                 .unwrap_or_default();
             variants.extend([lower, title, name.to_uppercase()]);
+            // macOS has no .exe, and Chromium and Electron apps connect from "<App> Helper".
+            #[cfg(target_os = "macos")]
+            for variant in variants.clone() {
+                let stem = variant
+                    .strip_suffix(".exe")
+                    .or_else(|| variant.strip_suffix(".EXE"))
+                    .unwrap_or(&variant);
+                variants.extend([stem.to_owned(), format!("{stem} Helper")]);
+            }
         }
         for variant in variants {
             if !names.contains(&variant) {

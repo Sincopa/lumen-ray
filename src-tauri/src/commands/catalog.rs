@@ -30,7 +30,7 @@ async fn restore_catalog_if_unchanged(
     }
     Ok(())
 }
-#[cfg(windows)]
+#[cfg(any(windows, target_os = "macos"))]
 async fn rollback_live_routing(
     state: &AppState,
     app: &tauri::AppHandle,
@@ -89,7 +89,7 @@ pub async fn apply_mutation(
         None
     };
     if let Some(id) = id {
-        #[cfg(windows)]
+        #[cfg(any(windows, target_os = "macos"))]
         if let Some(before) = previous.as_ref() {
             let after = state.repository.read().await.clone();
             match crate::services::vpn_service::apply_live_rules(state, &id, before, &after).await {
@@ -177,7 +177,7 @@ async fn publish_routing_if_changed(
     if !after.nodes.iter().any(|node| node.id == id) {
         return;
     }
-    #[cfg(windows)]
+    #[cfg(any(windows, target_os = "macos"))]
     match crate::services::vpn_service::apply_live_rules(state, &id, before, after).await {
         Ok(crate::engine::LiveRoutingStatus::Applied) => {
             log::info!("Applied subscription routing without reconnecting");
@@ -190,7 +190,7 @@ async fn publish_routing_if_changed(
             );
         }
     }
-    #[cfg(not(windows))]
+    #[cfg(not(any(windows, target_os = "macos")))]
     let _ = id;
 }
 #[tauri::command]
@@ -327,6 +327,13 @@ async fn disconnect_removed_server(state: &AppState, app: &tauri::AppHandle) -> 
 #[tauri::command]
 pub async fn get_processes() -> Result<Vec<crate::platform::windows::ProcessItem>> {
     tokio::task::spawn_blocking(crate::platform::windows::processes)
+        .await
+        .map_err(|_| BackendError::new("PROCESS_FAILED", "Could not enumerate processes"))?
+}
+#[cfg(target_os = "macos")]
+#[tauri::command]
+pub async fn get_processes() -> Result<Vec<crate::platform::processes::ProcessItem>> {
+    tokio::task::spawn_blocking(crate::platform::processes::processes)
         .await
         .map_err(|_| BackendError::new("PROCESS_FAILED", "Could not enumerate processes"))?
 }

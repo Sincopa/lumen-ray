@@ -30,7 +30,7 @@ pub async fn ping(state: &AppState, id: String) -> Result<serde_json::Value> {
     Ok(value)
 }
 async fn ping_inner(state: &AppState, id: &str) -> Result<serde_json::Value> {
-    #[cfg(windows)]
+    #[cfg(any(windows, target_os = "macos"))]
     {
         let Some(core) = isolated_core(state, id).await else {
             return Ok(serde_json::json!("timeout"));
@@ -43,7 +43,7 @@ async fn ping_inner(state: &AppState, id: &str) -> Result<serde_json::Value> {
             None => serde_json::json!("timeout"),
         })
     }
-    #[cfg(not(windows))]
+    #[cfg(not(any(windows, target_os = "macos")))]
     {
         let _ = (state, id);
         Ok(serde_json::json!("timeout"))
@@ -52,21 +52,21 @@ async fn ping_inner(state: &AppState, id: &str) -> Result<serde_json::Value> {
 
 /// A short-lived core that serves one node on a local SOCKS port (TCP and UDP).
 /// Dropping it ends the process with its job object.
-#[cfg(windows)]
+#[cfg(any(windows, target_os = "macos"))]
 pub(crate) struct IsolatedCore {
     pub proxy_port: u16,
     child: crate::platform::process::CoreProcess,
     _permit: tokio::sync::SemaphorePermit<'static>,
 }
 
-#[cfg(windows)]
+#[cfg(any(windows, target_os = "macos"))]
 impl IsolatedCore {
     pub async fn stop(mut self) {
         let _ = self.child.kill().await;
     }
 }
 
-#[cfg(windows)]
+#[cfg(any(windows, target_os = "macos"))]
 pub(crate) async fn isolated_core(state: &AppState, id: &str) -> Option<IsolatedCore> {
     let permit = PROBES.acquire().await.ok()?;
     let mut repo = state.repository.read().await.clone();

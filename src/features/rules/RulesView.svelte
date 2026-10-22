@@ -202,6 +202,9 @@
 	});
 
 	function formatRuleDisplayName(name: string): string {
+		// A macOS app bundle folder: /Applications/Discord.app/
+		const bundle = /([^/]+)\.app\/$/.exec(name);
+		if (bundle) return bundle[1];
 		if (name.includes('\\') || name.includes('/')) {
 			const parts = name.split(/[\\/]/);
 			return parts[parts.length - 1] || name;

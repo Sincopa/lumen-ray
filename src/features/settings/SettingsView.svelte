@@ -10,6 +10,7 @@
 	import SettingRow from '../../components/SettingRow.svelte';
 	import ToggleSwitch from '../../components/ToggleSwitch.svelte';
 	import { runtime } from '../../lib/runtime';
+	import { supportsTun } from '../../lib/platform';
 	import {
 		nativeSettings,
 		settingsError,
@@ -238,11 +239,11 @@
 	let uiScaleValue = $derived(String(Math.round(shaderSettings.uiScale * 100)));
 
 	let routingOptions = $derived([
-		{ value: 'tun', label: t('settings.modeTun') },
+		...(supportsTun ? [{ value: 'tun', label: t('settings.modeTun') }] : []),
 		{ value: 'proxy', label: t('settings.modeProxy') },
 	]);
 	let networkMode = $derived(
-		runtime.isTauri ? $nativeSettings.networkMode : 'proxy',
+		runtime.isTauri && supportsTun ? $nativeSettings.networkMode : 'proxy',
 	);
 
 	let dnsOptions = $derived([
@@ -705,7 +706,9 @@
 						updateNativeSettings({ networkMode: value as 'proxy' | 'tun' }),
 					!runtime.isTauri,
 				)}
-				{@render hint(t('settings.routingDesc'))}
+				{@render hint(
+					t(supportsTun ? 'settings.routingDesc' : 'settings.routingProxyOnly'),
+				)}
 			{:else if currentSubView === 'serverSelection'}
 				{@render choices(
 					serverSelectionOptions,
@@ -756,7 +759,7 @@
 						customDnsInvalid,
 					)}
 				{/if}
-				{@render hint(t('settings.dnsTunOnly'))}
+				{@render hint(supportsTun ? t('settings.dnsTunOnly') : undefined)}
 			{:else if currentSubView === 'updateInterval'}
 				{@render choices(
 					updateIntervalOptions,

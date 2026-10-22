@@ -17,7 +17,7 @@ fn interrupted_repository_write_recovers_previous_encrypted_snapshot() {
     assert!(store.load().is_ok());
 }
 
-#[cfg(windows)]
+#[cfg(any(windows, target_os = "macos"))]
 #[tokio::test]
 async fn native_local_proxy_smoke() {
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -68,6 +68,77 @@ async fn native_local_proxy_smoke() {
         .unwrap();
     assert!(
         tokio::net::TcpStream::connect((std::net::Ipv4Addr::LOCALHOST, proxy))
+            .await
+            .is_err()
+    );
+}
+
+#[cfg(target_os = "macos")]
+#[tokio::test]
+async fn macos_system_proxy_inbound_serves_and_stops() {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let dir = tempfile::tempdir().unwrap();
+    let runtime = crate::runtime::RuntimePaths::new(
+        std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("runtime"),
+    );
+    let core = bundle::prepare(&runtime, dir.path()).unwrap();
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let origin = tokio::spawn(async move {
+        let (mut socket, _) = listener.accept().await.unwrap();
+        let mut request = [0u8; 4096];
+        let read = socket.read(&mut request).await.unwrap();
+        assert!(String::from_utf8_lossy(&request[..read]).starts_with("GET /system-proxy "));
+        socket
+            .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 5\r\nConnection: close\r\n\r\nlumen")
+            .await
+            .unwrap();
+    });
+    let node = uri::parse(VLESS, "sub").unwrap();
+    let mut repo = Repository {
+        nodes: vec![node.clone()],
+        ..Default::default()
+    };
+    assert_eq!(repo.settings.network_mode, "proxy");
+    repo.settings.dns_server = "1.1.1.1".into();
+    let (proxy, metrics) = crate::engine::xray::ports().unwrap();
+    let mut config = config::build(&repo, &node.id, proxy, metrics, false).unwrap();
+    config::enable_api(&mut config, metrics).unwrap();
+    let bytes = serde_json::to_vec(&config).unwrap();
+    let mut session = crate::engine::xray::XraySession::default();
+    crate::engine::xray::start(&core, &mut session, &bytes, proxy, metrics)
+        .await
+        .unwrap();
+    let running = |core: &std::path::Path| {
+        std::process::Command::new("/usr/bin/pgrep")
+            .arg("-f")
+            .arg(core)
+            .output()
+            .unwrap()
+            .status
+            .success()
+    };
+    assert!(running(&core));
+    let result = reqwest::Client::builder()
+        .proxy(reqwest::Proxy::http(format!("http://127.0.0.1:{}", metrics + 1)).unwrap())
+        .build()
+        .unwrap()
+        .get(format!("http://{address}/system-proxy"))
+        .send()
+        .await;
+    let body = match result {
+        Ok(response) => response.text().await,
+        Err(error) => Err(error),
+    };
+    crate::engine::xray::stop(&mut session).await.unwrap();
+    assert_eq!(body.unwrap(), "lumen");
+    tokio::time::timeout(std::time::Duration::from_secs(5), origin)
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(!running(&core));
+    assert!(
+        tokio::net::TcpStream::connect((std::net::Ipv4Addr::LOCALHOST, metrics + 1))
             .await
             .is_err()
     );

@@ -73,6 +73,9 @@ pub async fn install_application_update(
         update
             .install(bytes)
             .map_err(|_| BackendError::new("UPDATE_FAILED", "Could not install signed update"))?;
+        // The Windows installer restarts Lumen itself; on macOS only the bundle was replaced.
+        #[cfg(target_os = "macos")]
+        app.request_restart();
     }
     Ok(())
 }

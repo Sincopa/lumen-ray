@@ -1,0 +1,47 @@
+{
+  "build": {
+    "beforeBuildCommand": "sh src-tauri/build/prepare-core-macos.sh && node node_modules/vite/bin/vite.js build"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "Lumen",
+        "width": 400,
+        "height": 700,
+        "resizable": false,
+        "maximizable": false,
+        "fullscreen": false,
+        "decorations": true,
+        "transparent": false,
+        "shadow": true,
+        "titleBarStyle": "Overlay",
+        "hiddenTitle": true,
+        "trafficLightPosition": {
+          "x": 20,
+          "y": 38
+        },
+        "backgroundColor": "#08080b"
+      }
+    ]
+  },
+  "bundle": {
+    "targets": [
+      "app",
+      "dmg"
+    ],
+    "resources": {
+      "runtime/xray/xray": "runtime/xray/xray",
+      "runtime/xray/geoip.dat": "runtime/xray/geoip.dat",
+      "runtime/xray/geosite.dat": "runtime/xray/geosite.dat",
+      "runtime/licenses/xray.txt": "runtime/licenses/xray.txt",
+      "runtime/licenses/flag-icons.txt": "runtime/licenses/flag-icons.txt",
+      "runtime/licenses/geist.txt": "runtime/licenses/geist.txt",
+      "runtime/licenses/lottie-web.txt": "runtime/licenses/lottie-web.txt",
+      "runtime/licenses/satoshi.txt": "runtime/licenses/satoshi.txt"
+    },
+    "macOS": {
+      "minimumSystemVersion": "13.0",
+      "hardenedRuntime": true
+    }
+  }
+}

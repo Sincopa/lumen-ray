@@ -41,6 +41,7 @@ dependencies = [
  "ctr",
  "ghash",
  "subtle",
+ "zeroize",
 ]
 
 [[package]]
@@ -125,10 +126,12 @@ dependencies = [
  "base64 0.22.1",
  "fs2",
  "hickory-proto",
+ "libc",
  "log",
  "percent-encoding",
  "png 0.17.16",
  "reqwest 0.12.28",
+ "security-framework",
  "serde",
  "serde-saphyr",
  "serde_json",
