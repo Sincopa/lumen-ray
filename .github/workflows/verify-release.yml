@@ -24,6 +24,9 @@ env:
 jobs:
   verify-macos:
     runs-on: macos-latest
+    permissions:
+      contents: write
+      actions: read
     env:
       GH_TOKEN: ${{ github.token }}
     steps:
@@ -69,8 +72,12 @@ jobs:
           for platform in ['windows-x86_64', 'darwin-aarch64', 'darwin-x86_64']:
               entry = metadata['platforms'][platform]
               prefix = f'https://github.com/{os.environ["GH_REPO"]}/releases/download/{tag}/'
-              assert entry['url'].startswith(prefix), f'Unexpected update URL for {platform}'
-              name = urllib.parse.unquote(entry['url'][len(prefix):])
+              asset = next((asset for asset in assets.values() if entry['url'] == asset['apiUrl']), None)
+              if asset is None:
+                  assert entry['url'].startswith(prefix), f'Unexpected update URL for {platform}'
+                  name = urllib.parse.unquote(entry['url'][len(prefix):])
+                  asset = assets[name]
+              name = asset['name']
               assert assets[name]['size'] > 0
               assert entry['signature'].strip() == (packages / f'{name}.sig').read_text().strip(), f'Wrong updater signature for {platform}'
           print('Build provenance, release files and all three updater platforms verified.')
