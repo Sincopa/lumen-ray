@@ -1,0 +1,105 @@
+name: Verify release packages
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing draft release tag
+        required: true
+        type: string
+      build_run:
+        description: Completed release build run with successful tests and package uploads
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+env:
+  RELEASE_TAG: ${{ inputs.tag }}
+  BUILD_RUN: ${{ inputs.build_run }}
+  GH_REPO: ${{ github.repository }}
+
+jobs:
+  verify-macos:
+    runs-on: macos-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Checkout verification scripts
+        uses: actions/checkout@v6
+
+      - name: Check build provenance and updater metadata
+        run: |
+          set -eu
+          [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          [[ "$BUILD_RUN" =~ ^[0-9]+$ ]]
+          git fetch --no-tags origin "refs/tags/$RELEASE_TAG:refs/tags/$RELEASE_TAG"
+          export SOURCE_SHA=$(git rev-parse "$RELEASE_TAG^{commit}")
+          gh run view "$BUILD_RUN" --json headSha,jobs > "$RUNNER_TEMP/build.json"
+          gh release view "$RELEASE_TAG" --json isDraft,assets > "$RUNNER_TEMP/release.json"
+          gh release download "$RELEASE_TAG" --pattern '*.app.tar.gz' --pattern '*.dmg' --pattern '*.sig' --pattern latest.json --dir "$RUNNER_TEMP/packages"
+          python3 - <<'PY'
+          import json, os, pathlib, subprocess, urllib.parse
+          root = pathlib.Path(os.environ['RUNNER_TEMP'])
+          build = json.loads((root / 'build.json').read_text())
+          assert build['headSha'] == os.environ['SOURCE_SHA'], 'Build does not match the release tag'
+          jobs = {job['name']: job for job in build['jobs']}
+          assert jobs['verify-frontend']['conclusion'] == 'success'
+          assert jobs['release-windows']['conclusion'] == 'success'
+          mac = jobs['release-macos']
+          steps = {step['name']: step for step in mac['steps']}
+          for name in ['Verify Rust backend', 'Build and upload ad-hoc signed universal app to the draft']:
+              assert steps[name]['conclusion'] == 'success', f'Missing successful build step: {name}'
+          failed = [step['name'] for step in mac['steps'] if step['conclusion'] == 'failure']
+          assert failed in [[], ['Verify ad-hoc signed bundle']], f'Unrelated build failure: {failed}'
+          release = json.loads((root / 'release.json').read_text())
+          assert release['isDraft'], 'Only unpublished drafts can use package recovery'
+          assets = {asset['name']: asset for asset in release['assets']}
+          tag = os.environ['RELEASE_TAG']
+          version = tag[1:]
+          config = json.loads(subprocess.check_output(['git', 'show', f'{tag}:src-tauri/tauri.conf.json']))
+          assert config['version'] == version
+          for name in [f'Lumen-Ray-{version}-Setup.exe', f'Lumen-Ray-{version}-Portable.zip', f'Lumen_{version}_universal.dmg']:
+              assert assets[name]['size'] > 0, f'Missing release package: {name}'
+          packages = root / 'packages'
+          metadata = json.loads((packages / 'latest.json').read_text())
+          assert metadata['version'].lstrip('v') == version
+          for platform in ['windows-x86_64', 'darwin-aarch64', 'darwin-x86_64']:
+              entry = metadata['platforms'][platform]
+              prefix = f'https://github.com/{os.environ["GH_REPO"]}/releases/download/{tag}/'
+              assert entry['url'].startswith(prefix), f'Unexpected update URL for {platform}'
+              name = urllib.parse.unquote(entry['url'][len(prefix):])
+              assert assets[name]['size'] > 0
+              assert entry['signature'].strip() == (packages / f'{name}.sig').read_text().strip(), f'Wrong updater signature for {platform}'
+          print('Build provenance, release files and all three updater platforms verified.')
+          PY
+
+      - name: Verify updater archive and disk image
+        run: |
+          set -eu
+          version=${RELEASE_TAG#v}
+          packages="$RUNNER_TEMP/packages"
+          unpacked="$RUNNER_TEMP/unpacked"
+          mount="$RUNNER_TEMP/dmg"
+          mkdir -p "$unpacked" "$mount"
+          tar -xzf "$packages/Lumen_${version}_universal.app.tar.gz" -C "$unpacked"
+          sh src-tauri/build/verify-macos-bundle.sh "$unpacked/Lumen.app"
+          hdiutil attach "$packages/Lumen_${version}_universal.dmg" -readonly -nobrowse -mountpoint "$mount"
+          trap 'hdiutil detach "$mount"' EXIT
+          sh src-tauri/build/verify-macos-bundle.sh "$mount/Lumen.app"
+          executable=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$unpacked/Lumen.app/Contents/Info.plist")
+          cmp "$unpacked/Lumen.app/Contents/MacOS/$executable" "$mount/Lumen.app/Contents/MacOS/$executable"
+          cmp "$unpacked/Lumen.app/Contents/Resources/runtime/xray/xray" "$mount/Lumen.app/Contents/Resources/runtime/xray/xray"
+
+  publish:
+    needs: verify-macos
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Publish verified release
+        run: gh release edit "$RELEASE_TAG" --draft=false --latest

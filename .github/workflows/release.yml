@@ -261,15 +261,7 @@ jobs:
           set -eu
           bundle=src-tauri/target/universal-apple-darwin/release/bundle
           app="$bundle/macos/Lumen.app"
-          codesign --verify --strict --verbose=2 "$app"
-          codesign --verify --strict --verbose=2 "$app/Contents/Resources/runtime/xray/xray"
-          codesign -dvv "$app" 2>&1 | grep -qx 'Signature=adhoc'
-          codesign -dvv "$app/Contents/Resources/runtime/xray/xray" 2>&1 | grep -qx 'Signature=adhoc'
-          codesign -dvv "$app/Contents/Resources/runtime/xray/xray" 2>&1 | grep -q 'flags=.*(runtime)'
-          lipo "$app/Contents/Resources/runtime/xray/xray" -verify_arch arm64
-          lipo "$app/Contents/Resources/runtime/xray/xray" -verify_arch x86_64
-          test ! -e "$app/Contents/Resources/runtime/xray/xray.exe"
-          test ! -e "$app/Contents/Resources/runtime/drivers"
+          sh src-tauri/build/verify-macos-bundle.sh "$app"
           ls "$bundle"/dmg/*.dmg
 
   # Publish only after every platform's artifacts passed signature verification.

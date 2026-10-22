@@ -37,7 +37,7 @@ if [ -n "$identity" ] && [ -f "$binary" ] && [ -f "$manifest" ] &&
 	grep -q "\"xray\": \"$(sha "$binary")\"" "$manifest" &&
 	codesign --verify --strict "$binary" 2>/dev/null &&
 	matches_identity "$binary" &&
-	codesign -dvv "$binary" 2>&1 | grep -q 'flags=.*(runtime)'; then
+	codesign -dvv "$binary" 2>&1 | grep -Eq 'flags=.*[(,]runtime[),]'; then
 	echo "Reusing signed Xray $version (universal) in $xray_dir."
 	exit 0
 fi
