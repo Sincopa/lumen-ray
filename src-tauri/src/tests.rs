@@ -1239,15 +1239,27 @@ async fn geo_presets_real_xray_outbound_selection_and_dns_priority() {
         .write_all(&serde_json::to_vec(&config).unwrap())
         .await
         .unwrap();
-    for _ in 0..100 {
-        if tokio::net::TcpStream::connect((std::net::Ipv4Addr::LOCALHOST, port))
-            .await
-            .is_ok()
-        {
-            break;
+    let ready = tokio::time::timeout(std::time::Duration::from_secs(10), async {
+        loop {
+            if tokio::net::TcpStream::connect((std::net::Ipv4Addr::LOCALHOST, port))
+                .await
+                .is_ok()
+            {
+                return;
+            }
+            if let Some(status) = child.try_wait().unwrap() {
+                let logs = std::fs::read_to_string(output.path()).unwrap();
+                panic!("Xray exited before opening its HTTP inbound ({status}):\n{logs}");
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
         }
-        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
-    }
+    })
+    .await;
+    assert!(
+        ready.is_ok(),
+        "Xray did not open its HTTP inbound within 10 seconds:\n{}",
+        std::fs::read_to_string(output.path()).unwrap()
+    );
     let client = reqwest::Client::builder()
         .no_proxy()
         .proxy(reqwest::Proxy::all(format!("http://127.0.0.1:{port}")).unwrap())
