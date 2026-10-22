@@ -42,6 +42,8 @@ If a message says WebView2 is missing, install it from [Microsoft](https://devel
 2. Open it and drag **Lumen** to **Applications**, then start it from there.
 3. Add a profile and connect the same way as on Windows.
 
+The macOS build uses an ad-hoc signature and is not notarized by Apple. If macOS blocks the first launch, open **System Settings → Privacy & Security → Open Anyway**, then confirm the launch.
+
 Only **System proxy** works on macOS for now. It covers browsers and other programs that follow the macOS proxy settings. TUN is not available on macOS yet.
 
 ## If something breaks

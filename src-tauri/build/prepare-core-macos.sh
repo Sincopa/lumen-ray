@@ -16,6 +16,14 @@ manifest="$root/src-tauri/build/manifest-macos.json"
 cache="$root/artifacts/core-download"
 identity=${APPLE_SIGNING_IDENTITY:-}
 
+matches_identity() {
+	if [ "$identity" = '-' ]; then
+		codesign -dvv "$1" 2>&1 | grep -qx 'Signature=adhoc'
+	else
+		codesign -dvv "$1" 2>&1 | grep -qxF "Authority=$identity"
+	fi
+}
+
 sha() { shasum -a 256 "$1" | cut -d' ' -f1; }
 fail() { echo "$1" >&2; exit 1; }
 
@@ -28,7 +36,7 @@ if [ -n "$identity" ] && [ -f "$binary" ] && [ -f "$manifest" ] &&
 	grep -q "\"version\": \"$version\"" "$manifest" &&
 	grep -q "\"xray\": \"$(sha "$binary")\"" "$manifest" &&
 	codesign --verify --strict "$binary" 2>/dev/null &&
-	codesign -dvv "$binary" 2>&1 | grep -qxF "Authority=$identity" &&
+	matches_identity "$binary" &&
 	codesign -dvv "$binary" 2>&1 | grep -q 'flags=.*(runtime)'; then
 	echo "Reusing signed Xray $version (universal) in $xray_dir."
 	exit 0
@@ -55,8 +63,12 @@ lipo -create -output "$work/xray" "$work/Xray-macos-arm64-v8a/xray" "$work/Xray-
 { lipo "$work/xray" -verify_arch arm64 && lipo "$work/xray" -verify_arch x86_64; } || fail "Universal Xray is missing an architecture"
 chmod 755 "$work/xray"
 if [ -n "$identity" ]; then
-	# Hardened runtime and a secure timestamp are required for notarization.
-	codesign --force --options runtime --timestamp --sign "$identity" "$work/xray"
+	if [ "$identity" = '-' ]; then
+		codesign --force --options runtime --timestamp=none --sign - "$work/xray"
+	else
+		# Hardened runtime and a secure timestamp are required for notarization.
+		codesign --force --options runtime --timestamp --sign "$identity" "$work/xray"
+	fi
 	codesign --verify --strict "$work/xray"
 fi
 [ "$("$work/xray" version | head -n 1 | cut -d' ' -f2)" = "$version" ] || fail 'Prepared Xray does not report the pinned version'
