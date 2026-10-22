@@ -7,6 +7,13 @@ import { runtime } from '../lib/runtime';
 export type TabName =
 	'home' | 'subscriptions' | 'servers' | 'settings' | 'rules';
 
+/** Rule selection mode borrows the bottom bar for delete and done. */
+export interface SelectionBar {
+	count: number;
+	onDelete: () => void;
+	onDone: () => void;
+}
+
 const tabOrder: Record<TabName, number> = {
 	home: 0,
 	subscriptions: 1,
@@ -21,6 +28,7 @@ class Shell {
 	importing = $state(false);
 	actionError = $state('');
 	ruleChrome = $state<'default' | 'selection' | 'picker'>('default');
+	selectionBar = $state<SelectionBar | null>(null);
 	brightnessOpen = $state(false);
 	pendingImport = $state('');
 
@@ -30,6 +38,7 @@ class Shell {
 		this.currentTab = tab;
 		if (tab !== 'rules') {
 			this.ruleChrome = 'default';
+			this.selectionBar = null;
 		}
 	};
 

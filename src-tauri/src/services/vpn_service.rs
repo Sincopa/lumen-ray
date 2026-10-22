@@ -1,5 +1,5 @@
-pub use crate::engine::Session;
 use crate::engine::backend;
+pub use crate::engine::Session;
 use crate::{
     app::state::AppState,
     domain::errors::{BackendError, Result},
@@ -223,6 +223,8 @@ async fn connect_with_selection(
             "UNSUPPORTED_PROTOCOL",
             "SERVER_UNREACHABLE",
             "TUN_NETWORK_UNREACHABLE",
+            "TUN_TRAFFIC_BLOCKED",
+            "TUN_DNS_FAILED",
             "CORE_CRASHED",
         ]
         .contains(&result.as_ref().err().map(|error| error.code).unwrap_or(""))
@@ -271,10 +273,7 @@ async fn connect_with_selection(
     }
     *state.session.lock().await = session;
     if let Err(error) = &result {
-        log::warn!(
-            "Connection failed code={}",
-            error.code
-        );
+        log::warn!("Connection failed code={}", error.code);
         if !restored && state.connection_generation.load(Ordering::Acquire) == generation {
             publish(
                 state,
@@ -492,9 +491,7 @@ pub(super) async fn release_to_standby(session: &mut Session) -> Result<()> {
         proxy.restore()?;
         session.system_proxy = None;
     }
-    backend()
-        .disconnect(&mut session.backend, true)
-        .await?;
+    backend().disconnect(&mut session.backend, true).await?;
     #[cfg(windows)]
     if session.is_tun() && !crate::platform::network::tunnel_defaults_absent() {
         return Err(BackendError::new(
@@ -509,9 +506,7 @@ async fn release(session: &mut Session, cause: &BackendError) -> Result<()> {
     // permission again and can drop the default route after the reader is gone.
     #[cfg(windows)]
     if tun_helper_alive(session) {
-        return backend()
-            .disconnect(&mut session.backend, true)
-            .await;
+        return backend().disconnect(&mut session.backend, true).await;
     }
     if !keeps_prepared_core(cause.code) {
         return stop(session).await;
@@ -521,9 +516,7 @@ async fn release(session: &mut Session, cause: &BackendError) -> Result<()> {
         proxy.restore()?;
         session.system_proxy = None;
     }
-    backend()
-        .disconnect(&mut session.backend, true)
-        .await
+    backend().disconnect(&mut session.backend, true).await
 }
 #[cfg(windows)]
 fn tun_helper_alive(session: &Session) -> bool {
@@ -547,9 +540,7 @@ pub async fn stop(session: &mut Session) -> Result<()> {
         proxy.restore()?;
         session.system_proxy = None;
     }
-    backend()
-        .disconnect(&mut session.backend, false)
-        .await
+    backend().disconnect(&mut session.backend, false).await
 }
 fn cancelled() -> BackendError {
     BackendError::new(
@@ -598,9 +589,7 @@ async fn disconnect_session(
     let shutdown = if session.has_system_proxy() {
         stop(session).await
     } else {
-        backend()
-            .disconnect(&mut session.backend, true)
-            .await
+        backend().disconnect(&mut session.backend, true).await
     };
     if let Err(error) = shutdown {
         let _ = stop(session).await;

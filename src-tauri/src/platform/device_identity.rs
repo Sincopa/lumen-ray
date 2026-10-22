@@ -3,11 +3,7 @@ use crate::{
     storage::secure::{OsSecretStore, SecretStore},
 };
 use sha2::{Digest, Sha256};
-use std::{
-    io::Write,
-    path::PathBuf,
-    sync::RwLock,
-};
+use std::{io::Write, path::PathBuf, sync::RwLock};
 
 /// Mixed into the device-id hash so the digest is specific to Lumen.
 /// The salt is public. Changing it gives existing installs a new id.

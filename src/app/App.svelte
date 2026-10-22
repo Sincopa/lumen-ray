@@ -1,9 +1,10 @@
 <script lang="ts">
 	import { fade } from 'svelte/transition';
-	import { screen, rise } from '../lib/motion';
+	import { screen, rise, leaveInPlace } from '../lib/motion';
 	import BackgroundShader from './chrome/BackgroundShader.svelte';
 	import WindowHeader from './chrome/WindowHeader.svelte';
 	import BottomNav from './chrome/BottomNav.svelte';
+	import TabHeader from './chrome/TabHeader.svelte';
 	import ConnectionView from '../features/connection/ConnectionView.svelte';
 	import EmptyHomeView from '../features/connection/EmptyHomeView.svelte';
 	import BrightnessView from '../features/connection/BrightnessView.svelte';
@@ -17,6 +18,7 @@
 	import { runtime } from '../lib/runtime';
 	import { applicationUpdate } from '../lib/services/applicationUpdate';
 	import { shell } from './shell.svelte';
+	import { tabHeader } from './tabHeader.svelte';
 	import { installLifecycle } from './lifecycle.svelte';
 
 	installLifecycle();
@@ -42,6 +44,16 @@
 			(s) => s.id === selectedServer?.subscriptionId,
 		),
 	);
+	// Subscriptions, servers and rules share one header that stays put between them.
+	let showTabHeader = $derived(
+		!shell.importing &&
+			(shell.currentTab === 'subscriptions' ||
+				shell.currentTab === 'servers' ||
+				(shell.currentTab === 'rules' && shell.ruleChrome === 'default')) &&
+			!!tabHeader.slots &&
+			!tabHeader.slots.hidden,
+	);
+
 	let subscriptionExpired = $derived(
 		selectedSubscription?.status === 'expired' ||
 			(typeof selectedSubscription?.daysRemaining === 'number' &&
@@ -97,6 +109,16 @@
 
 		{#if shell.actionError}
 			<p role="alert" transition:rise>{shell.actionError}</p>
+		{/if}
+
+		{#if showTabHeader}
+			<div
+				class="tab-header-host"
+				in:screen={{ dir: shell.direction(shell.currentTab, shell.prevTab) }}
+				out:leaveInPlace
+			>
+				<TabHeader />
+			</div>
 		{/if}
 
 		<!-- Tab Views with directional fly transitions -->
@@ -170,7 +192,10 @@
 								}}
 							/>
 						{:else if shell.currentTab === 'rules'}
-							<RulesView onChromeChange={(mode) => (shell.ruleChrome = mode)} />
+							<RulesView
+								onChromeChange={(mode) => (shell.ruleChrome = mode)}
+								onSelectionChange={(bar) => (shell.selectionBar = bar)}
+							/>
 						{/if}
 					</div>
 				{/key}
@@ -178,7 +203,7 @@
 		</div>
 
 		<!-- Bottom Navigation Bar -->
-		{#if !shell.importing && shell.currentTab !== 'settings' && (shell.currentTab !== 'rules' || shell.ruleChrome === 'default')}
+		{#if !shell.importing && shell.currentTab !== 'settings' && (shell.currentTab !== 'rules' || shell.ruleChrome !== 'picker')}
 			<BottomNav
 				currentTab={shell.currentTab}
 				{routingMode}
@@ -187,6 +212,10 @@
 					(shell.currentTab === 'home' && subscriptionExpired)}
 				onTabChange={shell.goToTab}
 				onModeChange={shell.changeMode}
+				selection={shell.currentTab === 'rules' &&
+				shell.ruleChrome === 'selection'
+					? shell.selectionBar
+					: null}
 				onActionClick={() => (shell.importing = true)}
 			/>
 		{/if}
@@ -292,6 +321,13 @@
 		overflow: hidden;
 		position: relative;
 		min-height: 0;
+	}
+
+	.tab-header-host {
+		position: relative;
+		z-index: 20;
+		flex-shrink: 0;
+		width: 100%;
 	}
 
 	.tab-view {

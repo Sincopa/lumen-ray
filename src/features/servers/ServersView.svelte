@@ -16,6 +16,7 @@
 	import reloadIcon from '../../assets/reload.svg';
 	import searchIcon from '../../assets/search.svg';
 	import crossIcon from '../../assets/close.svg';
+	import { tabHeader } from '../../app/tabHeader.svelte';
 
 	const searchTask = createDeferredTask();
 	onDestroy(() => {
@@ -81,7 +82,9 @@
 			text: `${serverDisplayName(server)} ${server.protocol} ${subscriptionsById.get(server.subscriptionId)?.name ?? ''}`.toLowerCase(),
 		})),
 	);
-	const normalizedQuery = $derived(query.toLowerCase());
+	const normalizedQuery = $derived(
+		(compact ? query : tabHeader.query).toLowerCase(),
+	);
 	let filtered = $derived(
 		normalizedQuery
 			? searchableServers
@@ -128,6 +131,19 @@
 		if (searchSignal > 0) handleOpenSearch();
 	});
 
+	// The tab shows the shared header; the compact picker keeps its own search.
+	const headerOwner = {};
+	$effect(() => {
+		if (compact) return;
+		tabHeader.claim(headerOwner, {
+			key: 'servers',
+			title: activeSubscription?.name ?? t('servers.title'),
+			searchPlaceholder: t('servers.searchPlaceholder') || 'Поиск серверов...',
+			actions: headerActions,
+		});
+	});
+	onDestroy(() => tabHeader.release(headerOwner));
+
 	function select(server: Server) {
 		onSelect?.({
 			id: server.id,
@@ -170,61 +186,73 @@
 	}}
 />
 
-<section class="servers-view" class:compact aria-label={t('servers.title')}>
-	<div class="header-wrapper" class:open={searching}>
-		<div class="header-pill">
-			<!-- Standard header content -->
-			<div class="header-normal" class:header-hidden={searching}>
-				<div class="header-card-title">
-					<span class="title-text">
-						{activeSubscription?.name ?? t('servers.title')}
-					</span>
-					<StatusDot variant="active" />
-				</div>
-				<div class="header-card-actions">
-					<IconButton
-						design
-						icon={searchIcon}
-						ariaLabel={t('common.search')}
-						onclick={handleOpenSearch}
-					/>
-					<IconButton
-						design
-						icon={reloadIcon}
-						ariaLabel={t('servers.reloadServers')}
-						disabled={busy || !$catalogStore.servers.length}
-						onclick={refresh}
-					/>
-				</div>
-			</div>
+{#snippet headerActions()}
+	<IconButton
+		design
+		icon={reloadIcon}
+		ariaLabel={t('servers.reloadServers')}
+		disabled={busy || !$catalogStore.servers.length}
+		onclick={refresh}
+	/>
+{/snippet}
 
-			<!-- Search bar inside header pill -->
-			<div
-				class="header-search"
-				class:search-open={searching && !searchClosing}
-				class:search-closing={searchClosing}
-			>
-				<img src={searchIcon} alt="" class="search-header-icon" />
-				<input
-					bind:this={searchInputEl}
-					type="text"
-					class="search-header-input"
-					placeholder={t('servers.searchPlaceholder') || 'Поиск серверов...'}
-					bind:value={query}
-					autocomplete="off"
-					spellcheck="false"
-				/>
-				<button
-					type="button"
-					class="close-search-btn"
-					onclick={handleCloseSearch}
-					aria-label={t('common.close')}
+<section class="servers-view" class:compact aria-label={t('servers.title')}>
+	{#if compact}
+		<div class="header-wrapper" class:open={searching}>
+			<div class="header-pill">
+				<!-- Standard header content -->
+				<div class="header-normal" class:header-hidden={searching}>
+					<div class="header-card-title">
+						<span class="title-text">
+							{activeSubscription?.name ?? t('servers.title')}
+						</span>
+						<StatusDot variant="active" />
+					</div>
+					<div class="header-card-actions">
+						<IconButton
+							design
+							icon={searchIcon}
+							ariaLabel={t('common.search')}
+							onclick={handleOpenSearch}
+						/>
+						<IconButton
+							design
+							icon={reloadIcon}
+							ariaLabel={t('servers.reloadServers')}
+							disabled={busy || !$catalogStore.servers.length}
+							onclick={refresh}
+						/>
+					</div>
+				</div>
+
+				<!-- Search bar inside header pill -->
+				<div
+					class="header-search"
+					class:search-open={searching && !searchClosing}
+					class:search-closing={searchClosing}
 				>
-					<img src={crossIcon} alt="" class="close-icon" />
-				</button>
+					<img src={searchIcon} alt="" class="search-header-icon" />
+					<input
+						bind:this={searchInputEl}
+						type="text"
+						class="search-header-input"
+						placeholder={t('servers.searchPlaceholder') || 'Поиск серверов...'}
+						bind:value={query}
+						autocomplete="off"
+						spellcheck="false"
+					/>
+					<button
+						type="button"
+						class="close-search-btn"
+						onclick={handleCloseSearch}
+						aria-label={t('common.close')}
+					>
+						<img src={crossIcon} alt="" class="close-icon" />
+					</button>
+				</div>
 			</div>
 		</div>
-	</div>
+	{/if}
 
 	{#if error}<p role="alert" transition:rise>{error}</p>{/if}
 

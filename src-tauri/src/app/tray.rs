@@ -214,7 +214,8 @@ async fn handle_tray_menu_event(
             let status = state.snapshot.read().await.status.clone();
             if status == "connected" {
                 // A successful switch persists the selection and notifies the UI.
-                let _ = crate::services::vpn_service::connect_exact(state, app, srv_id.to_string()).await;
+                let _ = crate::services::vpn_service::connect_exact(state, app, srv_id.to_string())
+                    .await;
             } else {
                 let result = crate::commands::catalog::apply_mutation(
                     state,

@@ -1,8 +1,9 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { fade } from 'svelte/transition';
-	import { rise, swap } from '../../lib/motion';
+	import { rise } from '../../lib/motion';
 	import RollingNumber from '../../components/RollingNumber.svelte';
+	import Morph from '../../components/Morph.svelte';
 	import CountryFlag from '../../components/CountryFlag.svelte';
 	import LumenFace from '../../components/LumenFace.svelte';
 	import HomeNotice from '../../components/HomeNotice.svelte';
@@ -50,6 +51,13 @@
 
 	let isConnected = $derived(connectionState === 'connected');
 	let isConnecting = $derived(connectionState === 'connecting');
+	let statusKey = $derived(
+		isConnecting || connectionState === 'disconnecting'
+			? connectionState
+			: isConnected
+				? 'timer'
+				: 'idle',
+	);
 
 	let now = $state(Date.now());
 	let elapsed = $derived(
@@ -138,37 +146,33 @@
 
 		<!-- Status and Timer in an absolute slot below button to prevent button displacement -->
 		<div class="status-slot">
-			{#if isConnecting || connectionState === 'disconnecting'}
-				<p
-					class="connection-status"
-					aria-hidden="true"
-					in:swap
-					out:fade={{ duration: 120 }}
-				>
-					{t('home.' + connectionState)}
-				</p>
-			{:else if isConnected}
-				<div
-					class="timer"
-					in:swap={{ y: 8, duration: 260 }}
-					out:fade={{ duration: 120 }}
-				>
-					<span class="time-segment">
-						<RollingNumber value={hours} />
-						<span class="time-label">{t('home.hoursUnit')}</span>
-					</span>
-					<span class="time-separator"></span>
-					<span class="time-segment">
-						<RollingNumber value={minutes} minDigits={2} />
-						<span class="time-label">{t('home.minutesUnit')}</span>
-					</span>
-					<span class="time-separator"></span>
-					<span class="time-segment">
-						<RollingNumber value={seconds} minDigits={2} />
-						<span class="time-label">{t('home.secondsUnit')}</span>
-					</span>
-				</div>
-			{/if}
+			<!-- "Connecting…", the timer and "Disconnecting…" morph into each other. -->
+			<div class="status-capsule" class:empty={statusKey === 'idle'}>
+				<Morph key={statusKey}>
+					{#if statusKey === 'connecting' || statusKey === 'disconnecting'}
+						<p class="connection-status" aria-hidden="true">
+							{t('home.' + statusKey)}
+						</p>
+					{:else if statusKey === 'timer'}
+						<div class="timer">
+							<span class="time-segment">
+								<RollingNumber value={hours} />
+								<span class="time-label">{t('home.hoursUnit')}</span>
+							</span>
+							<span class="time-separator"></span>
+							<span class="time-segment">
+								<RollingNumber value={minutes} minDigits={2} />
+								<span class="time-label">{t('home.minutesUnit')}</span>
+							</span>
+							<span class="time-separator"></span>
+							<span class="time-segment">
+								<RollingNumber value={seconds} minDigits={2} />
+								<span class="time-label">{t('home.secondsUnit')}</span>
+							</span>
+						</div>
+					{/if}
+				</Morph>
+			</div>
 
 			{#if error}
 				<div
@@ -285,8 +289,19 @@
 		pointer-events: none;
 	}
 
+	/* Plain text: only the words dissolve into each other. */
+	.status-capsule {
+		display: flex;
+		align-items: center;
+		transition: opacity 240ms ease;
+	}
+	.status-capsule.empty {
+		opacity: 0;
+	}
+
 	.connection-status {
 		margin: 0;
+		white-space: nowrap;
 		color: rgba(0, 0, 0, 0.66);
 		font-size: 14px;
 		text-align: center;

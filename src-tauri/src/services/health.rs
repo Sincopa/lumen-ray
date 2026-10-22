@@ -97,15 +97,48 @@ pub async fn verify(proxy_port: u16, tun: bool) -> Result<Option<String>> {
     let system = client(None)?;
     let (proxy_result, system_result) = tokio::join!(check_client(&proxy), check_client(&system));
     let ip = proxy_result?;
-    system_result.map_err(|_| {
-        BackendError::new(
-            "TUN_NETWORK_UNREACHABLE",
-            "The proxy works but the system network path does not",
-        )
-    })?;
+    if system_result.is_err() {
+        return Err(system_path_error(&system).await);
+    }
     #[cfg(windows)]
     crate::platform::network::verify_tunnel_routes()?;
     Ok(ip)
+}
+
+/// Names the stage at which the system path through LumenTun fails, so the user
+/// sees more than "the network is unreachable". Xray logs dial failures below
+/// its warning level, so its own output cannot tell these apart.
+async fn system_path_error(system: &reqwest::Client) -> BackendError {
+    // Any HTTP answer from an address proves that packets leave through the tunnel;
+    // the lookup separately checks Windows name resolution through it.
+    let by_address = system.get("http://1.1.1.1/cdn-cgi/trace").send();
+    let lookup = tokio::time::timeout(
+        Duration::from_secs(3),
+        tokio::net::lookup_host("cp.cloudflare.com:80"),
+    );
+    let (by_address, lookup) = tokio::join!(by_address, lookup);
+    let resolved =
+        lookup.is_ok_and(|result| result.is_ok_and(|mut addresses| addresses.next().is_some()));
+    let error = system_path_failure(by_address.is_ok(), resolved);
+    log::warn!("TUN system path check failed: {}", error.message);
+    error
+}
+
+fn system_path_failure(traffic_ok: bool, dns_ok: bool) -> BackendError {
+    match (traffic_ok, dns_ok) {
+        (false, _) => BackendError::new(
+            "TUN_TRAFFIC_BLOCKED",
+            "Connections through LumenTun do not leave the computer",
+        ),
+        (true, false) => BackendError::new(
+            "TUN_DNS_FAILED",
+            "Connections through LumenTun work, but Windows name resolution does not",
+        ),
+        (true, true) => BackendError::new(
+            "TUN_NETWORK_UNREACHABLE",
+            "Connections and name resolution work, but HTTPS checks through LumenTun fail",
+        ),
+    }
 }
 
 /// Each path of a running session, checked separately so the monitor can tell
@@ -188,6 +221,8 @@ pub fn retryable(code: &str) -> bool {
         code,
         "SERVER_UNREACHABLE"
             | "TUN_NETWORK_UNREACHABLE"
+            | "TUN_TRAFFIC_BLOCKED"
+            | "TUN_DNS_FAILED"
             | "CORE_CRASHED"
             | "CORE_START_FAILED"
             | "TUN_ADAPTER_TIMEOUT"
@@ -216,6 +251,22 @@ pub fn allow_recovery(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn system_path_failure_names_the_failed_stage() {
+        assert_eq!(system_path_failure(false, true).code, "TUN_TRAFFIC_BLOCKED");
+        assert_eq!(
+            system_path_failure(false, false).code,
+            "TUN_TRAFFIC_BLOCKED"
+        );
+        assert_eq!(system_path_failure(true, false).code, "TUN_DNS_FAILED");
+        assert_eq!(
+            system_path_failure(true, true).code,
+            "TUN_NETWORK_UNREACHABLE"
+        );
+        for code in ["TUN_TRAFFIC_BLOCKED", "TUN_DNS_FAILED"] {
+            assert!(retryable(code));
+        }
+    }
     #[test]
     fn rapid_success_then_crash_still_exhausts_recovery_budget() {
         let now = std::time::Instant::now();

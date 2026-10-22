@@ -54,6 +54,35 @@
 	/* Motion */
 	--ease-spring: cubic-bezier(0.22, 1, 0.36, 1);
 	--ease-soft: cubic-bezier(0.4, 0, 0.2, 1);
+	/* Damped spring with a 5% overshoot, for shapes that morph. Matches springOut in motion.ts. */
+	--ease-morph: linear(
+		0,
+		0.059,
+		0.196,
+		0.366,
+		0.537,
+		0.69,
+		0.815,
+		0.911,
+		0.978,
+		1.021,
+		1.044,
+		1.053,
+		1.053,
+		1.047,
+		1.039,
+		1.029,
+		1.02,
+		1.013,
+		1.007,
+		1.003,
+		1,
+		0.998,
+		0.997,
+		0.997,
+		1
+	);
+	--morph-duration: 600ms;
 
 	/* Z-index */
 	--z-bg: -10;

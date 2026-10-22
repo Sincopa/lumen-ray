@@ -354,6 +354,7 @@ pub fn build(
     }
     let mut nodes = None;
     let mut outbound_tags: Option<std::collections::HashSet<String>> = None;
+    let mut catch_all: Option<String> = None;
     for rule in crate::services::catalog_service::ordered_rules(&repo.rules) {
         let target = if ["direct", "block"].contains(&rule.server_id.as_str()) {
             rule.server_id.clone()
@@ -448,14 +449,21 @@ pub fn build(
                 let tag = crate::storage::repository::normalize_geo_tag(&rule.name, "geoip")?;
                 compiled["ip"] = json!([format!("geoip:{tag}")]);
             }
-            // A MATCH/final rule must not turn Rules mode into a full tunnel.
-            // Unmatched traffic stays direct; only the listed services use the VPN.
-            crate::storage::repository::RuleMatcher::Final => continue,
+            // A provider or preset MATCH must not turn Rules mode into a full tunnel:
+            // unmatched traffic stays direct and only the listed services use the VPN.
+            // A catch-all the user added replaces that default, so "everything through
+            // one server except a few sites" works. It goes last, after every rule.
+            crate::storage::repository::RuleMatcher::Final => {
+                if rule.preset_id.is_none() && catch_all.is_none() {
+                    catch_all = Some(target);
+                }
+                continue;
+            }
         }
         rules.push(compiled);
     }
     let default_target = if repo.routing_mode == "rules" {
-        "direct".to_string()
+        catch_all.unwrap_or_else(|| "direct".to_string())
     } else {
         target_tag.to_string()
     };

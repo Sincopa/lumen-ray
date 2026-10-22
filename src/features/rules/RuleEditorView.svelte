@@ -2,7 +2,7 @@
 	import nextIcon from '../../assets/chevron-right.svg';
 	import type { Rule, RuleMatcher, Server } from '../../lib/services/catalog';
 	import { t } from '../../lib/i18n';
-	import { screen, reveal } from '../../lib/motion';
+	import { screen, reveal, morphIn, morphOut } from '../../lib/motion';
 	import { serverDisplayName } from '../../lib/utils/serverDisplayName';
 	import CountryFlag from '../../components/CountryFlag.svelte';
 	import MaterialIcon from '../../components/MaterialIcon.svelte';
@@ -25,6 +25,8 @@
 		step?: 'type' | 'form';
 		onStepChange?: (step: 'type' | 'form') => void;
 		onNameChange?: (name: string) => void;
+		/** Offers the catch-all type. There is at most one. */
+		allowFinal?: boolean;
 	}
 
 	let {
@@ -39,6 +41,7 @@
 		step = 'form',
 		onStepChange,
 		onNameChange,
+		allowFinal = true,
 	}: Props = $props();
 
 	const ruleTypes: { id: RuleMatcher; label: string; desc: string }[] = [
@@ -50,7 +53,11 @@
 		},
 		{ id: 'geosite', label: 'GeoSite', desc: 'rules.typeGeositeDesc' },
 		{ id: 'geoip', label: 'GeoIP', desc: 'rules.typeGeoipDesc' },
+		{ id: 'final', label: 'rules.everythingElse', desc: 'rules.typeFinalDesc' },
 	];
+	const shownTypes = $derived(
+		allowFinal ? ruleTypes : ruleTypes.filter((type) => type.id !== 'final'),
+	);
 	let pickedType = $state<RuleMatcher | null>(null);
 
 	// svelte-ignore state_referenced_locally
@@ -96,8 +103,13 @@
 		onStepChange?.('form');
 	}
 
+	// Back from the form returns to the type list only for a new rule. An
+	// existing rule opens on the form, so back leaves the editor.
+	// svelte-ignore state_referenced_locally
+	const startedOnType = step === 'type';
+
 	function goBack() {
-		if (step === 'form' && onStepChange) {
+		if (step === 'form' && startedOnType && onStepChange) {
 			pickedType = matcher;
 			onStepChange('type');
 		} else {
@@ -326,7 +338,7 @@
 			{#if step === 'type'}
 				<!-- Choose what the rule matches. -->
 				<div class="type-list" role="radiogroup" aria-label={t('rules.kind')}>
-					{#each ruleTypes as type (type.id)}
+					{#each shownTypes as type (type.id)}
 						{@const selected = pickedType === type.id}
 						<button
 							type="button"
@@ -354,32 +366,10 @@
 						</button>
 					{/each}
 				</div>
-
-				<div class="design-action-bar">
-					<IconButton
-						design
-						icon={backIcon}
-						ariaLabel={t('common.back')}
-						size="lg"
-						variant="surface"
-						onclick={onCancel}
-					/>
-					<button
-						type="button"
-						class="continue-btn"
-						disabled={!pickedType}
-						onclick={continueWithType}
-					>
-						<span>{t('common.continue')}</span>
-						<img src={nextIcon} alt="" width="34" height="34" />
-					</button>
-				</div>
 			{:else}
 				<div class="form-container">
 					{#if matcher === 'final'}
-						<p class="field-hint">
-							{t('rules.everythingElse')}. {t('rules.finalDetails')}
-						</p>
+						<p class="field-hint">{t('rules.finalHint')}</p>
 						{@render serverField()}
 					{:else if matcher === 'domain'}
 						<DesignTextField
@@ -455,29 +445,45 @@
 						<p class="error-msg" role="alert">{error}</p>
 					{/if}
 				</div>
-
-				<div class="design-action-bar">
-					<IconButton
-						design
-						icon={backIcon}
-						ariaLabel={t('common.back')}
-						size="lg"
-						variant="surface"
-						onclick={goBack}
-					/>
-					<IconButton
-						design
-						icon={checkIcon}
-						ariaLabel={t('common.save')}
-						size="lg"
-						variant="primary"
-						disabled={!canSave}
-						onclick={handleSave}
-					/>
-				</div>
 			{/if}
 		</div>
 	{/key}
+
+	<!-- The bar stays while the steps change: "Continue" shrinks into the check. -->
+	<div class="design-action-bar">
+		<IconButton
+			design
+			icon={backIcon}
+			ariaLabel={t('common.back')}
+			size="lg"
+			variant="surface"
+			onclick={goBack}
+		/>
+		<button
+			type="button"
+			class="primary-morph"
+			class:wide={step === 'type'}
+			disabled={step === 'type' ? !pickedType : !canSave}
+			aria-label={step === 'type' ? t('common.continue') : t('common.save')}
+			onclick={step === 'type' ? continueWithType : handleSave}
+		>
+			{#key step}
+				<span
+					class="primary-layer"
+					class:pill={step === 'type'}
+					in:morphIn
+					out:morphOut
+				>
+					{#if step === 'type'}
+						<span>{t('common.continue')}</span>
+						<img src={nextIcon} alt="" width="34" height="34" />
+					{:else}
+						<img src={checkIcon} alt="" width="34" height="34" />
+					{/if}
+				</span>
+			{/key}
+		</button>
+	</div>
 </section>
 
 <style>
@@ -570,16 +576,16 @@
 		letter-spacing: 0.2px;
 	}
 
-	.continue-btn {
-		display: flex;
-		justify-content: space-between;
-		align-items: center;
-		flex: 1;
-		max-width: 272px;
+	/* One button: a wide "Continue" pill on the type step, a round check on the form. */
+	.primary-morph {
+		position: relative;
+		flex-shrink: 0;
+		width: 50px;
 		height: 50px;
-		padding: 8px 8px 8px 24px;
+		padding: 0;
 		border: 0;
 		border-radius: 123px;
+		overflow: hidden;
 		background: #fff;
 		color: #262626;
 		font-size: 16px;
@@ -588,22 +594,51 @@
 		-webkit-backdrop-filter: blur(25px);
 		backdrop-filter: blur(25px);
 		transition:
+			width var(--morph-duration) var(--ease-morph),
 			background-color 180ms ease,
 			color 180ms ease,
 			transform 160ms var(--ease-spring);
 	}
-	.continue-btn:disabled {
+	.primary-morph.wide {
+		width: min(272px, calc(100% - 62px));
+	}
+	.primary-layer {
+		position: absolute;
+		inset: 0;
+		display: flex;
+		justify-content: center;
+		align-items: center;
+	}
+	.primary-layer.pill {
+		justify-content: space-between;
+		padding: 8px 8px 8px 24px;
+		white-space: nowrap;
+	}
+	.primary-layer img {
+		filter: brightness(0);
+	}
+	.primary-morph:disabled {
 		background: #262626;
 		color: #ffffff4d;
 		opacity: 1;
 	}
-	/* The chevron asset is dark; on the disabled pill it matches the dim label. */
-	.continue-btn:disabled img {
+	/* The dark glyphs match the dim label on the disabled pill. */
+	.primary-morph:disabled img {
 		filter: brightness(0) invert(1);
 		opacity: 0.3;
 	}
-	.continue-btn:active:not(:disabled) {
+	.primary-morph:active:not(:disabled) {
 		transform: scale(0.97);
+	}
+	@media (hover: hover) and (pointer: fine) {
+		.primary-morph:hover:not(:disabled) {
+			background: #f5f5f5;
+		}
+	}
+	@media (prefers-reduced-motion: reduce) {
+		.primary-morph {
+			transition: none;
+		}
 	}
 
 	/* Step 2: form. */

@@ -481,6 +481,16 @@
 								onchange={(val) => updateNativeSettings({ autoStart: val })}
 							/>
 						</SettingRow>
+						<SettingRow label={t('settings.autoConnect')}>
+							<ToggleSwitch
+								mode="checkbox"
+								disabled={!runtime.isTauri}
+								ariaLabel={t('settings.autoConnect')}
+								checked={runtime.isTauri ? $nativeSettings.autoConnect : false}
+								onchange={(value) =>
+									updateNativeSettings({ autoConnect: value })}
+							/>
+						</SettingRow>
 						<SettingRow label={t('settings.closeToTray')}>
 							<ToggleSwitch
 								mode="checkbox"
@@ -523,16 +533,6 @@
 							showChevron
 							onclick={() => open('routingMode')}
 						/>
-						<SettingRow label={t('settings.autoConnect')}>
-							<ToggleSwitch
-								mode="checkbox"
-								disabled={!runtime.isTauri}
-								ariaLabel={t('settings.autoConnect')}
-								checked={runtime.isTauri ? $nativeSettings.autoConnect : false}
-								onchange={(value) =>
-									updateNativeSettings({ autoConnect: value })}
-							/>
-						</SettingRow>
 						<SettingRow label={t('settings.autoReconnect')}>
 							<ToggleSwitch
 								mode="checkbox"

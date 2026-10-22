@@ -1007,6 +1007,34 @@ fn geo_rules_xray_config_compilation() {
     assert!(last.get("network").is_none());
     assert_eq!(last["outboundTag"], "direct");
 
+    // A catch-all the user added sends unmatched traffic to its server, still
+    // after every other rule. A provider MATCH keeps the direct default.
+    let catch_all_target = |preset_id: Option<&str>| {
+        let mut everything = repo.clone();
+        everything.rules.push(Rule {
+            id: "everything".into(),
+            name: "match".into(),
+            matcher: RuleMatcher::Final,
+            server_id: "subscription".into(),
+            enabled: true,
+            preset_id: preset_id.map(Into::into),
+            is_domain: false,
+        });
+        let value =
+            serde_json::to_value(config::build(&everything, &node.id, 10808, 10809, true).unwrap())
+                .unwrap();
+        let last = value["routing"]["rules"]
+            .as_array()
+            .unwrap()
+            .last()
+            .unwrap()
+            .clone();
+        assert_eq!(last["ip"], serde_json::json!(["0.0.0.0/0", "::/0"]));
+        last["outboundTag"].clone()
+    };
+    assert_eq!(catch_all_target(None), "proxy");
+    assert_eq!(catch_all_target(Some("subscription:sub")), "direct");
+
     // Tag validation: mismatched prefix must error
     repo.rules = vec![Rule {
         id: "bad".into(),

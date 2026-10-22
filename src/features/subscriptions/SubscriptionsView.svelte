@@ -5,7 +5,14 @@
 	import { SvelteSet } from 'svelte/reactivity';
 	import { createDeferredTask } from '../../lib/utils/deferredTask';
 	import { flip } from 'svelte/animate';
-	import { reveal, rise, pop, swap, easeOut } from '../../lib/motion';
+	import {
+		reveal,
+		rise,
+		pop,
+		swap,
+		easeOut,
+		morphGrow,
+	} from '../../lib/motion';
 	import { catalog, connection } from '../../lib/services';
 	import { errorCode } from '../../lib/services/errors';
 	import {
@@ -16,7 +23,6 @@
 	import type { Subscription } from '../../lib/services/catalog';
 	import DesignOverlay from '../../components/DesignOverlay.svelte';
 	import ConfirmDialog from '../../components/ConfirmDialog.svelte';
-	import StatusDot from '../../components/StatusDot.svelte';
 	import IconButton from '../../components/IconButton.svelte';
 	import PopupMenu from '../../components/PopupMenu.svelte';
 	import MenuItem from '../../components/MenuItem.svelte';
@@ -30,6 +36,7 @@
 	import backIcon from '../../assets/back.svg';
 	import checkIcon from '../../assets/check.svg';
 	import { formatSubscriptionUpdatedAgo } from '../../lib/utils/time';
+	import { tabHeader } from '../../app/tabHeader.svelte';
 
 	const focusTask = createDeferredTask();
 	let copyResetTimer: ReturnType<typeof setTimeout> | undefined;
@@ -78,6 +85,32 @@
 				?.subscriptionId ??
 			$catalogStore.subscriptions[0]?.id,
 	);
+
+	const activeSub = $derived(
+		$catalogStore.subscriptions.find((sub) => sub.id === activeSubId),
+	);
+	// The active subscription is pinned in the shared header above the list.
+	const otherSubs = $derived(
+		$catalogStore.subscriptions.filter((sub) => sub.id !== activeSub?.id),
+	);
+
+	const headerOwner = {};
+	$effect(() => {
+		const sub = activeSub;
+		if (!sub) {
+			tabHeader.release(headerOwner);
+			return;
+		}
+		tabHeader.claim(headerOwner, {
+			key: 'subscriptions',
+			title: sub.name,
+			actions: headerActions,
+			replace: editingId === sub.id ? headerRename : undefined,
+			body: expanded.has(sub.id) ? headerBody : undefined,
+			popover: menu === sub.id ? headerMenu : undefined,
+		});
+	});
+	onDestroy(() => tabHeader.release(headerOwner));
 
 	let menuTop = $state(68);
 	let viewEl = $state<HTMLElement | null>(null);
@@ -253,6 +286,152 @@
 	}}
 />
 
+{#snippet renameField(sub: Subscription)}
+	<div
+		class="card-rename-inline"
+		role="presentation"
+		onclick={(e) => e.stopPropagation()}
+		onkeydown={(e) => e.stopPropagation()}
+	>
+		<img src={pencilIcon} alt="" class="rename-icon" />
+		<input
+			bind:this={editInputEl}
+			type="text"
+			class="rename-input"
+			bind:value={editName}
+			maxlength="80"
+			autocomplete="off"
+			spellcheck="false"
+			onkeydown={(e) => {
+				if (e.key === 'Enter') {
+					e.preventDefault();
+					saveEditing(sub.id);
+				} else if (e.key === 'Escape') {
+					e.preventDefault();
+					cancelEditing();
+				}
+			}}
+		/>
+		<button
+			type="button"
+			class="rename-action-btn check"
+			onclick={() => saveEditing(sub.id)}
+			aria-label={t('common.save')}
+		>
+			<img src={checkIcon} alt="" class="action-svg" />
+		</button>
+		<button
+			type="button"
+			class="rename-action-btn cancel"
+			onclick={cancelEditing}
+			aria-label={t('common.close')}
+		>
+			<img src={closeBoldIcon} alt="" class="action-svg" />
+		</button>
+	</div>
+{/snippet}
+
+{#snippet cardActions(sub: Subscription)}
+	<IconButton
+		design
+		icon={reloadIcon}
+		ariaLabel={t('common.reload')}
+		disabled={busy !== null}
+		onclick={() => refresh(sub.id)}
+	/>
+	<IconButton
+		design
+		icon={menuIcon}
+		ariaLabel={t('common.menu')}
+		active={menu === sub.id}
+		expanded={menu === sub.id}
+		onclick={(e) => toggleMenu(sub.id, e)}
+	/>
+	<IconButton
+		design
+		icon={chevronIcon}
+		ariaLabel={sub.name}
+		expanded={expanded.has(sub.id)}
+		class="card-chevron"
+		onclick={() => toggleExpanded(sub.id)}
+	/>
+{/snippet}
+
+{#snippet cardDetails(sub: Subscription)}
+	<div class="metrics-row">
+		<div class="metric-item">
+			<span class="metric-label">
+				{t('subscriptions.daysLabel')}
+			</span>
+			<span class="metric-val">
+				{sub.daysRemaining ?? (sub.traffic === '∞' ? '∞' : '—')}
+			</span>
+		</div>
+		<div class="metric-item">
+			<span class="metric-label">
+				{t('subscriptions.trafficLabel')}
+			</span>
+			<span class="metric-val">{sub.traffic ?? '—'}</span>
+		</div>
+	</div>
+	<div class="updated-time">{formatUpdatedAgo(sub)}</div>
+	{#if $subscriptionRefreshStatus[sub.id]?.state === 'error'}
+		<div class="refresh-error" role="status">
+			{t('subscriptions.refreshFailed')}: {t(
+				'errors.' + ($subscriptionRefreshStatus[sub.id].error ?? 'unknown'),
+			)}
+		</div>
+	{/if}
+{/snippet}
+
+{#snippet menuItems()}
+	<MenuItem
+		icon={pencilIcon}
+		label={t('common.edit')}
+		onclick={() => {
+			if (activeMenuSub) startEditing(activeMenuSub);
+		}}
+	/>
+	<MenuItem
+		icon={shareIcon}
+		label={t('common.share')}
+		onclick={() => {
+			if (activeMenuSub) void showSubscriptionSource(activeMenuSub);
+		}}
+	/>
+	<MenuItem
+		icon={trashIcon}
+		label={t('common.delete')}
+		variant="danger"
+		disabled={$connectionStore.busy || $connectionStore.status === 'connected'}
+		onclick={() => {
+			deleting = activeMenuSub ?? null;
+			menu = null;
+		}}
+	/>
+{/snippet}
+
+<!-- The active subscription lives in the shared header; these fill it. -->
+{#snippet headerRename()}
+	{#if activeSub}{@render renameField(activeSub)}{/if}
+{/snippet}
+
+{#snippet headerActions()}
+	{#if activeSub}{@render cardActions(activeSub)}{/if}
+{/snippet}
+
+{#snippet headerBody()}
+	{#if activeSub}
+		<div class="card-details">{@render cardDetails(activeSub)}</div>
+	{/if}
+{/snippet}
+
+{#snippet headerMenu()}
+	<PopupMenu top="calc(var(--design-header-height) + 8px)" right="20px">
+		{@render menuItems()}
+	</PopupMenu>
+{/snippet}
+
 <section
 	class="subscriptions-view"
 	bind:this={viewEl}
@@ -260,97 +439,31 @@
 >
 	{#if error}<p role="alert" transition:rise>{error}</p>{/if}
 	<div class="cards-list" onscroll={() => (menu = null)}>
-		{#each $catalogStore.subscriptions as sub (sub.id)}
+		{#each otherSubs as sub (sub.id)}
 			<div
 				class="sub-card-wrapper"
 				class:has-open-menu={menu === sub.id}
 				animate:flip={{ duration: 280, easing: easeOut }}
+				in:pop={{ start: 0.96, duration: 220 }}
 				out:pop={{ start: 0.96, duration: 180 }}
 			>
 				<article class="sub-card" class:expanded={expanded.has(sub.id)}>
 					<div class="card-header" class:is-editing={editingId === sub.id}>
 						{#if editingId === sub.id}
-							<div
-								in:swap
-								class="card-rename-inline"
-								role="presentation"
-								onclick={(e) => e.stopPropagation()}
-								onkeydown={(e) => e.stopPropagation()}
-							>
-								<img src={pencilIcon} alt="" class="rename-icon" />
-								<input
-									bind:this={editInputEl}
-									type="text"
-									class="rename-input"
-									bind:value={editName}
-									maxlength="80"
-									autocomplete="off"
-									spellcheck="false"
-									onkeydown={(e) => {
-										if (e.key === 'Enter') {
-											e.preventDefault();
-											saveEditing(sub.id);
-										} else if (e.key === 'Escape') {
-											e.preventDefault();
-											cancelEditing();
-										}
-									}}
-								/>
-								<button
-									type="button"
-									class="rename-action-btn check"
-									onclick={() => saveEditing(sub.id)}
-									aria-label={t('common.save')}
-								>
-									<img src={checkIcon} alt="" class="action-svg" />
-								</button>
-								<button
-									type="button"
-									class="rename-action-btn cancel"
-									onclick={cancelEditing}
-									aria-label={t('common.close')}
-								>
-									<img src={closeBoldIcon} alt="" class="action-svg" />
-								</button>
+							<div class="rename-wrap" in:morphGrow>
+								{@render renameField(sub)}
 							</div>
 						{:else}
 							<button
 								in:swap
 								class="title-group"
-								aria-pressed={activeSubId === sub.id}
+								aria-pressed={false}
 								onclick={() => selectSubscription(sub.id)}
 							>
 								<span class="sub-name">{sub.name}</span>
-								{#if activeSubId === sub.id}
-									<span class="dot-pop" in:pop={{ start: 0.6 }}>
-										<StatusDot variant="active" />
-									</span>
-								{/if}
 							</button>
 							<div class="actions-group">
-								<IconButton
-									design
-									icon={reloadIcon}
-									ariaLabel={t('common.reload')}
-									disabled={busy !== null}
-									onclick={() => refresh(sub.id)}
-								/>
-								<IconButton
-									design
-									icon={menuIcon}
-									ariaLabel={t('common.menu')}
-									active={menu === sub.id}
-									expanded={menu === sub.id}
-									onclick={(e) => toggleMenu(sub.id, e)}
-								/>
-								<IconButton
-									design
-									icon={chevronIcon}
-									ariaLabel={sub.name}
-									expanded={expanded.has(sub.id)}
-									class="card-chevron"
-									onclick={() => toggleExpanded(sub.id)}
-								/>
+								{@render cardActions(sub)}
 							</div>
 						{/if}
 					</div>
@@ -362,66 +475,21 @@
 					>
 						{#if expanded.has(sub.id)}
 							<div class="card-details" transition:reveal>
-								<div class="metrics-row">
-									<div class="metric-item">
-										<span class="metric-label">
-											{t('subscriptions.daysLabel')}
-										</span>
-										<span class="metric-val">
-											{sub.daysRemaining ?? (sub.traffic === '∞' ? '∞' : '—')}
-										</span>
-									</div>
-									<div class="metric-item">
-										<span class="metric-label">
-											{t('subscriptions.trafficLabel')}
-										</span>
-										<span class="metric-val">{sub.traffic ?? '—'}</span>
-									</div>
-								</div>
-								<div class="updated-time">{formatUpdatedAgo(sub)}</div>
-								{#if $subscriptionRefreshStatus[sub.id]?.state === 'error'}
-									<div class="refresh-error" role="status">
-										{t('subscriptions.refreshFailed')}: {t(
-											'errors.' +
-												($subscriptionRefreshStatus[sub.id].error ?? 'unknown'),
-										)}
-									</div>
-								{/if}
+								{@render cardDetails(sub)}
 							</div>
 						{/if}
 					</div>
 				</article>
 			</div>
-		{:else}<p>{t('subscriptions.empty')}</p>{/each}
+		{/each}
+		{#if !$catalogStore.subscriptions.length}
+			<p>{t('subscriptions.empty')}</p>
+		{/if}
 	</div>
 
-	{#if menu && activeMenuSub}
+	{#if menu && activeMenuSub && menu !== activeSub?.id}
 		<PopupMenu top="{menuTop}px" right="20px">
-			<MenuItem
-				icon={pencilIcon}
-				label={t('common.edit')}
-				onclick={() => {
-					if (activeMenuSub) startEditing(activeMenuSub);
-				}}
-			/>
-			<MenuItem
-				icon={shareIcon}
-				label={t('common.share')}
-				onclick={() => {
-					if (activeMenuSub) void showSubscriptionSource(activeMenuSub);
-				}}
-			/>
-			<MenuItem
-				icon={trashIcon}
-				label={t('common.delete')}
-				variant="danger"
-				disabled={$connectionStore.busy ||
-					$connectionStore.status === 'connected'}
-				onclick={() => {
-					deleting = activeMenuSub;
-					menu = null;
-				}}
-			/>
+			{@render menuItems()}
 		</PopupMenu>
 	{/if}
 </section>
@@ -531,10 +599,6 @@
 	.cards-list::-webkit-scrollbar {
 		display: none;
 	}
-	.dot-pop {
-		display: inline-flex;
-		flex-shrink: 0;
-	}
 	.sub-card-wrapper {
 		position: relative;
 		width: 100%;
@@ -573,13 +637,24 @@
 		gap: 8px;
 	}
 	/* Icons keep their built-in padding, as in the Figma frame. */
+	.rename-wrap {
+		display: flex;
+		align-items: center;
+		width: 100%;
+		height: 100%;
+	}
+	/* A lighter pill, so the title visibly unrolls into a field. */
 	.card-rename-inline {
 		display: flex;
 		align-items: center;
 		gap: 10px;
-		width: 100%;
-		height: 100%;
-		margin-left: -7px;
+		width: calc(100% + 18px);
+		height: 44px;
+		margin: 0 -8px 0 -10px;
+		padding: 0 4px 0 3px;
+		border-radius: 999px;
+		background: #ffffff0d;
+		box-sizing: border-box;
 	}
 	.rename-icon {
 		width: 28px;

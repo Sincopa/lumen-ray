@@ -6,7 +6,6 @@
 	import { onDestroy, onMount } from 'svelte';
 	import { runtime } from '../../lib/runtime';
 	import { getProcesses, getRuleIcons } from '../../lib/services/processes';
-	import { createDeferredTask } from '../../lib/utils/deferredTask';
 	import { catalog } from '../../lib/services';
 	import { errorCode } from '../../lib/services/errors';
 	import { t } from '../../lib/i18n';
@@ -18,7 +17,6 @@
 	import IconButton from '../../components/IconButton.svelte';
 	import backIcon from '../../assets/back.svg';
 	import tunIcon from '../../assets/mode-rules.svg';
-	import StatusDot from '../../components/StatusDot.svelte';
 	import RoundCheckbox from '../../components/RoundCheckbox.svelte';
 	import ToggleSwitch from '../../components/ToggleSwitch.svelte';
 	import ServersView from '../servers/ServersView.svelte';
@@ -30,45 +28,22 @@
 	import searchIcon from '../../assets/search.svg';
 	import addIcon from '../../assets/plus.svg';
 	import pencilIcon from '../../assets/pencil.svg';
-	import trashIcon from '../../assets/trash.svg';
 	import checkIcon from '../../assets/check.svg';
-	import crossIcon from '../../assets/close.svg';
 	import yandexIcon from '../../assets/yandex.png';
+	import { tabHeader } from '../../app/tabHeader.svelte';
+	import type { SelectionBar } from '../../app/shell.svelte';
 
 	interface Props {
 		onChromeChange?: (mode: 'default' | 'selection' | 'picker') => void;
+		/** Selection mode hands delete and done to the bottom bar. */
+		onSelectionChange?: (bar: SelectionBar | null) => void;
 	}
 
-	let { onChromeChange }: Props = $props();
-
-	const searchTask = createDeferredTask();
-	onDestroy(searchTask.cancel);
+	let { onChromeChange, onSelectionChange }: Props = $props();
 
 	const catalogStore = catalog.state;
 
 	// Local state
-	let query = $state('');
-	let searching = $state(false);
-	let searchClosing = $state(false);
-	let searchInputEl = $state<HTMLInputElement | null>(null);
-
-	function handleOpenSearch() {
-		searching = true;
-		searchClosing = false;
-		searchTask.schedule(() => {
-			searchInputEl?.focus();
-		}, 180);
-	}
-
-	function handleCloseSearch() {
-		searchClosing = true;
-		searchTask.schedule(() => {
-			searching = false;
-			searchClosing = false;
-			query = '';
-		}, 240);
-	}
-
 	let selectMode = $state(false);
 	let selectingRule = $state<Rule | null>(null);
 	let pendingServerId = $state('');
@@ -82,6 +57,7 @@
 	let error = $state('');
 	let showPresets = $state(false);
 	let confirmSwitchToRules = $state(false);
+	let switchReason = $state<'preset' | 'catchAll'>('preset');
 
 	// Derived state
 	const serversById = $derived(
@@ -104,7 +80,7 @@
 			(subscription) => subscription.id === activeSubscriptionId,
 		) ?? $catalogStore.subscriptions[0],
 	);
-	const normalizedQuery = $derived(query.toLowerCase());
+	const normalizedQuery = $derived(tabHeader.query.toLowerCase());
 	let filtered = $derived(
 		normalizedQuery
 			? $catalogStore.rules.filter((rule) =>
@@ -119,6 +95,10 @@
 				.map((r) => r.presetId)
 				.filter((id): id is string => Boolean(id)),
 		),
+	);
+	// One catch-all per list: it decides where everything unmatched goes.
+	const manualCatchAllId = $derived(
+		$catalogStore.rules.find((r) => r.matcher === 'final' && !r.presetId)?.id,
 	);
 	const hasActiveProxy = $derived(
 		Boolean(
@@ -243,6 +223,35 @@
 		);
 	});
 
+	// The list screen fills the shared header; App hides it on the other screens.
+	const headerOwner = {};
+	$effect(() => {
+		tabHeader.claim(headerOwner, {
+			key: 'rules',
+			title: activeSub?.name ?? t('rules.title'),
+			searchPlaceholder: t('rules.searchPlaceholder') || 'Поиск правил...',
+			actions: headerActions,
+			trailing: selectMode ? undefined : headerAdd,
+			hidden: selectMode,
+		});
+	});
+	onDestroy(() => tabHeader.release(headerOwner));
+
+	$effect(() => {
+		onSelectionChange?.(
+			selectMode
+				? {
+						count: selected.length,
+						onDelete: () => (deleting = true),
+						onDone: () => {
+							selectMode = false;
+							selected = [];
+						},
+					}
+				: null,
+		);
+	});
+
 	// Sub-screens push in from the side they logically live on.
 	const screenDepth: Record<string, number> = {
 		list: 0,
@@ -310,6 +319,7 @@
 			await catalog.applyPreset(presetId);
 			if ($catalogStore.routingMode === 'global') {
 				showPresets = false;
+				switchReason = 'preset';
 				confirmSwitchToRules = true;
 			}
 			error = '';
@@ -347,11 +357,33 @@
 	}
 </script>
 
-<svelte:window
-	onkeydown={(event) => {
-		if (event.key === 'Escape' && searching) handleCloseSearch();
-	}}
-/>
+{#snippet headerActions()}
+	<IconButton
+		design
+		icon={pencilIcon}
+		ariaLabel={t('rules.selectMode')}
+		onclick={() => (selectMode = true)}
+	/>
+	<IconButton
+		design
+		ariaLabel={t('rules.presets')}
+		onclick={() => (showPresets = true)}
+	>
+		<MaterialIcon name="tune" size={18} />
+	</IconButton>
+{/snippet}
+
+{#snippet headerAdd()}
+	<IconButton
+		design
+		icon={addIcon}
+		ariaLabel={t('common.add')}
+		size="lg"
+		variant="surface"
+		disabled={!$catalogStore.servers.length}
+		onclick={add}
+	/>
+{/snippet}
 
 {#key rulesScreen}
 	<div class="rules-screen" in:screen={{ dir: screenDir(rulesScreen) }}>
@@ -420,6 +452,7 @@
 					server={currentServer}
 					subscriptionName={activeSub?.name}
 					step={editorStep}
+					allowFinal={!manualCatchAllId || manualCatchAllId === editing.id}
 					onStepChange={(next) => (editorStep = next)}
 					onNameChange={(name) => {
 						if (editing) editing.name = name;
@@ -430,6 +463,15 @@
 								await catalog.saveRules(updated);
 							} else {
 								await catalog.saveRule(updated);
+							}
+							// The catch-all only applies in Rules mode.
+							if (
+								!Array.isArray(updated) &&
+								updated.matcher === 'final' &&
+								$catalogStore.routingMode === 'global'
+							) {
+								switchReason = 'catchAll';
+								confirmSwitchToRules = true;
 							}
 							editing = null;
 							choosingProcess = false;
@@ -521,88 +563,6 @@
 						</button>
 					</div>
 				{/if}
-				<div
-					class="header-card-wrapper"
-					class:selection={selectMode}
-					hidden={selectMode}
-				>
-					<div class="header-row">
-						<div class="header-pill">
-							<!-- Normal header content -->
-							<div class="header-normal" class:header-hidden={searching}>
-								<div class="header-card-title">
-									<span class="title-text">
-										{activeSub?.name ?? t('rules.title')}
-									</span>
-									<StatusDot variant="active" />
-								</div>
-								<div class="header-card-actions">
-									<IconButton
-										design
-										icon={searchIcon}
-										ariaLabel={t('common.search')}
-										onclick={handleOpenSearch}
-									/>
-									{#if !selectMode}
-										<IconButton
-											design
-											icon={pencilIcon}
-											ariaLabel={t('rules.selectMode')}
-											onclick={() => (selectMode = true)}
-										/>
-										<IconButton
-											design
-											ariaLabel={t('rules.presets')}
-											onclick={() => (showPresets = true)}
-										>
-											<MaterialIcon name="tune" size={18} />
-										</IconButton>
-									{/if}
-								</div>
-							</div>
-
-							<!-- Search bar inside header pill (identical to ServersView) -->
-							<div
-								class="header-search"
-								class:search-open={searching && !searchClosing}
-								class:search-closing={searchClosing}
-							>
-								<img src={searchIcon} alt="" class="search-header-icon" />
-								<input
-									bind:this={searchInputEl}
-									type="text"
-									class="search-header-input"
-									placeholder={t('rules.searchPlaceholder') ||
-										'Поиск правил...'}
-									bind:value={query}
-									autocomplete="off"
-									spellcheck="false"
-								/>
-								<button
-									type="button"
-									class="close-search-btn"
-									onclick={handleCloseSearch}
-									aria-label={t('common.close')}
-								>
-									<img src={crossIcon} alt="" class="close-icon" />
-								</button>
-							</div>
-						</div>
-
-						{#if !selectMode}
-							<IconButton
-								design
-								icon={addIcon}
-								ariaLabel={t('common.add')}
-								size="lg"
-								variant="surface"
-								class="add-rule-btn"
-								disabled={!$catalogStore.servers.length}
-								onclick={add}
-							/>
-						{/if}
-					</div>
-				</div>
 				{#if error}<p role="alert" transition:rise>{error}</p>{/if}
 				<div class="rules-list">
 					{#each filtered as rule (rule.id)}
@@ -751,30 +711,6 @@
 						</div>
 					{/each}
 				</div>
-				{#if selectMode}
-					<div class="design-action-bar select-bar" transition:rise>
-						<button
-							type="button"
-							class="delete-selected"
-							aria-label={t('rules.deleteSelected')}
-							disabled={!selected.length}
-							onclick={() => (deleting = true)}
-						>
-							<img src={trashIcon} alt="" width="34" height="34" />
-						</button>
-						<IconButton
-							design
-							icon={checkIcon}
-							ariaLabel={t('common.close')}
-							size="lg"
-							variant="primary"
-							onclick={() => {
-								selectMode = false;
-								selected = [];
-							}}
-						/>
-					</div>
-				{/if}
 			</section>
 		{/if}
 	</div>
@@ -795,8 +731,10 @@
 {#if confirmSwitchToRules}
 	<ConfirmDialog
 		title={t('presets.switchModeTitle') || 'Включить режим правил?'}
-		description={t('presets.switchModeDesc') ||
-			'Пресет применен. Для его работы рекомендуется переключить режим приложения на «Правила».'}
+		description={switchReason === 'catchAll'
+			? t('rules.switchModeDesc')
+			: t('presets.switchModeDesc') ||
+				'Пресет применен. Для его работы рекомендуется переключить режим приложения на «Правила».'}
 		cancelLabel={t('common.cancel')}
 		confirmLabel={t('presets.switchToRules') || 'Включить'}
 		onCancel={() => (confirmSwitchToRules = false)}
@@ -850,179 +788,6 @@
 		flex: 1;
 		gap: 10px;
 		overflow: hidden;
-	}
-	.header-card-wrapper {
-		position: relative;
-		width: 100%;
-		flex-shrink: 0;
-	}
-	.header-row {
-		display: flex;
-		align-items: center;
-		gap: 8px;
-		width: 100%;
-		box-sizing: border-box;
-		padding: 0;
-	}
-	.header-pill {
-		position: relative;
-		height: var(--design-header-height);
-		background: var(--design-panel);
-		border-radius: 124px;
-		-webkit-backdrop-filter: blur(14px);
-		backdrop-filter: blur(14px);
-		box-sizing: border-box;
-		flex: 1;
-		min-width: 0;
-		overflow: hidden;
-		border: 0;
-		transition: border-color 180ms ease;
-	}
-
-	.header-pill:focus-within {
-		border-color: rgba(255, 255, 255, 0.35);
-	}
-
-	.header-normal {
-		width: 100%;
-		height: 100%;
-		padding: 0 20px 0 23px;
-		display: flex;
-		justify-content: space-between;
-		align-items: center;
-		box-sizing: border-box;
-		gap: 8px;
-		transition:
-			opacity 200ms ease,
-			transform 200ms ease;
-	}
-
-	.header-normal.header-hidden {
-		opacity: 0;
-		pointer-events: none;
-		transform: scale(0.96);
-	}
-
-	.header-card-title {
-		font-family: 'Satoshi', var(--font-family-base);
-		display: flex;
-		align-items: center;
-		gap: 10px;
-		min-width: 0;
-		font-size: 16px;
-		font-weight: 500;
-		letter-spacing: -0.2px;
-	}
-
-	.title-text {
-		line-height: 1.3;
-		white-space: nowrap;
-		overflow: hidden;
-		text-overflow: ellipsis;
-	}
-
-	.header-card-actions {
-		display: flex;
-		align-items: center;
-		gap: 6px;
-		flex-shrink: 0;
-	}
-
-	/* Header Search Bar */
-	.header-search {
-		position: absolute;
-		left: 0;
-		top: 0;
-		width: 100%;
-		height: 100%;
-		padding: 0 8px 0 20px;
-		display: flex;
-		align-items: center;
-		gap: 12px;
-		box-sizing: border-box;
-		opacity: 0;
-		pointer-events: none;
-		transform: scale(0.96);
-		transition:
-			opacity 220ms ease,
-			transform 220ms cubic-bezier(0.22, 1, 0.36, 1);
-	}
-
-	.header-search.search-open {
-		opacity: 1;
-		pointer-events: auto;
-		transform: scale(1);
-	}
-
-	.header-search.search-closing {
-		opacity: 0;
-		pointer-events: none;
-		transform: scale(0.96);
-	}
-
-	.search-header-icon {
-		width: 28px;
-		height: 28px;
-		object-fit: contain;
-		filter: brightness(0) invert(1);
-		opacity: 0.6;
-		flex-shrink: 0;
-	}
-
-	.search-header-input {
-		flex: 1;
-		height: 100%;
-		background: transparent !important;
-		border: none !important;
-		outline: none !important;
-		box-shadow: none !important;
-		border-radius: 0 !important;
-		color: #ffffff;
-		font-size: 14px;
-		font-family: inherit;
-		padding: 0 !important;
-		-webkit-appearance: none;
-		appearance: none;
-		min-width: 0;
-	}
-
-	.search-header-input::placeholder {
-		color: rgba(255, 255, 255, 0.4);
-	}
-
-	.close-search-btn {
-		width: 32px;
-		height: 32px;
-		border-radius: 50%;
-		background: #ffffff;
-		border: none;
-		cursor: pointer;
-		display: flex;
-		align-items: center;
-		justify-content: center;
-		flex-shrink: 0;
-		transition: transform 160ms var(--ease-spring);
-		box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
-	}
-
-	.close-search-btn:hover {
-		transform: scale(1.06);
-	}
-
-	.close-search-btn:active {
-		transform: scale(0.94);
-	}
-
-	.close-icon {
-		width: 14px;
-		height: 14px;
-		object-fit: contain;
-		filter: brightness(0);
-	}
-
-	:global(.add-rule-btn) {
-		flex-shrink: 0;
-		transform-origin: 80% 50% !important;
 	}
 	.rules-list {
 		display: flex;
@@ -1193,59 +958,13 @@
 		font-weight: 500;
 		line-height: 16.2px;
 	}
-	/* Red delete sits where the nav pill was. */
-	.delete-selected {
-		display: grid;
-		place-items: center;
-		width: 42px;
-		height: 42px;
-		margin-left: 0;
-		padding: 0;
-		border: 1px solid #ffffff26;
-		border-radius: 50%;
-		background: #d03441;
-		-webkit-backdrop-filter: blur(25px);
-		backdrop-filter: blur(25px);
-		transition:
-			background-color 160ms ease,
-			opacity 160ms ease,
-			transform 160ms var(--ease-spring);
-	}
-	.delete-selected img {
-		filter: brightness(0) invert(1);
-	}
-	.delete-selected:disabled {
-		opacity: 0.5;
-	}
-	.delete-selected:active:not(:disabled) {
-		transform: scale(0.94);
-	}
-	@media (hover: hover) and (pointer: fine) {
-		.delete-selected:hover:not(:disabled) {
-			background: #e03d4b;
-		}
-	}
-
 	.domain-details {
 		display: none;
 	}
 	.rule-left {
 		flex: 1;
 	}
-	.selection .header-pill {
-		width: 100%;
-	}
-	.empty .title-text {
-		font-family: 'Satoshi', var(--font-family-base);
-	}
 	@media (max-width: 350px) {
-		.header-normal {
-			padding-left: 16px;
-			padding-right: 12px;
-		}
-		.header-card-actions {
-			gap: 2px;
-		}
 		.rule-right {
 			gap: 6px;
 		}
