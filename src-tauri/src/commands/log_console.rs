@@ -30,7 +30,30 @@ pub fn open_log_console(app: tauri::AppHandle) -> Result<()> {
             .map(|_| ())
             .map_err(|_| BackendError::new("LOG_CONSOLE_FAILED", "Could not open log console"))
     }
-    #[cfg(not(windows))]
+    #[cfg(target_os = "macos")]
+    {
+        let log_path = app
+            .path()
+            .app_log_dir()
+            .map_err(|_| BackendError::new("LOG_CONSOLE_FAILED", "Log directory unavailable"))?
+            .join(format!("{}.log", app.package_info().name));
+        log::info!("Opening live log console");
+        // Console follows the file live; before the first write, show the folder instead.
+        let mut command = std::process::Command::new("/usr/bin/open");
+        if log_path.is_file() {
+            command.args(["-a", "Console"]).arg(&log_path);
+        } else {
+            command.arg(log_path.parent().unwrap_or(&log_path));
+        }
+        // Sync commands run on the main thread: do not wait for `open` there.
+        command
+            .spawn()
+            .map(|mut child| {
+                std::thread::spawn(move || child.wait());
+            })
+            .map_err(|_| BackendError::new("LOG_CONSOLE_FAILED", "Could not open log console"))
+    }
+    #[cfg(not(any(windows, target_os = "macos")))]
     {
         let _ = app;
         Err(BackendError::new(

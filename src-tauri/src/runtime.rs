@@ -1,6 +1,11 @@
 use crate::domain::errors::{BackendError, Result};
 use std::path::{Path, PathBuf};
 
+#[cfg(windows)]
+pub const XRAY_BINARY: &str = "xray.exe";
+#[cfg(not(windows))]
+pub const XRAY_BINARY: &str = "xray";
+
 fn error() -> BackendError {
     BackendError::new(
         "CORE_NOT_FOUND",
@@ -23,7 +28,7 @@ impl RuntimePaths {
     }
 
     pub fn xray_binary(&self) -> PathBuf {
-        self.xray_dir().join("xray.exe")
+        self.xray_dir().join(XRAY_BINARY)
     }
 
     pub fn geoip_path(&self) -> PathBuf {
@@ -56,7 +61,8 @@ impl RuntimePaths {
     }
 
     pub fn is_valid(&self) -> bool {
-        self.xray_binary().is_file() && self.wintun_path().is_file()
+        // Wintun only backs the Windows TUN helper.
+        self.xray_binary().is_file() && (!cfg!(windows) || self.wintun_path().is_file())
     }
 }
 
@@ -90,11 +96,11 @@ pub fn resolve_from(base: Option<&Path>) -> Result<RuntimePaths> {
 
     // 1. Explicit base directory (e.g. from Tauri resource_dir or test override)
     if let Some(dir) = base {
-        if dir.join("xray").join("xray.exe").is_file() {
+        if dir.join("xray").join(XRAY_BINARY).is_file() {
             candidates.push(dir.to_path_buf());
         }
         let runtime_sub = dir.join("runtime");
-        if runtime_sub.join("xray").join("xray.exe").is_file() {
+        if runtime_sub.join("xray").join(XRAY_BINARY).is_file() {
             candidates.push(runtime_sub);
         }
     }
@@ -102,11 +108,11 @@ pub fn resolve_from(base: Option<&Path>) -> Result<RuntimePaths> {
     // 2. Explicit environment variable override
     if let Some(env_dir) = std::env::var_os("LUMEN_RUNTIME_DIR") {
         let path = PathBuf::from(env_dir);
-        if path.join("xray").join("xray.exe").is_file() {
+        if path.join("xray").join(XRAY_BINARY).is_file() {
             candidates.push(path.clone());
         }
         let sub = path.join("runtime");
-        if sub.join("xray").join("xray.exe").is_file() {
+        if sub.join("xray").join(XRAY_BINARY).is_file() {
             candidates.push(sub);
         }
     }
@@ -114,6 +120,9 @@ pub fn resolve_from(base: Option<&Path>) -> Result<RuntimePaths> {
     // 3. Relative to current executable (works for installed NSIS and portable releases regardless of CWD)
     if let Ok(exe) = std::env::current_exe() {
         if let Some(parent) = exe.parent() {
+            // macOS app bundle: Contents/MacOS/<exe> -> Contents/Resources/runtime
+            #[cfg(target_os = "macos")]
+            candidates.push(parent.join("..").join("Resources").join("runtime"));
             // Portable or installed app layout: <dir>/runtime
             candidates.push(parent.join("runtime"));
             // Elevated helper or nested layout: <dir>/../runtime

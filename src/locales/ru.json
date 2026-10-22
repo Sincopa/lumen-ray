@@ -118,6 +118,7 @@
 		"languageDesc": "Выберите язык отображения",
 		"routingMode": "Режим работы",
 		"routingDesc": "Выберите сетевой режим клиента",
+		"routingProxyOnly": "На этой платформе пока доступен только системный прокси",
 		"modeProxy": "Системный прокси (HTTP)",
 		"modeTun": "TUN-адаптер (Полный VPN)",
 		"autoConnect": "Автоподключение",
@@ -272,6 +273,8 @@
 		"processFailed": "Не удалось получить список программ Windows. (PROCESS_FAILED)",
 		"logConsoleFailed": "Не удалось открыть журнал Lumen. (LOG_CONSOLE_FAILED)",
 		"notificationFailed": "Windows не показала уведомление. Проверьте разрешения уведомлений. (NOTIFICATION_FAILED)",
+		"platformUnsupported": "Режим TUN пока недоступен на этой платформе. Выберите «Системный прокси» в разделе «Режим работы». (PLATFORM_UNSUPPORTED)",
+		"autostartUnavailable": "Переместите Lumen в папку «Программы», чтобы он открывался при входе в систему. (AUTOSTART_UNAVAILABLE)",
 		"GEO_DATA_MISSING": "Базы GeoIP/GeoSite не найдены или повреждены.",
 		"INVALID_GEO_TAG": "Недопустимый тег. Используйте латинские буквы, цифры, _, -, !, @"
 	},
@@ -350,5 +353,31 @@
 		"examplesLabel": "Например:",
 		"selectedCount": "Выбрано",
 		"clear": "Очистить"
+	},
+	"macos": {
+		"settings": {
+			"autoStart": "Автозапуск при входе в систему",
+			"resetProxyDesc": "Очищает системный прокси macOS и восстанавливает интернет при сбое",
+			"resetProxyDone": "Системный прокси macOS очищен"
+		},
+		"errors": {
+			"routingConflict": "Маршрут macOS обходит Lumen. Повторите подключение или проверьте другие сетевые маршруты.",
+			"tunAdapterTimeout": "macOS не удалось запустить VPN-интерфейс. Проверьте, не работает ли другой VPN, затем повторите попытку.",
+			"invalidRule": "Введите домен без пути или имя приложения и выберите сервер.",
+			"coreNotFound": "Не найден файл Xray. Переустановите Lumen. (CORE_NOT_FOUND)",
+			"coreStartFailed": "Не удалось запустить Xray: macOS заблокировала файл или заняты локальные порты. Переустановите Lumen и повторите. (CORE_START_FAILED)",
+			"tunFailed": "Не удалось поднять TUN-интерфейс: служба с правами администратора не запустилась или закрылась. Отключите другие VPN, разрешите запрос администратора и повторите. (TUN_FAILED)",
+			"tunNetworkUnreachable": "Сервер отвечает, но трафик macOS не идёт через Lumen. Обычно мешает другой VPN или фаервол. Отключите их и переподключитесь. (TUN_NETWORK_UNREACHABLE)",
+			"permissionDenied": "Для режима TUN нужны права администратора, а запрос macOS был отклонён. Подключитесь снова и подтвердите запрос. (PERMISSION_DENIED)",
+			"networkChanged": "Сеть macOS изменилась, VPN отключён после нескольких неудачных проверок. Подключитесь снова. (NETWORK_CHANGED)",
+			"dnsUnavailable": "Не удалось прочитать DNS-серверы macOS. Проверьте настройки сети в Системных настройках. (DNS_UNAVAILABLE)",
+			"alreadyRunning": "Lumen уже запущен. Откройте его через значок в строке меню. (ALREADY_RUNNING)",
+			"processFailed": "Не удалось получить список программ macOS. (PROCESS_FAILED)",
+			"notificationFailed": "macOS не показала уведомление. Разрешите уведомления для Lumen в Системных настройках. (NOTIFICATION_FAILED)"
+		},
+		"rules": {
+			"applicationHint": "Имя приложения. Например, Discord",
+			"application": "Приложение"
+		}
 	}
 }

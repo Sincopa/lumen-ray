@@ -67,7 +67,7 @@ pub type BackendSession = xray::XraySession;
 pub struct Session {
     pub generation: u64,
     pub backend: BackendSession,
-    #[cfg(windows)]
+    #[cfg(any(windows, target_os = "macos"))]
     pub system_proxy: Option<crate::platform::proxy::SystemProxy>,
 }
 impl Session {
@@ -90,11 +90,11 @@ impl Session {
         self.backend.is_tun
     }
     pub fn has_system_proxy(&self) -> bool {
-        #[cfg(windows)]
+        #[cfg(any(windows, target_os = "macos"))]
         {
             self.system_proxy.is_some()
         }
-        #[cfg(not(windows))]
+        #[cfg(not(any(windows, target_os = "macos")))]
         {
             false
         }
@@ -127,7 +127,7 @@ pub async fn connect(
     selected_backend.validate(repo, selected)?;
     // An Xray system-proxy session may switch live on the same local port; the
     // caller replaces the Windows proxy only when the listener changes.
-    #[cfg(windows)]
+    #[cfg(any(windows, target_os = "macos"))]
     if repo.settings.network_mode == "tun" {
         if let Some(proxy) = session.system_proxy.as_ref() {
             proxy.restore()?;

@@ -2,7 +2,7 @@
 	"name": "lumen",
 	"private": true,
 	"version": "0.2.8",
-	"description": "Desktop VPN and proxy client for Windows, built with Svelte 5 and Tauri 2",
+	"description": "Desktop VPN and proxy client for Windows and macOS, built with Svelte 5 and Tauri 2",
 	"license": "SEE LICENSE IN LICENSE",
 	"type": "module",
 	"scripts": {
@@ -19,6 +19,10 @@
 		"build:release": "powershell -NoProfile -ExecutionPolicy Bypass -File src-tauri/build/build-release.ps1 -Mode All",
 		"build:installer": "powershell -NoProfile -ExecutionPolicy Bypass -File src-tauri/build/build-release.ps1 -Mode Installer",
 		"build:portable": "powershell -NoProfile -ExecutionPolicy Bypass -File src-tauri/build/build-release.ps1 -Mode Portable",
+		"prepare:core:macos": "sh src-tauri/build/prepare-core-macos.sh",
+		"tauri:dev:macos": "sh src-tauri/build/prepare-core-macos.sh && tauri dev",
+		"tauri:build:macos": "tauri build --target universal-apple-darwin",
+		"build:macos": "tauri build --target universal-apple-darwin --config src-tauri/tauri.release.conf.json",
 		"release:version": "node src-tauri/build/set-version.mjs"
 	},
 	"engines": {

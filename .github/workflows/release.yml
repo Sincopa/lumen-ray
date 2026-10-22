@@ -143,7 +143,7 @@ jobs:
         with:
           tagName: v__VERSION__
           releaseName: Lumen v__VERSION__
-          releaseBody: Download the Windows installer or portable archive below. Updater metadata and a version-bound signature are included.
+          releaseBody: Download the Windows installer or portable archive, or the macOS disk image, below. Updater metadata and a version-bound signature are included.
           releaseDraft: true
           prerelease: false
           generateReleaseNotes: true
@@ -173,11 +173,8 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
           # Upload primary release assets (Setup installer + Portable zip)
+          # Stays a draft until the publish job, after macOS is verified too.
           gh release upload $tag "$releaseDir/Lumen-Ray-$version-Setup.exe" "$releaseDir/Lumen-Ray-$version-Portable.zip" --clobber
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-
-          # Publish only after all final artifacts passed Authenticode verification.
-          gh release edit $tag --draft=false
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Upload signature verification reports
@@ -194,3 +191,139 @@ jobs:
         if: always()
         shell: pwsh
         run: powershell -NoProfile -ExecutionPolicy Bypass -File src-tauri/build/ci-windows-signing.ps1 -Mode Cleanup
+
+  # Runs after Windows: tauri-action re-uploads latest.json on the draft, so parallel jobs would race.
+  release-macos:
+    needs: release-windows
+    runs-on: macos-latest
+    env:
+      RUST_TEST_THREADS: '1'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: '1.92.0'
+          targets: aarch64-apple-darwin,x86_64-apple-darwin
+          components: clippy
+
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: './src-tauri -> target'
+          cache-on-failure: true
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Verify updater signing key
+        shell: pwsh
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: pwsh -NoProfile -NonInteractive -File src-tauri/build/prepare-updater-signing.ps1
+
+      # The Xray core is signed before bundling, so the identity must be in a keychain first.
+      - name: Import Developer ID certificate
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+        run: |
+          set -eu
+          for name in APPLE_CERTIFICATE APPLE_CERTIFICATE_PASSWORD APPLE_SIGNING_IDENTITY; do
+            eval "value=\${$name:-}"
+            [ -n "$value" ] || { echo "Repository secret $name is missing" >&2; exit 1; }
+          done
+          keychain="$RUNNER_TEMP/lumen-signing.keychain-db"
+          password=$(openssl rand -hex 24)
+          printf '%s' "$APPLE_CERTIFICATE" | base64 --decode > "$RUNNER_TEMP/certificate.p12"
+          security create-keychain -p "$password" "$keychain"
+          security set-keychain-settings -lut 21600 "$keychain"
+          security unlock-keychain -p "$password" "$keychain"
+          security import "$RUNNER_TEMP/certificate.p12" -k "$keychain" -P "$APPLE_CERTIFICATE_PASSWORD" -T /usr/bin/codesign
+          rm -f "$RUNNER_TEMP/certificate.p12"
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$password" "$keychain" > /dev/null
+          security list-keychains -d user -s "$keychain" $(security list-keychains -d user | tr -d '"')
+          security find-identity -v -p codesigning "$keychain" | grep -qF "\"$APPLE_SIGNING_IDENTITY\"" || {
+            echo 'APPLE_SIGNING_IDENTITY is not in APPLE_CERTIFICATE' >&2
+            exit 1
+          }
+          echo "LUMEN_KEYCHAIN=$keychain" >> "$GITHUB_ENV"
+
+      - name: Prepare verified Xray core
+        env:
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+        run: sh src-tauri/build/prepare-core-macos.sh
+
+      - name: Build frontend for native checks
+        run: npm run build
+
+      - name: Verify Rust backend
+        run: |
+          cargo test --locked --manifest-path src-tauri/Cargo.toml
+          cargo clippy --locked --manifest-path src-tauri/Cargo.toml --all-targets --all-features -- -D warnings
+
+      # No APPLE_CERTIFICATE: the bundler uses the imported keychain identity.
+      - name: Build, notarize and upload universal app to the draft
+        uses: tauri-apps/tauri-action@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        with:
+          tagName: v__VERSION__
+          releaseName: Lumen v__VERSION__
+          releaseDraft: true
+          prerelease: false
+          uploadUpdaterJson: true
+          args: --target universal-apple-darwin --config src-tauri/tauri.release.conf.json --bundles app,dmg
+
+      - name: Verify signed and notarized bundle
+        run: |
+          set -eu
+          bundle=src-tauri/target/universal-apple-darwin/release/bundle
+          app="$bundle/macos/Lumen.app"
+          codesign --verify --strict --verbose=2 "$app"
+          codesign --verify --strict --verbose=2 "$app/Contents/Resources/runtime/xray/xray"
+          codesign -dvv "$app/Contents/Resources/runtime/xray/xray" 2>&1 | grep -q 'flags=.*(runtime)'
+          lipo "$app/Contents/Resources/runtime/xray/xray" -verify_arch arm64
+          lipo "$app/Contents/Resources/runtime/xray/xray" -verify_arch x86_64
+          test ! -e "$app/Contents/Resources/runtime/xray/xray.exe"
+          test ! -e "$app/Contents/Resources/runtime/drivers"
+          xcrun stapler validate "$app"
+          spctl --assess --type execute --verbose=2 "$app"
+          ls "$bundle"/dmg/*.dmg
+
+      - name: Remove imported signing keychain
+        if: always()
+        run: |
+          if [ -n "${LUMEN_KEYCHAIN:-}" ]; then security delete-keychain "$LUMEN_KEYCHAIN" || true; fi
+
+  # Publish only after every platform's artifacts passed signature verification.
+  publish:
+    needs: [release-windows, release-macos]
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Publish release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -eu
+          version=$(jq -r .version src-tauri/tauri.conf.json)
+          if [ "$GITHUB_REF_TYPE" = tag ]; then tag=$GITHUB_REF_NAME; else tag=v$version; fi
+          gh release edit "$tag" --draft=false

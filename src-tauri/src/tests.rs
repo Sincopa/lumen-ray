@@ -210,7 +210,7 @@ fn discord_media_leaves_a_server_that_drops_it() {
         .position(|rule| rule["inboundTag"][0] == "probe")
         .unwrap();
     assert!(probe < voice);
-    #[cfg(windows)]
+    #[cfg(any(windows, target_os = "macos"))]
     {
         let plan = config::live_routing_plan(&before, &repo, &node.id, true)
             .unwrap()
@@ -395,7 +395,7 @@ async fn bundled_core_validation() {
     }
 }
 
-#[cfg(windows)]
+#[cfg(any(windows, target_os = "macos"))]
 #[tokio::test]
 async fn core_readiness_does_not_wait_for_external_ip() {
     let directory = tempfile::tempdir().unwrap();
@@ -486,7 +486,7 @@ fn ip_rules_and_default_direct() {
     repo.rules[0].name = "203.0.113.0/99".into();
     assert!(config::build(&repo, &node.id, 10808, 10809, true).is_err());
 }
-#[cfg(windows)]
+#[cfg(any(windows, target_os = "macos"))]
 #[test]
 fn disabling_a_rule_can_replace_live_routing_without_restarting_tun() {
     use crate::storage::repository::{Rule, RuleMatcher};
@@ -593,7 +593,7 @@ fn vpn_applications_do_not_override_russian_direct_presets() {
     assert_eq!(catch_all["outboundTag"], "direct");
     assert!(position(&process("Discord.exe")) < chrome);
 }
-#[cfg(windows)]
+#[cfg(any(windows, target_os = "macos"))]
 #[test]
 fn switching_routing_modes_keeps_the_active_tun_configuration() {
     use crate::storage::repository::{Rule, RuleMatcher};
@@ -657,7 +657,7 @@ fn switching_routing_modes_keeps_the_active_tun_configuration() {
         "direct"
     );
 }
-#[cfg(windows)]
+#[cfg(any(windows, target_os = "macos"))]
 #[test]
 fn switching_routing_modes_keeps_the_system_proxy_configuration() {
     let node = uri::parse(VLESS, "sub").unwrap();
@@ -693,7 +693,7 @@ fn switching_routing_modes_keeps_the_system_proxy_configuration() {
         .unwrap()
         .is_some());
 }
-#[cfg(windows)]
+#[cfg(any(windows, target_os = "macos"))]
 #[test]
 fn dns_policy_keeps_mode_and_geo_rules_on_the_live_path() {
     use crate::storage::repository::{Rule, RuleMatcher};
@@ -763,7 +763,7 @@ fn dns_policy_keeps_mode_and_geo_rules_on_the_live_path() {
         .unwrap()
         .is_some());
 }
-#[cfg(windows)]
+#[cfg(any(windows, target_os = "macos"))]
 #[test]
 fn rule_for_another_server_is_a_live_outbound_and_route() {
     use crate::storage::repository::{Rule, RuleMatcher};
@@ -1305,7 +1305,7 @@ mod hwid_tests {
         platform::device_identity::{
             generate_hwid_from_seed, is_safe_header_value, is_valid_hwid, mask_hwid,
             read_device_model, read_machine_seed, read_os_version, DeviceIdentity,
-            DeviceIdentityManager, DeviceIdentityStore,
+            DeviceIdentityManager, DeviceIdentityStore, DEVICE_OS, HWID_PREFIX,
         },
         services::catalog_service,
         storage::secure::SecretStore,
@@ -1463,18 +1463,20 @@ mod hwid_tests {
         let identity = manager.get_or_init().unwrap();
 
         assert!(is_valid_hwid(&identity.hwid));
-        assert!(identity.hwid.starts_with("win-"));
+        assert!(identity.hwid.starts_with(HWID_PREFIX));
         assert_eq!(identity.hwid.len(), 36);
-        assert_eq!(identity.device_os, "Windows");
+        assert_eq!(identity.device_os, DEVICE_OS);
         assert!(is_safe_header_value(&identity.ver_os));
 
         // Format validation edge cases
-        assert!(is_valid_hwid("win-0123456789abcdef0123456789abcdef"));
-        assert!(is_valid_hwid("win-ABCDEF-1234=test"));
+        assert!(is_valid_hwid(&format!(
+            "{HWID_PREFIX}0123456789abcdef0123456789abcdef"
+        )));
+        assert!(is_valid_hwid(&format!("{HWID_PREFIX}ABCDEF-1234=test")));
         assert!(!is_valid_hwid("linux-0123456789abcdef"));
-        assert!(!is_valid_hwid("win-123")); // too short (< 10)
-        assert!(!is_valid_hwid(&format!("win-{}", "a".repeat(65)))); // too long (> 64)
-        assert!(!is_valid_hwid("win-invalid!char"));
+        assert!(!is_valid_hwid(&format!("{HWID_PREFIX}123"))); // too short (< 10)
+        assert!(!is_valid_hwid(&format!("{HWID_PREFIX}{}", "a".repeat(65)))); // too long (> 64)
+        assert!(!is_valid_hwid(&format!("{HWID_PREFIX}invalid!char")));
     }
 
     #[test]
@@ -1523,7 +1525,7 @@ mod hwid_tests {
 
         // Test masked log output
         let masked = mask_hwid(&identity.hwid);
-        assert!(masked.starts_with("win-"));
+        assert!(masked.starts_with(HWID_PREFIX));
         assert!(masked.contains("..."));
         assert_ne!(masked, identity.hwid);
     }
@@ -1581,7 +1583,7 @@ mod hwid_tests {
             if path == "/sub" {
                 assert_eq!(
                     headers.get("x-device-os").map(String::as_str),
-                    Some("Windows")
+                    Some(DEVICE_OS)
                 );
                 assert!(headers.contains_key("x-hwid"));
                 assert!(headers.contains_key("x-ver-os"));
@@ -1672,7 +1674,7 @@ mod hwid_tests {
                 assert!(headers.contains_key("x-hwid"));
                 assert_eq!(
                     headers.get("x-device-os").map(String::as_str),
-                    Some("Windows")
+                    Some(DEVICE_OS)
                 );
                 (200, vec![], VALID_SUB_BASE64.into())
             } else {

@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { getCurrentWindow } from '@tauri-apps/api/window';
 	import { runtime } from '../../lib/runtime';
+	import { isMac } from '../../lib/platform';
 	import { t } from '../../lib/i18n';
 	import minimizeIcon from '../../assets/minimize.svg';
 	import maximizeIcon from '../../assets/maximize.svg';
@@ -44,9 +45,10 @@
 	class="window-header"
 	class:dark-surface={darkSurface}
 	class:light-backdrop={lightBackdrop && !darkSurface}
+	class:mac={isMac}
 	data-tauri-drag-region
 >
-	<div class="logo">{title}</div>
+	<div class="logo" data-tauri-drag-region>{title}</div>
 
 	<div class="header-right">
 		{#if onOpenSettings && showQuickActions}
@@ -66,7 +68,8 @@
 			</button>
 		{/if}
 
-		{#if showControls}
+		<!-- macOS uses the native traffic lights instead. -->
+		{#if showControls && !isMac}
 			<div class="controls-pill">
 				<button
 					class="control-btn"
@@ -119,6 +122,15 @@
 		margin-left: 9px;
 		user-select: none;
 		transition: color 600ms ease;
+	}
+	/* Native traffic lights span x=20..80 and centre at y=36 in window pixels,
+	   unaffected by UI zoom. */
+	.mac {
+		padding-left: calc(92px / var(--ui-zoom, 1) - 16px);
+		margin-top: calc(36px / var(--ui-zoom, 1) - 36px);
+	}
+	.mac .logo {
+		margin-left: 0;
 	}
 	.light-backdrop .logo {
 		color: #00000080;

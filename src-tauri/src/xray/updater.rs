@@ -1,4 +1,7 @@
-use crate::domain::errors::{BackendError, Result};
+use crate::{
+    domain::errors::{BackendError, Result},
+    runtime::XRAY_BINARY,
+};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::{
@@ -51,8 +54,14 @@ fn version_parts(version: &str) -> Result<[u32; 3]> {
 }
 fn archive_name() -> Result<&'static str> {
     match std::env::consts::ARCH {
+        #[cfg(windows)]
         "x86_64" => Ok("Xray-windows-64.zip"),
+        #[cfg(windows)]
         "aarch64" => Ok("Xray-windows-arm64-v8a.zip"),
+        #[cfg(target_os = "macos")]
+        "x86_64" => Ok("Xray-macos-64.zip"),
+        #[cfg(target_os = "macos")]
+        "aarch64" => Ok("Xray-macos-arm64-v8a.zip"),
         _ => Err(error()),
     }
 }
@@ -160,7 +169,7 @@ pub async fn prepare(version: &str, directory: &Path) -> Result<PathBuf> {
     let destination = directory.join(version);
     let staging = tempfile::tempdir_in(directory).map_err(|_| error())?;
     extract(&bytes, staging.path())?;
-    let executable = staging.path().join("xray.exe");
+    let executable = staging.path().join(XRAY_BINARY);
     let output = tokio::time::timeout(
         Duration::from_secs(10),
         crate::engine::xray::command(&executable)
@@ -177,7 +186,7 @@ pub async fn prepare(version: &str, directory: &Path) -> Result<PathBuf> {
     }
     // Ensure staging has wintun.dll (official Xray core zip releases do not bundle it)
     let staging_wintun = staging.path().join("wintun.dll");
-    if !staging_wintun.is_file() {
+    if cfg!(windows) && !staging_wintun.is_file() {
         let base_wintun = directory
             .join(crate::xray::bundle::VERSION)
             .join("wintun.dll");
@@ -189,7 +198,7 @@ pub async fn prepare(version: &str, directory: &Path) -> Result<PathBuf> {
             }
         }
     }
-    if !staging.path().join("wintun.dll").is_file() {
+    if cfg!(windows) && !staging.path().join("wintun.dll").is_file() {
         return Err(error());
     }
     // Use one committed geo generation, never a mixture of files from the core archive.
@@ -209,8 +218,8 @@ pub async fn prepare(version: &str, directory: &Path) -> Result<PathBuf> {
     .await?;
     if destination.exists() {
         // Reuse only byte-identical files; never overwrite an executable that may be running.
-        let expected = std::fs::read(staging.path().join("xray.exe")).map_err(|_| error())?;
-        if std::fs::read(destination.join("xray.exe")).map_err(|_| error())? != expected {
+        let expected = std::fs::read(staging.path().join(XRAY_BINARY)).map_err(|_| error())?;
+        if std::fs::read(destination.join(XRAY_BINARY)).map_err(|_| error())? != expected {
             return Err(error());
         }
         for name in ["wintun.dll", "geoip.dat", "geosite.dat"] {
@@ -223,7 +232,7 @@ pub async fn prepare(version: &str, directory: &Path) -> Result<PathBuf> {
     } else {
         std::fs::rename(staging.path(), &destination).map_err(|_| error())?;
     }
-    Ok(destination.join("xray.exe"))
+    Ok(destination.join(XRAY_BINARY))
 }
 fn extract(bytes: &[u8], destination: &Path) -> Result<()> {
     let mut archive = zip::ZipArchive::new(std::io::Cursor::new(bytes)).map_err(|_| error())?;
@@ -234,7 +243,8 @@ fn extract(bytes: &[u8], destination: &Path) -> Result<()> {
             return Err(error());
         }
         if ![
-            "xray.exe",
+            XRAY_BINARY,
+            #[cfg(windows)]
             "wintun.dll",
             "LICENSE",
             "geoip.dat",
@@ -256,8 +266,17 @@ fn extract(bytes: &[u8], destination: &Path) -> Result<()> {
             .map_err(|_| error())?;
         output.sync_all().map_err(|_| error())?;
     }
-    if !destination.join("xray.exe").is_file() {
+    if !destination.join(XRAY_BINARY).is_file() {
         return Err(error());
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(
+            destination.join(XRAY_BINARY),
+            std::fs::Permissions::from_mode(0o755),
+        )
+        .map_err(|_| error())?;
     }
     Ok(())
 }

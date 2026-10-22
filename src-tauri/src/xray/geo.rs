@@ -211,6 +211,7 @@ pub fn install_snapshot(
     validate_geo_files_sync(core, staging.path())?;
     commit(data, staging, meta)
 }
+#[cfg(windows)]
 pub fn install_trusted_snapshot(
     data: &Path,
     meta: GeoDatabaseMetadata,

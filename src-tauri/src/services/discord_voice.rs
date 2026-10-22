@@ -70,7 +70,7 @@ pub fn schedule(state: Arc<AppState>, server_id: String, proxy_port: u16, genera
         if previous.is_none() {
             update(&state, &server_id, Some(DIRECT.into()), generation).await;
         }
-        #[cfg(windows)]
+        #[cfg(any(windows, target_os = "macos"))]
         let fallback = fallback(
             &state,
             &server_id,
@@ -79,7 +79,7 @@ pub fn schedule(state: Arc<AppState>, server_id: String, proxy_port: u16, genera
             &current,
         )
         .await;
-        #[cfg(not(windows))]
+        #[cfg(not(any(windows, target_os = "macos")))]
         let fallback: Option<String> = None;
         if !current() {
             return;
@@ -119,7 +119,7 @@ async fn update(state: &Arc<AppState>, server_id: &str, route: Option<String>, g
     let Some((before, after)) = change else {
         return;
     };
-    #[cfg(windows)]
+    #[cfg(any(windows, target_os = "macos"))]
     match super::vpn_service::apply_live_rules(state, server_id, &before, &after).await {
         Ok(crate::engine::LiveRoutingStatus::Applied) => {
             log::info!("Discord voice route applied without reconnecting");
@@ -130,14 +130,14 @@ async fn update(state: &Arc<AppState>, server_id: &str, route: Option<String>, g
             error.code
         ),
     }
-    #[cfg(not(windows))]
+    #[cfg(not(any(windows, target_os = "macos")))]
     let _ = (before, after);
 }
 
 /// The first server of the subscription that answers Discord's voice servers,
 /// checked one at a time in a short-lived core. The previous choice goes first,
 /// then the order used for automatic server selection.
-#[cfg(windows)]
+#[cfg(any(windows, target_os = "macos"))]
 async fn fallback(
     state: &AppState,
     selected: &str,

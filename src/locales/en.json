@@ -118,6 +118,7 @@
 		"languageDesc": "Select application display language",
 		"routingMode": "Working Mode",
 		"routingDesc": "Select network client mode",
+		"routingProxyOnly": "Only the system proxy is available on this platform for now",
 		"modeProxy": "System Proxy (HTTP)",
 		"modeTun": "TUN Adapter (Full VPN)",
 		"autoConnect": "Auto Connect",
@@ -272,6 +273,8 @@
 		"processFailed": "Could not list Windows programs. (PROCESS_FAILED)",
 		"logConsoleFailed": "Could not open the Lumen log. (LOG_CONSOLE_FAILED)",
 		"notificationFailed": "Windows did not show the notification. Check notification permissions. (NOTIFICATION_FAILED)",
+		"platformUnsupported": "TUN mode is not available on this platform yet. Choose System Proxy under Working Mode. (PLATFORM_UNSUPPORTED)",
+		"autostartUnavailable": "Move Lumen to the Applications folder to open it at login. (AUTOSTART_UNAVAILABLE)",
 		"GEO_DATA_MISSING": "GeoIP/GeoSite databases are missing or corrupted.",
 		"INVALID_GEO_TAG": "Invalid tag. Use Latin letters, digits, _, -, !, @"
 	},
@@ -350,5 +353,33 @@
 		"examplesLabel": "For example:",
 		"selectedCount": "selected",
 		"clear": "Clear"
+	},
+	"macos": {
+		"settings": {
+			"autoStart": "Open at login",
+			"closeToTray": "Keep running in the menu bar when closed",
+			"startMinimized": "Start hidden in the menu bar",
+			"resetProxyDesc": "Cleans up macOS proxy settings and restores internet",
+			"resetProxyDone": "macOS proxy settings cleared"
+		},
+		"errors": {
+			"routingConflict": "A macOS route bypasses Lumen. Retry the connection or check competing routes.",
+			"tunAdapterTimeout": "macOS could not start the VPN interface. Check for another active VPN, then try again.",
+			"invalidRule": "Enter a domain without a path or an application name, and select a server.",
+			"coreNotFound": "The Xray file is missing. Reinstall Lumen. (CORE_NOT_FOUND)",
+			"coreStartFailed": "Xray could not start: macOS blocked it or local ports are busy. Reinstall Lumen and retry. (CORE_START_FAILED)",
+			"tunFailed": "Could not bring up the TUN interface: the administrator helper did not start or exited. Turn off other VPNs, allow the administrator prompt and retry. (TUN_FAILED)",
+			"tunNetworkUnreachable": "The server answers, but macOS traffic does not go through Lumen. Another VPN or a firewall usually causes this. Turn them off and reconnect. (TUN_NETWORK_UNREACHABLE)",
+			"permissionDenied": "TUN mode needs administrator rights and the macOS prompt was declined. Connect again and approve the prompt. (PERMISSION_DENIED)",
+			"networkChanged": "The macOS network changed and the VPN was disconnected after repeated failed checks. Connect again. (NETWORK_CHANGED)",
+			"dnsUnavailable": "Could not read the macOS DNS servers. Check the network settings in System Settings. (DNS_UNAVAILABLE)",
+			"alreadyRunning": "Lumen is already running. Open it from the menu bar icon. (ALREADY_RUNNING)",
+			"processFailed": "Could not list macOS programs. (PROCESS_FAILED)",
+			"notificationFailed": "macOS did not show the notification. Allow notifications for Lumen in System Settings. (NOTIFICATION_FAILED)"
+		},
+		"rules": {
+			"applicationHint": "Application name. For example, Discord",
+			"application": "Application"
+		}
 	}
 }

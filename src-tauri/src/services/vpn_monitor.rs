@@ -51,11 +51,11 @@ pub fn monitor(state: Arc<AppState>, app: tauri::AppHandle) {
         let mut last_health = Instant::now();
         let mut last_tick = Instant::now();
         let mut generation = 0;
-        #[cfg(windows)]
+        #[cfg(any(windows, target_os = "macos"))]
         let watcher = crate::platform::network_watch::NetworkWatch::new();
-        #[cfg(windows)]
+        #[cfg(any(windows, target_os = "macos"))]
         let mut revision = watcher.revision();
-        #[cfg(windows)]
+        #[cfg(any(windows, target_os = "macos"))]
         let mut physical = crate::platform::network_watch::physical_fingerprint();
         let mut physical_changed = false;
         let mut network_dirty = false;
@@ -74,7 +74,7 @@ pub fn monitor(state: Arc<AppState>, app: tauri::AppHandle) {
                 _=ticker.tick()=>{
                     network_dirty |= last_tick.elapsed() > Duration::from_secs(15);
                     last_tick = Instant::now();
-                    #[cfg(windows)] { let now = watcher.revision(); network_dirty |= now != revision; revision = now; }
+                    #[cfg(any(windows, target_os = "macos"))] { let now = watcher.revision(); network_dirty |= now != revision; revision = now; }
                     let Ok(operation)=state.connection_operation.try_acquire()else{continue};
                     let mut session=std::mem::take(&mut *state.session.lock().await);
                     let active_id = state.snapshot.read().await.info.as_ref().map(|info| info.server_id.clone());
@@ -88,6 +88,9 @@ pub fn monitor(state: Arc<AppState>, app: tauri::AppHandle) {
                             publish(&state,&app,Snapshot{status:"error".into(),info:None,error:Some(BackendError::new("CORE_CRASHED","Networking engine stopped unexpectedly"))}).await;
                         }
                     }
+                    // macOS proxies are per service: one enabled or created since connect has none.
+                    #[cfg(target_os = "macos")]
+                    if network_dirty { if let Some(proxy) = &session.system_proxy { if let Err(error) = proxy.extend() { log::warn!("New network services were not pointed at Lumen: {}", error.code); } } }
                     let source = session.stats_source();
                     let active=session.started().map(|s|(session.proxy_port(),s.elapsed().as_secs(),session.generation,session.is_tun()));
                     *state.session.lock().await=session;
@@ -98,7 +101,7 @@ pub fn monitor(state: Arc<AppState>, app: tauri::AppHandle) {
                     if let Some((proxy_port,duration,active_generation,is_tun))=active{
                         if generation != active_generation {
                             generation = active_generation; unhealthy = 0; degraded = false; network_dirty = false; physical_changed = false; last_health = Instant::now();
-                            #[cfg(windows)] { physical = crate::platform::network_watch::physical_fingerprint(); }
+                            #[cfg(any(windows, target_os = "macos"))] { physical = crate::platform::network_watch::physical_fingerprint(); }
                         }
                         // Recheck sooner after a failure; one failed probe right after a
                         // network event or resume is not an outage.
@@ -110,14 +113,14 @@ pub fn monitor(state: Arc<AppState>, app: tauri::AppHandle) {
                                     let repo = state.repository.read().await;
                                     (repo.settings.clone(), repo.routing_mode == "rules")
                                 };
-                                #[cfg(windows)]
+                                #[cfg(any(windows, target_os = "macos"))]
                                 let offline = {
                                     let now=crate::platform::network_watch::physical_fingerprint();
                                     physical_changed |= physical.is_some() && now.is_some() && physical != now;
                                     if now.is_some() { physical=now; }
                                     now.is_none()
                                 };
-                                #[cfg(not(windows))]
+                                #[cfg(not(any(windows, target_os = "macos")))]
                                 let offline = false;
                                 #[allow(unused_mut)]
                                 let mut probe = super::health::probe(proxy_port, is_tun).await;

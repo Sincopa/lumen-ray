@@ -75,6 +75,25 @@ impl AppState {
                 }
             }
         }
+        // macOS has no TUN helper yet and the UI cannot select it, so a saved TUN
+        // mode would fail every connect.
+        #[cfg(target_os = "macos")]
+        if repository.settings.network_mode == "tun" {
+            repository.settings.network_mode = "proxy".into();
+            if let Err(error) = store.save(&repository) {
+                log::warn!("Could not save the system proxy mode: {}", error.code);
+            }
+        }
+        // Restore proxies while an orphaned core still serves them. On failure keep
+        // the core running so Reset network settings stays reachable.
+        #[cfg(target_os = "macos")]
+        match crate::platform::proxy::SystemProxy::recover(&data) {
+            Ok(()) => crate::platform::process::recover(&data),
+            Err(error) => {
+                log::warn!("Could not restore macOS proxy settings: {}", error.code);
+                crate::platform::process::track(&data);
+            }
+        }
         #[cfg(windows)]
         crate::platform::proxy::SystemProxy::recover(&data)?;
         let core = crate::xray::bundle::prepare(resources.into(), &data)?;

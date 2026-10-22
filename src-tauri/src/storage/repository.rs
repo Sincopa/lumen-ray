@@ -201,7 +201,13 @@ pub struct Settings {
 impl Default for Settings {
     fn default() -> Self {
         Self {
-            network_mode: "tun".into(),
+            // TUN on macOS needs a privileged helper that does not exist yet.
+            network_mode: if cfg!(target_os = "macos") {
+                "proxy"
+            } else {
+                "tun"
+            }
+            .into(),
             dns_policy: Default::default(),
             subscription_transport: default_subscription_transport(),
             auto_connect: false,

@@ -12,11 +12,15 @@ mod tests;
 mod xray;
 use commands::vpn;
 use tauri::Manager;
+// One expansion: each one embeds Info.plist, and macOS rejects a second copy at link time.
+fn context() -> tauri::Context<tauri::Wry> {
+    tauri::generate_context!()
+}
 pub fn run_startup_check_if_requested() -> bool {
     if std::env::args().nth(1).as_deref() != Some("--lumen-startup-check") {
         return false;
     }
-    let context = tauri::generate_context!();
+    let context = context();
     let result = app::startup::verify_embedded_frontend(&context)
         .and_then(|_| app::startup::preflight())
         .and_then(|_| {
@@ -27,7 +31,10 @@ pub fn run_startup_check_if_requested() -> bool {
     match result {
         Ok(()) => {
             app::startup::record("STARTUP_CHECK_OK");
-            println!("STARTUP_CHECK_OK (embedded frontend, WebView2 and runtime discovery)");
+            println!(
+                "STARTUP_CHECK_OK (embedded frontend, {} and runtime discovery)",
+                if cfg!(windows) { "WebView2" } else { "WebView" }
+            );
         }
         Err(failure) => {
             app::startup::record(failure.code);
@@ -104,7 +111,7 @@ pub fn run_smoke_if_requested() -> bool {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     app::startup::install_panic_handler();
-    let mut context = tauri::generate_context!();
+    let mut context = context();
     if !cfg!(dev) {
         if let Err(failure) = app::startup::verify_embedded_frontend(&context) {
             app::startup::report(failure);
@@ -309,6 +316,46 @@ pub fn run() {
     // 0 = idle, 1 = cleanup in progress, 2 = safe to exit.
     let exiting = std::sync::Arc::new(std::sync::atomic::AtomicU8::new(0));
     application.run(move |app, event| {
+        // The Dock icon brings back a window hidden to the menu bar.
+        #[cfg(target_os = "macos")]
+        if let tauri::RunEvent::Reopen { .. } = event {
+            if let Some(window) = app.get_webview_window("main") {
+                let _ = window.show();
+                let _ = window.unminimize();
+                let _ = window.set_focus();
+            }
+            return;
+        }
+        // Cmd+Q, logout and shutdown terminate through applicationWillTerminate,
+        // which skips ExitRequested. The system proxy must not outlive its listener.
+        #[cfg(target_os = "macos")]
+        if let tauri::RunEvent::Exit = event {
+            if exiting.swap(2, std::sync::atomic::Ordering::SeqCst) != 2 {
+                if let Some(state) = app.try_state::<std::sync::Arc<app::state::AppState>>() {
+                    let state = state.inner().clone();
+                    state
+                        .connection_generation
+                        .fetch_add(1, std::sync::atomic::Ordering::AcqRel);
+                    // A busy session waits on this blocked main thread for menu updates,
+                    // so only an idle one is stopped gracefully.
+                    if let Ok(mut session) = state.session.try_lock() {
+                        // The timer needs the runtime's reactor, so it is created inside block_on.
+                        tauri::async_runtime::block_on(async {
+                            let _ = tokio::time::timeout(
+                                std::time::Duration::from_secs(5),
+                                services::vpn_service::stop(&mut session),
+                            )
+                            .await;
+                        });
+                    }
+                    if let Err(error) = platform::proxy::SystemProxy::recover(&state.data) {
+                        log::warn!("Could not restore macOS proxy settings: {}", error.code);
+                    }
+                    platform::process::stop_recorded(&state.data);
+                }
+            }
+            return;
+        }
         if let tauri::RunEvent::ExitRequested { api, .. } = event {
             if exiting.load(std::sync::atomic::Ordering::SeqCst) != 2 {
                 api.prevent_exit();

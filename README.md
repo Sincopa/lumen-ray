@@ -1,8 +1,8 @@
 # Lumen
 
-Windows app for a VPN or proxy subscription you already have.
+Windows and macOS app for a VPN or proxy subscription you already have.
 
-**[Download for Windows x64](https://github.com/Sincopa/lumen-ray/releases/latest)** · [Report a bug](https://github.com/Sincopa/lumen-ray/issues) · [Proprietary (All Rights Reserved)](LICENSE)
+**[Download for Windows x64](https://github.com/Sincopa/lumen-ray/releases/latest)** · **[Download for macOS](https://github.com/Sincopa/lumen-ray/releases/latest)** · [Report a bug](https://github.com/Sincopa/lumen-ray/issues) · [Proprietary (All Rights Reserved)](LICENSE)
 
 ## Screenshots
 
@@ -36,9 +36,17 @@ The first launch can show a SmartScreen warning. The app is signed with a certif
 
 If a message says WebView2 is missing, install it from [Microsoft](https://developer.microsoft.com/microsoft-edge/webview2/).
 
+### macOS
+
+1. Download the **.dmg** from [Releases](https://github.com/Sincopa/lumen-ray/releases/latest). One build runs on Apple Silicon and Intel, macOS 13 or newer.
+2. Open it and drag **Lumen** to **Applications**, then start it from there.
+3. Add a profile and connect the same way as on Windows.
+
+Only **System proxy** works on macOS for now. It covers browsers and other programs that follow the macOS proxy settings. TUN is not available on macOS yet.
+
 ## If something breaks
 
-Open an [issue](https://github.com/Sincopa/lumen-ray/issues) with the app version, your Windows version, and what you clicked. Do not paste a subscription link, a key, or a password.
+Open an [issue](https://github.com/Sincopa/lumen-ray/issues) with the app version, your Windows or macOS version, and what you clicked. Do not paste a subscription link, a key, or a password.
 
 ## Build it yourself
 
@@ -51,5 +59,15 @@ npm run tauri:dev
 ```
 
 `npm run build:release` writes the installer and the portable ZIP to `release/`.
+
+On macOS: Node.js 22.12 or newer, Rust 1.92 or newer with both Apple targets, and the Xcode Command Line Tools.
+
+```sh
+npm ci
+rustup target add aarch64-apple-darwin x86_64-apple-darwin
+npm run tauri:dev:macos
+```
+
+`tauri:dev:macos` first builds the verified universal Xray core into `src-tauri/runtime/xray/xray`; plain `cargo` commands need it too (`npm run prepare:core:macos`). `npm run tauri:build:macos` writes `Lumen.app` and the disk image to `src-tauri/target/universal-apple-darwin/release/bundle/`. Set `APPLE_SIGNING_IDENTITY` to sign the core and the app with a Developer ID, and `APPLE_ID`, `APPLE_PASSWORD` and `APPLE_TEAM_ID` to notarize.
 
 Proprietary, All Rights Reserved. See [LICENSE](LICENSE). Xray, Wintun, and the fonts keep their own license files in the repository.

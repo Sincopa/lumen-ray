@@ -24,11 +24,11 @@ pub fn build(
     let p = &repo.settings.dns_policy;
     p.validate()?;
     let direct = if p.direct == "system" {
-        #[cfg(windows)]
+        #[cfg(any(windows, target_os = "macos"))]
         {
             crate::platform::network::system_dns()?
         }
-        #[cfg(not(windows))]
+        #[cfg(not(any(windows, target_os = "macos")))]
         {
             vec![p.bootstrap.clone()]
         }
