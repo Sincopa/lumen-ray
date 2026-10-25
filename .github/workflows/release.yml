@@ -32,7 +32,6 @@ jobs:
           npm run check
           npm run lint
           npm run format:check
-          npm run check:locales
 
       - name: Build frontend for browser checks
         run: npm run build

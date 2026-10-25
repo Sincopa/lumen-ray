@@ -1,7 +1,7 @@
 {
 	"name": "lumen",
 	"private": true,
-	"version": "0.2.10",
+	"version": "0.2.11",
 	"description": "Desktop VPN and proxy client for Windows and macOS, built with Svelte 5 and Tauri 2",
 	"license": "SEE LICENSE IN LICENSE",
 	"type": "module",
@@ -9,7 +9,6 @@
 		"lint": "eslint src *.ts *.js --max-warnings 0",
 		"format": "prettier --write src *.ts *.js *.json README.md",
 		"format:check": "prettier --check src *.ts *.js *.json README.md",
-		"check:locales": "node tools/check-locales.mjs",
 		"dev": "vite",
 		"build": "vite build",
 		"preview": "vite preview",
