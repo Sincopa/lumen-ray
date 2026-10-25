@@ -12,7 +12,6 @@ use std::{
     sync::Arc,
     time::{Duration, Instant},
 };
-use tauri::Emitter;
 
 /// Ask the elevated helper to reinstall the tunnel default routes. No new elevation.
 #[cfg(windows)]
@@ -39,15 +38,6 @@ async fn reassert_routes(state: &AppState, generation: u64) -> bool {
 pub fn monitor(state: Arc<AppState>, app: tauri::AppHandle) {
     let mut shutdown = state.shutdown.subscribe();
     tauri::async_runtime::spawn(async move {
-        let client = match reqwest::Client::builder()
-            .no_proxy()
-            .timeout(Duration::from_millis(800))
-            .build()
-        {
-            Ok(c) => c,
-            Err(_) => return,
-        };
-        let mut previous = (0u64, 0u64, 0u64, Instant::now());
         let mut last_health = Instant::now();
         let mut last_tick = Instant::now();
         let mut generation = 0;
@@ -83,7 +73,6 @@ pub fn monitor(state: Arc<AppState>, app: tauri::AppHandle) {
                         failed_id = active_id.clone();
                         log::warn!("Core stopped unexpectedly");
                         let _=stop(&mut session).await;
-                        *state.traffic.write().await=Default::default();
                         if active_id.is_some() {
                             publish(&state,&app,Snapshot{status:"error".into(),info:None,error:Some(BackendError::new("CORE_CRASHED","Networking engine stopped unexpectedly"))}).await;
                         }
@@ -91,14 +80,13 @@ pub fn monitor(state: Arc<AppState>, app: tauri::AppHandle) {
                     // macOS proxies are per service: one enabled or created since connect has none.
                     #[cfg(target_os = "macos")]
                     if network_dirty { if let Some(proxy) = &session.system_proxy { if let Err(error) = proxy.extend() { log::warn!("New network services were not pointed at Lumen: {}", error.code); } } }
-                    let source = session.stats_source();
-                    let active=session.started().map(|s|(session.proxy_port(),s.elapsed().as_secs(),session.generation,session.is_tun()));
+                    let active=session.started().map(|_|(session.proxy_port(),session.generation,session.is_tun()));
                     *state.session.lock().await=session;
                     drop(operation);
                     if let Some(id) = failed_id {
                         schedule_recovery(state.clone(), app.clone(), id);
                     }
-                    if let Some((proxy_port,duration,active_generation,is_tun))=active{
+                    if let Some((proxy_port,active_generation,is_tun))=active{
                         if generation != active_generation {
                             generation = active_generation; unhealthy = 0; degraded = false; network_dirty = false; physical_changed = false; last_health = Instant::now();
                             #[cfg(any(windows, target_os = "macos"))] { physical = crate::platform::network_watch::physical_fingerprint(); }
@@ -175,7 +163,6 @@ pub fn monitor(state: Arc<AppState>, app: tauri::AppHandle) {
                                             if let Some(id) = &id {
                                                 state.latencies.write().await.insert(id.clone(), serde_json::json!("timeout"));
                                             }
-                                            *state.traffic.write().await = Default::default();
                                             let error = cleanup.err().or_else(|| outcome.err()).unwrap_or_else(|| BackendError::new("NETWORK_CHANGED", "Physical network changed"));
                                             log::warn!("Tunnel released after repeated failed checks: {}", error.code);
                                             publish(&state, &app, Snapshot { status: "error".into(), info: None, error: Some(error) }).await;
@@ -192,20 +179,6 @@ pub fn monitor(state: Arc<AppState>, app: tauri::AppHandle) {
                                 }
                             }
                         }
-                        let mut traffic=super::stats_service::TrafficStats{duration_seconds:duration,..Default::default()};
-                        if let Some(source)=source { if let Ok((up,down))=source.counters(&client).await{
-                            let dt=previous.3.elapsed().as_secs_f64().max(0.001);
-                            traffic.available=true;traffic.upload=up;traffic.download=down;
-                            if previous.0==active_generation{traffic.upload_speed=up.saturating_sub(previous.1) as f64/dt;traffic.download_speed=down.saturating_sub(previous.2) as f64/dt;}
-                            previous=(active_generation,up,down,Instant::now());
-                        }
-                        }
-                        let Ok(_publish_operation)=state.connection_operation.try_acquire()else{continue};
-                        let current=state.session.lock().await;
-                        if current.started().is_none()||current.generation!=active_generation{continue;}
-                        drop(current);
-                        *state.traffic.write().await=traffic.clone();
-                        if app.emit("vpn://stats",traffic).is_err(){log::warn!("Unable to deliver metrics event");}
                     }
                 }
             }

@@ -1248,6 +1248,8 @@ pub async fn stop(session: &mut XraySession) -> Result<()> {
     failures.into_iter().next().map_or(Ok(()), Err)
 }
 
+/// Traffic counters prove that the native checks really carried data through the core.
+#[cfg(any(test, all(windows, debug_assertions)))]
 pub async fn counters(client: &reqwest::Client, port: u16) -> Result<(u64, u64)> {
     let error = || {
         BackendError::new(

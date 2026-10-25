@@ -103,17 +103,6 @@ impl Session {
     pub fn failed(&mut self) -> bool {
         xray::failed(&mut self.backend)
     }
-    pub fn stats_source(&self) -> Option<StatsSource> {
-        self.started()?;
-        Some(StatsSource(self.backend.metrics_port))
-    }
-}
-/// Xray's metrics port.
-pub struct StatsSource(u16);
-impl StatsSource {
-    pub async fn counters(&self, client: &reqwest::Client) -> Result<(u64, u64)> {
-        xray::counters(client, self.0).await
-    }
 }
 
 /// The active backend is never inferred from mutable saved settings.

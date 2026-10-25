@@ -161,19 +161,22 @@
 	.settings-btn.active {
 		background: #ffffff20;
 	}
-	.dark-surface .controls-pill,
 	.dark-surface .header-circle-btn {
 		background: var(--design-glass-dark);
+	}
+	.dark-surface .controls-pill {
+		background: var(--design-glass-raised);
 	}
 	.controls-pill {
 		display: flex;
 		align-items: center;
-		justify-content: space-between;
+		gap: 6px;
 		width: 112px;
 		height: 40px;
-		padding: 6px;
-		border-radius: 123px;
+		padding: 6px 8px;
+		border-radius: 32px;
 		background: var(--design-glass);
+		box-shadow: var(--design-edge), var(--design-glow);
 		backdrop-filter: blur(25px);
 	}
 	.control-btn {

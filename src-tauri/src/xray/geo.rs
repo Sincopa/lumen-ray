@@ -195,7 +195,7 @@ pub fn snapshot(data: &Path) -> Result<(GeoDatabaseMetadata, Vec<u8>, Vec<u8>)> 
     let (ip, site) = verify_pair(&dir, &meta)?;
     Ok((meta, ip, site))
 }
-#[allow(dead_code)]
+#[cfg(test)]
 pub fn install_snapshot(
     data: &Path,
     core: &Path,

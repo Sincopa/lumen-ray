@@ -1,6 +1,4 @@
 <script lang="ts">
-	import closeBoldIcon from '../../assets/close-bold.svg';
-	import copyIcon from '../../assets/copy.svg';
 	import { onDestroy } from 'svelte';
 	import { SvelteSet } from 'svelte/reactivity';
 	import { createDeferredTask } from '../../lib/utils/deferredTask';
@@ -15,57 +13,27 @@
 	} from '../../lib/motion';
 	import { catalog, connection } from '../../lib/services';
 	import { errorCode } from '../../lib/services/errors';
-	import {
-		refreshStatus,
-		refreshSubscriptionWithStatus,
-	} from '../../lib/services/maintenance';
-	import { t, i18n } from '../../lib/i18n';
+	import { refreshSubscriptionWithStatus } from '../../lib/services/maintenance';
+	import { t } from '../../lib/i18n';
 	import type { Subscription } from '../../lib/services/catalog';
-	import DesignOverlay from '../../components/DesignOverlay.svelte';
 	import ConfirmDialog from '../../components/ConfirmDialog.svelte';
-	import IconButton from '../../components/IconButton.svelte';
 	import PopupMenu from '../../components/PopupMenu.svelte';
-	import MenuItem from '../../components/MenuItem.svelte';
-	import MaterialIcon from '../../components/MaterialIcon.svelte';
-	import reloadIcon from '../../assets/reload.svg';
-	import menuIcon from '../../assets/menu.svg';
-	import pencilIcon from '../../assets/pencil.svg';
-	import trashIcon from '../../assets/trash.svg';
-	import shareIcon from '../../assets/share-link.svg';
-	import chevronIcon from '../../assets/chevron-up.svg';
-	import backIcon from '../../assets/back.svg';
-	import checkIcon from '../../assets/check.svg';
-	import { formatSubscriptionUpdatedAgo } from '../../lib/utils/time';
 	import { tabHeader } from '../../app/tabHeader.svelte';
+	import { loadExpandedIds, saveExpandedIds } from './subscriptionExpansion';
+	import SubscriptionRenameField from './parts/SubscriptionRenameField.svelte';
+	import SubscriptionCardActions from './parts/SubscriptionCardActions.svelte';
+	import SubscriptionDetails from './parts/SubscriptionDetails.svelte';
+	import SubscriptionMenuItems from './parts/SubscriptionMenuItems.svelte';
+	import SubscriptionShareDialog from './parts/SubscriptionShareDialog.svelte';
 
 	const focusTask = createDeferredTask();
-	let copyResetTimer: ReturnType<typeof setTimeout> | undefined;
-	onDestroy(() => {
-		focusTask.cancel();
-		if (copyResetTimer) clearTimeout(copyResetTimer);
-	});
+	onDestroy(() => focusTask.cancel());
 
 	const catalogStore = catalog.state;
 	const connectionStore = connection.state;
-	const subscriptionRefreshStatus = refreshStatus;
-
-	// Expanded cards survive restarts; only the chevron changes them.
-	const EXPANDED_KEY = 'lumen_expanded_subscriptions';
-	function loadExpanded(): string[] {
-		try {
-			const ids: unknown = JSON.parse(
-				localStorage.getItem(EXPANDED_KEY) ?? '[]',
-			);
-			return Array.isArray(ids)
-				? ids.filter((id): id is string => typeof id === 'string')
-				: [];
-		} catch {
-			return [];
-		}
-	}
 
 	// Local state
-	const expanded = new SvelteSet<string>(loadExpanded());
+	const expanded = new SvelteSet<string>(loadExpandedIds());
 	let editingId = $state<string | null>(null);
 	let editName = $state('');
 	let editInputEl = $state<HTMLInputElement | null>(null);
@@ -77,7 +45,6 @@
 	let sharing = $state<Subscription | null>(null);
 	let sharedSource = $state('');
 	let shareError = $state('');
-	let copyState = $state<'idle' | 'copied' | 'failed'>('idle');
 
 	let activeSubId = $derived(
 		$catalogStore.selectedSubscriptionId ??
@@ -92,6 +59,9 @@
 	// The active subscription is pinned in the shared header above the list.
 	const otherSubs = $derived(
 		$catalogStore.subscriptions.filter((sub) => sub.id !== activeSub?.id),
+	);
+	const deleteBlocked = $derived(
+		$connectionStore.busy || $connectionStore.status === 'connected',
 	);
 
 	const headerOwner = {};
@@ -134,32 +104,7 @@
 		if (expanded.has(id)) expanded.delete(id);
 		else expanded.add(id);
 		const known = new Set($catalogStore.subscriptions.map((sub) => sub.id));
-		try {
-			localStorage.setItem(
-				EXPANDED_KEY,
-				JSON.stringify([...expanded].filter((key) => known.has(key))),
-			);
-		} catch {
-			/* Storage is optional. */
-		}
-	}
-
-	function formatUpdatedAgo(sub: Subscription): string {
-		const minutes =
-			sub.updatedMinutesAgo ??
-			Math.max(
-				1,
-				Math.floor(
-					(Date.now() - (sub.updatedAt || Date.now() - 60_000)) / 60_000,
-				),
-			);
-		if (minutes < 60)
-			return t('subscriptions.updatedMinutesAgo', { count: minutes });
-		return formatSubscriptionUpdatedAgo(
-			sub.updatedAt,
-			sub.updatedMinutesAgo,
-			i18n.currentLanguage,
-		);
+		saveExpandedIds([...expanded].filter((key) => known.has(key)));
 	}
 
 	function toggleMenu(subId: string, e: MouseEvent) {
@@ -219,6 +164,11 @@
 		}
 	}
 
+	function requestDelete(sub: Subscription) {
+		deleting = sub;
+		menu = null;
+	}
+
 	async function remove() {
 		if (!deleting) return;
 		deleteBusy = true;
@@ -238,39 +188,11 @@
 		sharing = sub;
 		sharedSource = '';
 		shareError = '';
-		copyState = 'idle';
 		try {
 			sharedSource = await catalog.getSubscriptionSource(sub.id);
 		} catch (cause) {
 			shareError = t('subscriptions.sourceUnavailable');
 			console.error('[subscription-source] Unable to retrieve source', cause);
-		}
-	}
-
-	async function copySubscriptionSource() {
-		if (!sharedSource) return;
-		copyState = 'idle';
-		try {
-			if (navigator.clipboard?.writeText) {
-				await navigator.clipboard.writeText(sharedSource);
-			} else {
-				const textarea = document.createElement('textarea');
-				textarea.value = sharedSource;
-				textarea.style.position = 'fixed';
-				textarea.style.opacity = '0';
-				document.body.appendChild(textarea);
-				textarea.select();
-				const copied = document.execCommand('copy');
-				textarea.remove();
-				if (!copied) throw new Error('Clipboard unavailable');
-			}
-			copyState = 'copied';
-			if (copyResetTimer) clearTimeout(copyResetTimer);
-			copyResetTimer = setTimeout(() => {
-				copyState = 'idle';
-			}, 1800);
-		} catch {
-			copyState = 'failed';
 		}
 	}
 </script>
@@ -286,149 +208,49 @@
 	}}
 />
 
-{#snippet renameField(sub: Subscription)}
-	<div
-		class="card-rename-inline"
-		role="presentation"
-		onclick={(e) => e.stopPropagation()}
-		onkeydown={(e) => e.stopPropagation()}
-	>
-		<img src={pencilIcon} alt="" class="rename-icon" />
-		<input
-			bind:this={editInputEl}
-			type="text"
-			class="rename-input"
-			bind:value={editName}
-			maxlength="80"
-			autocomplete="off"
-			spellcheck="false"
-			onkeydown={(e) => {
-				if (e.key === 'Enter') {
-					e.preventDefault();
-					saveEditing(sub.id);
-				} else if (e.key === 'Escape') {
-					e.preventDefault();
-					cancelEditing();
-				}
-			}}
+{#snippet headerRename()}
+	{#if activeSub}
+		<SubscriptionRenameField
+			bind:name={editName}
+			bind:inputEl={editInputEl}
+			onSave={() => saveEditing(activeSub.id)}
+			onCancel={cancelEditing}
 		/>
-		<button
-			type="button"
-			class="rename-action-btn check"
-			onclick={() => saveEditing(sub.id)}
-			aria-label={t('common.save')}
-		>
-			<img src={checkIcon} alt="" class="action-svg" />
-		</button>
-		<button
-			type="button"
-			class="rename-action-btn cancel"
-			onclick={cancelEditing}
-			aria-label={t('common.close')}
-		>
-			<img src={closeBoldIcon} alt="" class="action-svg" />
-		</button>
-	</div>
-{/snippet}
-
-{#snippet cardActions(sub: Subscription)}
-	<IconButton
-		design
-		icon={reloadIcon}
-		ariaLabel={t('common.reload')}
-		disabled={busy !== null}
-		onclick={() => refresh(sub.id)}
-	/>
-	<IconButton
-		design
-		icon={menuIcon}
-		ariaLabel={t('common.menu')}
-		active={menu === sub.id}
-		expanded={menu === sub.id}
-		onclick={(e) => toggleMenu(sub.id, e)}
-	/>
-	<IconButton
-		design
-		icon={chevronIcon}
-		ariaLabel={sub.name}
-		expanded={expanded.has(sub.id)}
-		class="card-chevron"
-		onclick={() => toggleExpanded(sub.id)}
-	/>
-{/snippet}
-
-{#snippet cardDetails(sub: Subscription)}
-	<div class="metrics-row">
-		<div class="metric-item">
-			<span class="metric-label">
-				{t('subscriptions.daysLabel')}
-			</span>
-			<span class="metric-val">
-				{sub.daysRemaining ?? (sub.traffic === '∞' ? '∞' : '—')}
-			</span>
-		</div>
-		<div class="metric-item">
-			<span class="metric-label">
-				{t('subscriptions.trafficLabel')}
-			</span>
-			<span class="metric-val">{sub.traffic ?? '—'}</span>
-		</div>
-	</div>
-	<div class="updated-time">{formatUpdatedAgo(sub)}</div>
-	{#if $subscriptionRefreshStatus[sub.id]?.state === 'error'}
-		<div class="refresh-error" role="status">
-			{t('subscriptions.refreshFailed')}: {t(
-				'errors.' + ($subscriptionRefreshStatus[sub.id].error ?? 'unknown'),
-			)}
-		</div>
 	{/if}
 {/snippet}
 
-{#snippet menuItems()}
-	<MenuItem
-		icon={pencilIcon}
-		label={t('common.edit')}
-		onclick={() => {
-			if (activeMenuSub) startEditing(activeMenuSub);
-		}}
-	/>
-	<MenuItem
-		icon={shareIcon}
-		label={t('common.share')}
-		onclick={() => {
-			if (activeMenuSub) void showSubscriptionSource(activeMenuSub);
-		}}
-	/>
-	<MenuItem
-		icon={trashIcon}
-		label={t('common.delete')}
-		variant="danger"
-		disabled={$connectionStore.busy || $connectionStore.status === 'connected'}
-		onclick={() => {
-			deleting = activeMenuSub ?? null;
-			menu = null;
-		}}
-	/>
-{/snippet}
-
 <!-- The active subscription lives in the shared header; these fill it. -->
-{#snippet headerRename()}
-	{#if activeSub}{@render renameField(activeSub)}{/if}
-{/snippet}
-
 {#snippet headerActions()}
-	{#if activeSub}{@render cardActions(activeSub)}{/if}
+	{#if activeSub}
+		<SubscriptionCardActions
+			name={activeSub.name}
+			busy={busy !== null}
+			menuOpen={menu === activeSub.id}
+			expanded={expanded.has(activeSub.id)}
+			onRefresh={() => refresh(activeSub.id)}
+			onToggleMenu={(e) => toggleMenu(activeSub.id, e)}
+			onToggleExpanded={() => toggleExpanded(activeSub.id)}
+		/>
+	{/if}
 {/snippet}
 
 {#snippet headerBody()}
 	{#if activeSub}
-		<div class="card-details">{@render cardDetails(activeSub)}</div>
+		<SubscriptionDetails sub={activeSub} />
 	{/if}
 {/snippet}
 
 {#snippet headerMenu()}
 	<PopupMenu top="calc(var(--design-header-height) + 8px)" right="20px">
-		{@render menuItems()}
+		{#if activeMenuSub}
+			<SubscriptionMenuItems
+				sub={activeMenuSub}
+				deleteDisabled={deleteBlocked}
+				onEdit={startEditing}
+				onShare={showSubscriptionSource}
+				onDelete={requestDelete}
+			/>
+		{/if}
 	</PopupMenu>
 {/snippet}
 
@@ -451,7 +273,12 @@
 					<div class="card-header" class:is-editing={editingId === sub.id}>
 						{#if editingId === sub.id}
 							<div class="rename-wrap" in:morphGrow>
-								{@render renameField(sub)}
+								<SubscriptionRenameField
+									bind:name={editName}
+									bind:inputEl={editInputEl}
+									onSave={() => saveEditing(sub.id)}
+									onCancel={cancelEditing}
+								/>
 							</div>
 						{:else}
 							<button
@@ -463,7 +290,15 @@
 								<span class="sub-name">{sub.name}</span>
 							</button>
 							<div class="actions-group">
-								{@render cardActions(sub)}
+								<SubscriptionCardActions
+									name={sub.name}
+									busy={busy !== null}
+									menuOpen={menu === sub.id}
+									expanded={expanded.has(sub.id)}
+									onRefresh={() => refresh(sub.id)}
+									onToggleMenu={(e) => toggleMenu(sub.id, e)}
+									onToggleExpanded={() => toggleExpanded(sub.id)}
+								/>
 							</div>
 						{/if}
 					</div>
@@ -474,8 +309,8 @@
 						onclick={() => selectSubscription(sub.id)}
 					>
 						{#if expanded.has(sub.id)}
-							<div class="card-details" transition:reveal>
-								{@render cardDetails(sub)}
+							<div transition:reveal>
+								<SubscriptionDetails {sub} />
 							</div>
 						{/if}
 					</div>
@@ -489,7 +324,13 @@
 
 	{#if menu && activeMenuSub && menu !== activeSub?.id}
 		<PopupMenu top="{menuTop}px" right="20px">
-			{@render menuItems()}
+			<SubscriptionMenuItems
+				sub={activeMenuSub}
+				deleteDisabled={deleteBlocked}
+				onEdit={startEditing}
+				onShare={showSubscriptionSource}
+				onDelete={requestDelete}
+			/>
 		</PopupMenu>
 	{/if}
 </section>
@@ -508,69 +349,12 @@
 {/if}
 
 {#if sharing}
-	<DesignOverlay
-		labelledby="share-title"
-		describedby="share-hint"
-		onDismiss={() => (sharing = null)}
-	>
-		<div class="share-content">
-			<div class="share-copy">
-				<h2 id="share-title">
-					{t('subscriptions.shareTitle', { name: sharing.name })}
-				</h2>
-				<p id="share-hint" class="share-hint">
-					{t('subscriptions.shareHint')}
-				</p>
-			</div>
-			{#if sharedSource}
-				<div class="source-field">
-					<input
-						readonly
-						value={sharedSource}
-						aria-label={t('subscriptions.source')}
-						onfocus={(event) => event.currentTarget.select()}
-					/>
-					<button
-						class="copy-icon-button"
-						class:copied={copyState === 'copied'}
-						type="button"
-						onclick={copySubscriptionSource}
-						aria-label={copyState === 'copied'
-							? t('common.copied')
-							: t('common.copy')}
-						title={copyState === 'copied'
-							? t('common.copied')
-							: t('common.copy')}
-					>
-						<span class="copy-icon">
-							{#if copyState === 'copied'}
-								<MaterialIcon name="check" size={20} />
-							{:else}
-								<img src={copyIcon} alt="" width="34" height="34" />
-							{/if}
-						</span>
-					</button>
-				</div>
-				{#if copyState === 'failed'}
-					<p class="copy-error" role="alert">{t('subscriptions.copyFailed')}</p>
-				{/if}
-			{:else if shareError}
-				<p class="share-error" role="alert">{shareError}</p>
-			{:else}
-				<p class="share-loading">{t('common.loading')}</p>
-			{/if}
-		</div>
-		{#snippet footer()}
-			<IconButton
-				design
-				icon={backIcon}
-				ariaLabel={t('common.back')}
-				size="lg"
-				variant="surface"
-				onclick={() => (sharing = null)}
-			/>
-		{/snippet}
-	</DesignOverlay>
+	<SubscriptionShareDialog
+		subscription={sharing}
+		source={sharedSource}
+		error={shareError}
+		onClose={() => (sharing = null)}
+	/>
 {/if}
 
 <style>
@@ -609,13 +393,14 @@
 	.sub-card {
 		background: var(--design-panel);
 		border: none;
-		border-radius: 32px;
-		padding: 20px 20px 20px 23px;
+		border-radius: 33px;
+		padding: 19px 20px 19px 23px;
 		display: flex;
 		flex-direction: column;
-		min-height: 68px;
+		min-height: 66px;
 		transition:
 			background-color 200ms ease,
+			box-shadow 200ms ease,
 			transform 220ms var(--ease-spring);
 		cursor: pointer;
 	}
@@ -627,6 +412,11 @@
 		background: var(--design-panel-open);
 		border: none;
 		min-height: 117px;
+		box-shadow:
+			var(--design-edge),
+			inset 0 0 21.7px rgba(255, 255, 255, 0.02);
+		-webkit-backdrop-filter: blur(25px);
+		backdrop-filter: blur(25px);
 	}
 	.card-header {
 		display: flex;
@@ -643,80 +433,6 @@
 		width: 100%;
 		height: 100%;
 	}
-	/* A lighter pill, so the title visibly unrolls into a field. */
-	.card-rename-inline {
-		display: flex;
-		align-items: center;
-		gap: 10px;
-		width: calc(100% + 18px);
-		height: 44px;
-		margin: 0 -8px 0 -10px;
-		padding: 0 4px 0 3px;
-		border-radius: 999px;
-		background: #ffffff0d;
-		box-sizing: border-box;
-	}
-	.rename-icon {
-		width: 28px;
-		height: 28px;
-		flex-shrink: 0;
-	}
-	.rename-input {
-		flex: 1;
-		height: 100%;
-		background: transparent !important;
-		border: none !important;
-		outline: none !important;
-		box-shadow: none !important;
-		font-size: 16px;
-		font-weight: 500;
-		color: #ffffff !important;
-		padding: 0 !important;
-		letter-spacing: -0.2px;
-	}
-	.rename-action-btn {
-		width: 28px;
-		height: 28px;
-		border-radius: 50%;
-		background: transparent;
-		border: none;
-		display: flex;
-		align-items: center;
-		justify-content: center;
-		cursor: pointer;
-		padding: 0;
-		flex-shrink: 0;
-		transition:
-			background 150ms ease,
-			transform 150ms ease;
-	}
-	.rename-action-btn:hover {
-		background: rgba(255, 255, 255, 0.12);
-		transform: scale(1.08);
-	}
-	.rename-action-btn.check:hover {
-		background: rgba(134, 225, 111, 0.2);
-	}
-	.rename-action-btn.cancel:hover {
-		background: rgba(243, 57, 57, 0.2);
-	}
-	.rename-action-btn.check {
-		width: 34px;
-		height: 34px;
-		margin: -3px 0;
-	}
-	.action-svg {
-		display: block;
-		width: 100%;
-		height: 100%;
-		opacity: 0.85;
-	}
-	.rename-action-btn.check .action-svg {
-		filter: brightness(0) invert(1);
-	}
-	.rename-action-btn:hover .action-svg {
-		opacity: 1;
-	}
 	.title-group {
 		display: flex;
 		align-items: center;
@@ -731,7 +447,7 @@
 	/* Not cap-trimmed: the ellipsis clip would cut ascenders and descenders. */
 	.sub-name {
 		font-size: 16px;
-		font-weight: 500;
+		font-weight: 400;
 		line-height: 1.3;
 		letter-spacing: 0;
 		overflow: hidden;
@@ -746,13 +462,6 @@
 		align-items: center;
 		gap: 8px;
 	}
-	:global(.card-chevron) {
-		transform: rotate(180deg);
-		transition: transform 200ms var(--ease-out);
-	}
-	:global(.card-chevron.expanded) {
-		transform: rotate(0);
-	}
 	.card-body {
 		margin-top: 0;
 		color: inherit;
@@ -765,163 +474,5 @@
 	}
 	.card-body.expanded {
 		margin-top: 20px;
-	}
-	.card-details {
-		display: flex;
-		width: 100%;
-		justify-content: space-between;
-		align-items: flex-end;
-		gap: 12px;
-	}
-	.metrics-row {
-		display: flex;
-		gap: 24px;
-	}
-	.metric-item:first-child {
-		min-width: 43px;
-	}
-	.metric-item {
-		display: flex;
-		flex-direction: column;
-		gap: 10px;
-	}
-	.metric-label {
-		font-size: 12px;
-		line-height: 12px;
-		font-weight: 500;
-		color: #ffffff40;
-	}
-	.metric-val {
-		font-size: 12px;
-		line-height: 12px;
-		font-weight: 500;
-		letter-spacing: -0.24px;
-	}
-	.updated-time {
-		font-size: 12px;
-		line-height: 14px;
-		color: #ffffff40;
-		max-width: 50%;
-		text-align: right;
-	}
-	.refresh-error {
-		font-size: 11px;
-		color: #ffb4aa;
-		text-align: right;
-	}
-	.share-content {
-		display: flex;
-		flex-direction: column;
-		gap: 48px;
-		text-align: center;
-	}
-	.share-copy {
-		display: flex;
-		flex-direction: column;
-		gap: 16px;
-	}
-	.share-copy h2 {
-		margin: 0;
-		font-size: 28px;
-		font-weight: 500;
-		line-height: 28px;
-	}
-	.share-hint,
-	.share-loading {
-		margin: 0;
-		color: #ffffff80;
-		font-size: 14px;
-		line-height: 18.2px;
-		letter-spacing: -0.3px;
-		text-align: center;
-	}
-	.source-field {
-		display: flex;
-		align-items: center;
-		gap: 24px;
-		width: 100%;
-		height: 64px;
-		padding: 7px 7px 7px 32px;
-		border-radius: 123px;
-		background: #ffffff0d;
-		box-sizing: border-box;
-	}
-	.source-field input {
-		flex: 1;
-		min-width: 0;
-		padding: 0;
-		border: 0;
-		background: transparent;
-		color: #fff;
-		font-size: 18px;
-		line-height: 18px;
-		letter-spacing: -0.4px;
-		text-overflow: ellipsis;
-		outline: none;
-	}
-	.copy-icon-button {
-		display: grid;
-		place-items: center;
-		flex: 0 0 50px;
-		width: 50px;
-		height: 50px;
-		min-height: 0;
-		padding: 0;
-		border: 0;
-		border-radius: 50%;
-		background: #ffffff0d;
-		color: #fff;
-		transition:
-			transform 180ms var(--ease-spring),
-			background-color 220ms ease,
-			color 220ms ease;
-	}
-	.copy-icon-button:hover {
-		background: #ffffff1a;
-	}
-	.copy-icon-button:active {
-		transform: scale(0.92);
-	}
-	.copy-icon-button.copied {
-		background: var(--color-success);
-		color: #10210d;
-	}
-	.copy-icon {
-		display: grid;
-		place-items: center;
-	}
-	.copy-icon-button.copied .copy-icon {
-		animation: copy-confirm 420ms var(--ease-spring);
-	}
-	@keyframes copy-confirm {
-		0% {
-			transform: scale(0.55) rotate(-18deg);
-			opacity: 0;
-		}
-		55% {
-			transform: scale(1.18) rotate(3deg);
-			opacity: 1;
-		}
-		100% {
-			transform: scale(1) rotate(0);
-			opacity: 1;
-		}
-	}
-	.copy-error,
-	.share-error {
-		margin: 0;
-		border-radius: 14px;
-		background: rgba(243, 57, 57, 0.12);
-		padding: 10px 12px;
-		font-size: 12px;
-		line-height: 1.4;
-	}
-	@media (prefers-reduced-motion: reduce) {
-		:global(.card-chevron) {
-			transition: none;
-		}
-		.copy-icon-button.copied .copy-icon {
-			animation: none;
-		}
 	}
 </style>

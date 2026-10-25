@@ -177,7 +177,6 @@ pub fn run() {
             vpn::get_status,
             vpn::get_connection_info,
             vpn::get_connection_snapshot,
-            vpn::get_stats,
             commands::catalog::get_catalog,
             commands::catalog::mutate_catalog,
             commands::catalog::import_subscription,
@@ -233,6 +232,10 @@ pub fn run() {
                 } else {
                     log::warn!("Updated core unavailable; using verified bundled fallback");
                 }
+            }
+            #[cfg(all(windows, not(debug_assertions)))]
+            if !ui_smoke {
+                platform::windows::repair_autostart();
             }
             if !ui_smoke {
                 services::vpn_service::monitor(state.clone(), app.handle().clone());

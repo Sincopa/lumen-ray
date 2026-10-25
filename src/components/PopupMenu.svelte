@@ -25,7 +25,9 @@
 	.popup-menu {
 		position: absolute;
 		width: 197px;
-		background: #ffffff0a;
+		background: #ffffff05;
+		/* Figma: 1px inside stroke at 15% white, kept out of layout. */
+		box-shadow: inset 0 0 0 1px #ffffff26;
 		outline: none;
 		border-radius: 24px;
 		padding: 10px 12px;

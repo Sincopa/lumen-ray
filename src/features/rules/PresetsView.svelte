@@ -120,6 +120,7 @@
 			<article
 				class="preset-card"
 				class:open={selected || expanded}
+				class:edged={selected && expanded}
 				class:disabled
 				in:rise|global={{ y: 12, delay: 40 * index, duration: 260 }}
 			>
@@ -224,6 +225,10 @@
 	.preset-card.open {
 		background: var(--design-panel-open);
 	}
+	/* The chosen preset, opened, gets a hairline edge. */
+	.preset-card.edged {
+		box-shadow: var(--design-edge);
+	}
 	.preset-main {
 		display: flex;
 		flex-direction: column;
@@ -255,10 +260,10 @@
 		height: 28px;
 	}
 	.preset-title {
-		font-size: 16px;
-		font-weight: 500;
-		line-height: 20.8px;
-		letter-spacing: -0.32px;
+		font-size: 18px;
+		font-weight: 400;
+		line-height: 23.4px;
+		letter-spacing: -0.36px;
 	}
 	.preset-radio {
 		display: grid;
@@ -355,18 +360,21 @@
 		padding: 8px 8px 8px 24px;
 		border: 0;
 		border-radius: 123px;
-		background: #fff;
+		background: var(--design-light);
+		box-shadow: var(--design-light-rim);
 		color: #262626;
 		font-size: 16px;
 		font-weight: 500;
 		line-height: 20.8px;
 		transition:
 			background-color 180ms ease,
+			box-shadow 180ms ease,
 			color 180ms ease,
 			transform 160ms var(--ease-out);
 	}
 	.continue-btn:disabled {
-		background: #262626;
+		background: var(--design-glass-raised);
+		box-shadow: var(--design-glow);
 		color: #ffffff4d;
 		opacity: 1;
 	}

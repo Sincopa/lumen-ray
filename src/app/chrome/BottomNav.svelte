@@ -114,6 +114,8 @@
 			type="button"
 			class="nav-action"
 			class:light={action !== 'add'}
+			class:mode-action={action === 'global' || action === 'rules'}
+			class:done-action={action === 'done'}
 			disabled={(action === 'global' || action === 'rules') && modeDisabled}
 			aria-label={actionLabel}
 			aria-pressed={action === 'global' || action === 'rules'
@@ -166,37 +168,48 @@
 	}
 	.nav-pill {
 		display: flex;
+		flex-shrink: 0;
 		align-items: center;
 		height: 50px;
-		padding: 8px;
+		padding: 0 4px;
 		box-sizing: border-box;
 		border-radius: 123px;
 		background: var(--design-glass);
 		backdrop-filter: blur(25px);
 		transition: background-color 300ms ease;
 	}
-	/* The tab pill shrinks into the red delete button. */
+	/* The tab pill shrinks into the 42px red delete button with a 15% rim. */
 	.nav-pill.danger {
+		height: 42px;
+		padding: 4px;
 		background: #d03441;
+		box-shadow: inset 0 0 0 1px #ffffff26;
 	}
 	.tab-row {
 		display: flex;
 		align-items: center;
-		gap: 12px;
 	}
+	/* 52x38 tabs: a 22px glyph (34px with its built-in padding) in 8/15 padding.
+	   The current tab sits on a faint pill, clipped 2px in from each side so
+	   neighbouring pills keep a 4px gap and a 6px one from the nav edge. */
 	.pill-btn {
 		display: grid;
 		place-items: center;
-		width: 34px;
-		height: 34px;
-		flex: 0 0 34px;
-		padding: 0;
+		width: 52px;
+		height: 38px;
+		flex: 0 0 52px;
+		padding: 0 2px;
+		box-sizing: border-box;
 		border: 0;
-		border-radius: 50%;
+		border-radius: 123px;
 		background: transparent;
+		background-clip: content-box;
 		transition:
 			background-color 160ms ease,
 			transform 160ms var(--ease-spring);
+	}
+	.pill-btn.active {
+		background-color: var(--design-glass-raised);
 	}
 	.pill-btn img {
 		display: block;
@@ -210,9 +223,9 @@
 	.delete-btn {
 		display: grid;
 		place-items: center;
-		width: 50px;
-		height: 50px;
-		margin: -8px;
+		width: 42px;
+		height: 42px;
+		margin: -4px;
 		padding: 0;
 		border: 0;
 		border-radius: 50%;
@@ -235,7 +248,7 @@
 		height: var(--nav-height);
 		padding: 8px;
 		box-sizing: border-box;
-		border: 1px solid transparent;
+		border: 1px solid #ffffff26;
 		border-radius: 123px;
 		background: var(--design-glass);
 		color: #262626;
@@ -245,10 +258,23 @@
 			border-color 300ms ease,
 			transform 160ms var(--ease-spring);
 	}
-	/* Mode and "done" are white; "add" stays glass. */
+	/* Mode and "done" are light; "add" stays glass. */
 	.nav-action.light {
-		border-color: #ffffff40;
-		background: #fff;
+		border-color: #fff;
+		background: var(--design-light);
+		box-shadow: inset 0 0 10.3px #fff;
+	}
+	/* "Done" is a 50px light circle, inset like the confirm buttons. */
+	.nav-action.done-action {
+		width: 50px;
+		height: 50px;
+		padding: 0;
+	}
+	/* The routing mode takes the rest of the row. */
+	.nav-action.mode-action {
+		flex: 1 1 0;
+		min-width: 0;
+		padding: 8px 18px 8px 8px;
 	}
 	.on-dark .nav-pill:not(.danger),
 	.on-dark .nav-action:not(.light) {
@@ -264,9 +290,6 @@
 		display: flex;
 		align-items: center;
 		gap: 8px;
-		min-width: 69px;
-		padding-right: 10px;
-		box-sizing: border-box;
 		font-size: 20px;
 		font-weight: 600;
 		line-height: 26px;
@@ -281,26 +304,29 @@
 	.nav-action:active:not(:disabled) {
 		transform: scale(0.94);
 	}
-	/* Narrow windows keep the mode toggle as an icon so the row still fits. */
+	/* Narrow windows tighten the tabs and keep the mode toggle as an icon so
+	   the row still fits. */
 	@media (max-width: 350px) {
-		.mode {
-			justify-content: center;
-			min-width: 40px;
-			padding-right: 0;
+		.pill-btn {
+			width: 44px;
+			flex-basis: 44px;
+		}
+		.nav-action.mode-action {
+			padding-right: 8px;
 		}
 		.mode span {
 			display: none;
 		}
 	}
 	@media (hover: hover) and (pointer: fine) {
-		.pill-btn:hover {
-			background: #ffffff12;
+		.pill-btn:not(.active):hover {
+			background-color: #ffffff12;
 		}
 		.nav-action:not(.light):hover {
 			background: #ffffff12;
 		}
 		.nav-action.light:hover:not(:disabled) {
-			background: #f1f1f1;
+			background: #e4e4e4;
 		}
 		.nav-pill.danger:has(.delete-btn:hover:not(:disabled)) {
 			background: #e03d4b;

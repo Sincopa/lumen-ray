@@ -442,7 +442,7 @@
 		gap: 10px;
 		min-width: 0;
 		font-size: 16px;
-		font-weight: 500;
+		font-weight: 400;
 		letter-spacing: 0;
 	}
 
@@ -585,7 +585,7 @@
 		-ms-overflow-style: none;
 		display: flex;
 		flex-direction: column;
-		gap: 6px;
+		gap: 4px;
 	}
 	.servers-list::-webkit-scrollbar {
 		display: none;
@@ -599,9 +599,9 @@
 		gap: 6px;
 		align-items: center;
 		border: none;
-		border-radius: 30px;
+		border-radius: 123px;
 		background: transparent;
-		padding: 12px 27px 12px 12px;
+		padding: 12px 26px 12px 12px;
 		text-align: left;
 		transition:
 			background-color 180ms ease,
@@ -629,15 +629,15 @@
 		font-size: 10px;
 		line-height: 1;
 		font-weight: 500;
-		letter-spacing: 0.5px;
-		color: #ffffff70;
+		letter-spacing: 0.4px;
+		color: #ffffff80;
 		text-transform: uppercase;
 	}
 	.ping {
 		font-size: 14px;
 		font-weight: 500;
 		white-space: nowrap;
-		color: #ffffffe6;
+		color: #fff;
 		display: inline-flex;
 		align-items: center;
 		gap: 6px;

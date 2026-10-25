@@ -34,7 +34,7 @@
 <!-- Labelled input pill. -->
 <div class="design-field">
 	<label class="field-label" for={id}>{label}</label>
-	<div class="input-pill" class:invalid>
+	<div class="input-pill" class:filled={!!value} class:invalid>
 		{#if prefix}<span class="input-prefix">{prefix}</span>{/if}
 		<input
 			bind:this={input}
@@ -80,7 +80,10 @@
 		font-size: 14px;
 		font-weight: 500;
 		line-height: 18.2px;
-		letter-spacing: -0.3px;
+		letter-spacing: -0.28px;
+		/* Figma measures the 12px gap from the cap height. */
+		text-box-trim: trim-both;
+		text-box-edge: cap alphabetic;
 	}
 	.input-pill {
 		display: flex;
@@ -88,9 +91,9 @@
 		gap: 6px;
 		width: 100%;
 		height: 60px;
-		padding: 0 14px 0 24px;
+		padding: 0 18px 0 24px;
 		border-radius: 24px;
-		background: var(--design-panel-open);
+		background: var(--design-panel);
 		-webkit-backdrop-filter: blur(25px);
 		backdrop-filter: blur(25px);
 		box-sizing: border-box;
@@ -98,19 +101,23 @@
 			background-color 180ms ease,
 			box-shadow 180ms ease;
 	}
+	/* A filled field lifts to 5% white over a 20% black base. */
+	.input-pill.filled {
+		background: linear-gradient(#ffffff0d, #ffffff0d), #00000033;
+	}
 	.input-pill:focus-within {
 		box-shadow: inset 0 0 0 1px #ffffff1f;
 	}
 	/* An invalid value tints the whole pill red. */
 	.input-pill.invalid {
-		background: #ff6c6726;
+		background: linear-gradient(#ff6c671f, #ff6c671f), #00000033;
 	}
 	.input-prefix {
 		flex-shrink: 0;
-		color: #ffffff4d;
+		color: #ffffff40;
 		font-size: 12px;
 		line-height: 15.6px;
-		letter-spacing: -0.2px;
+		letter-spacing: -0.24px;
 		user-select: none;
 	}
 	.text-input {
@@ -127,7 +134,7 @@
 		font-family: inherit;
 		font-size: 14px;
 		line-height: 18.2px;
-		letter-spacing: -0.3px;
+		letter-spacing: -0.28px;
 		appearance: none;
 	}
 	.text-input::placeholder {

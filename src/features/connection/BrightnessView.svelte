@@ -147,6 +147,7 @@
 		border: 0;
 		border-radius: 50%;
 		background: var(--design-glass);
+		box-shadow: var(--design-glow);
 		-webkit-backdrop-filter: blur(25px);
 		backdrop-filter: blur(25px);
 		transition:

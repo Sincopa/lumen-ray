@@ -1,12 +1,5 @@
-import type {
-	VpnConnectionState,
-	VpnConnectionInfo,
-	TrafficStats,
-} from '../../types/models';
-import type { CatalogService } from '../catalog';
+import type { VpnConnectionState, VpnConnectionInfo } from '../../types/models';
 export interface VpnService {
-	getStats?(): Promise<TrafficStats>;
-	subscribeStats?(listener: (stats: TrafficStats) => void): Promise<() => void>;
 	subscribe?(
 		listener: (snapshot: {
 			status: VpnConnectionState;
@@ -26,15 +19,3 @@ export interface VpnService {
 	getStatus(): Promise<VpnConnectionState>;
 	getConnectionInfo(): Promise<VpnConnectionInfo | null>;
 }
-export type ServerService = Pick<
-	CatalogService,
-	'getServers' | 'selectServer' | 'pingServer'
->;
-export type SubscriptionService = Pick<
-	CatalogService,
-	| 'importSubscription'
-	| 'refreshSubscription'
-	| 'getSubscriptionSource'
-	| 'renameSubscription'
-	| 'removeSubscription'
->;

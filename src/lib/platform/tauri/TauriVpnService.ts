@@ -1,21 +1,9 @@
 import type { VpnService } from '../../services/contracts';
-import type {
-	VpnConnectionState,
-	VpnConnectionInfo,
-	TrafficStats,
-} from '../../types/models';
+import type { VpnConnectionState, VpnConnectionInfo } from '../../types/models';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 
 export class TauriVpnService implements VpnService {
-	async getStats(): Promise<TrafficStats> {
-		return invoke<TrafficStats>('get_stats');
-	}
-	async subscribeStats(listener: (stats: TrafficStats) => void) {
-		return listen<TrafficStats>('vpn://stats', (event) =>
-			listener(event.payload),
-		);
-	}
 	async getSnapshot() {
 		return invoke<{
 			status: VpnConnectionState;

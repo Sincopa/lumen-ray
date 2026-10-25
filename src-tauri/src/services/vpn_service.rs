@@ -605,7 +605,6 @@ async fn disconnect_session(
         .await;
         return Err(error);
     }
-    *state.traffic.write().await = Default::default();
     publish(state, app, Snapshot::default()).await;
     Ok(())
 }

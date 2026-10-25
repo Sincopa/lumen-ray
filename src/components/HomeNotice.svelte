@@ -49,7 +49,7 @@
 		max-width: 100%;
 		height: 48px;
 		padding: 8px 18px 8px 8px;
-		border-radius: 16px;
+		border-radius: 123px;
 		background: #00000026;
 		-webkit-backdrop-filter: blur(25px);
 		backdrop-filter: blur(25px);
@@ -91,7 +91,7 @@
 		height: 32px;
 		padding: 8px 12px;
 		border: 0;
-		border-radius: 8px;
+		border-radius: 123px;
 		background: #00000040;
 		color: #fff;
 		font-size: 12px;

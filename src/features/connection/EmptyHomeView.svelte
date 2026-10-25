@@ -159,8 +159,9 @@
 
 	/* Figma "Frame 2147223317": a faint pill that grows once a link is in. */
 	.profile-control.editing {
-		width: min(100%, 234px);
+		width: min(100%, 236px);
 		background: #ffffff05;
+		box-shadow: var(--design-edge);
 	}
 	.profile-control.editing.filled {
 		width: min(100%, 300px);
@@ -223,7 +224,7 @@
 		display: flex;
 		align-items: center;
 		gap: 14px;
-		padding: 0 7px 0 6px;
+		padding: 0 7px;
 		opacity: 0;
 		transform: scale(1.08);
 		pointer-events: none;
@@ -247,7 +248,8 @@
 		padding: 0;
 		border: 0;
 		border-radius: 50%;
-		background: #ffffff0d;
+		/* 5% glass with a light falling from the top. */
+		background: linear-gradient(#ffffff1a, #99999900), #ffffff0d;
 		transition:
 			background-color 160ms ease,
 			transform 180ms var(--ease-spring);
@@ -258,7 +260,7 @@
 	}
 
 	.paste-btn:hover:not(:disabled) {
-		background: #ffffff1a;
+		background: linear-gradient(#ffffff1a, #99999900), #ffffff1a;
 	}
 
 	.paste-btn:active:not(:disabled) {

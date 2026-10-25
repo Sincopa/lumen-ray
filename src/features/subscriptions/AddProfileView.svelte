@@ -135,7 +135,7 @@
 		width: 100%;
 		height: 100%;
 		min-height: 0;
-		padding-top: 12px;
+		padding-top: 24px;
 		box-sizing: border-box;
 	}
 	.form-container {

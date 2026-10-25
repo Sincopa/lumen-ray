@@ -521,6 +521,7 @@ impl SubscriptionClient {
         })
     }
 
+    #[cfg(test)]
     pub async fn fetch(&self, source: &str) -> Result<String> {
         self.fetch_with_metadata(source).await.map(|f| f.body)
     }
@@ -538,7 +539,7 @@ fn has_header_flag(headers: &reqwest::header::HeaderMap, name: &str) -> bool {
     })
 }
 
-#[allow(dead_code)]
+#[cfg(test)]
 pub async fn fetch_with_metadata(
     source: &str,
     client: &SubscriptionClient,
@@ -546,7 +547,7 @@ pub async fn fetch_with_metadata(
     client.fetch_with_metadata(source).await
 }
 
-#[allow(dead_code)]
+#[cfg(test)]
 pub async fn fetch(source: &str, client: &SubscriptionClient) -> Result<String> {
     client.fetch(source).await
 }

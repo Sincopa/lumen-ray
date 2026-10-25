@@ -290,14 +290,15 @@
 		pointer-events: none;
 		z-index: -1;
 		opacity: 0;
-		transition: opacity 0.35s cubic-bezier(0.4, 0, 0.2, 1);
+		transition: opacity 0.35s var(--ease-soft);
 	}
 
 	.app-ui.dim-backdrop::before {
 		opacity: 1;
 	}
+	/* Figma: #020202 under a 2% white veil. */
 	.app-ui.design-screen::before {
-		background: rgba(15, 15, 15, 0.95);
+		background: rgba(7, 7, 7, 0.95);
 		backdrop-filter: none;
 	}
 

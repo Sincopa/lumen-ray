@@ -113,15 +113,43 @@ pub fn set_autostart(enabled: bool) -> Result<()> {
             BackendError::new("STORAGE_FAILED", "Failed to access Windows Run registry")
         })?;
     if enabled {
-        let exe = std::env::current_exe()
-            .map_err(|_| BackendError::new("STORAGE_FAILED", "Executable path is unavailable"))?;
-        let cmd = format!("\"{}\" --minimized", exe.to_string_lossy());
-        key.set_value("Lumen", &cmd)
+        key.set_value("Lumen", &autostart_command()?)
             .map_err(|_| BackendError::new("STORAGE_FAILED", "Failed to register autostart"))?;
     } else {
         let _ = key.delete_value("Lumen");
     }
     Ok(())
+}
+
+fn autostart_command() -> Result<String> {
+    let exe = std::env::current_exe()
+        .map_err(|_| BackendError::new("STORAGE_FAILED", "Executable path is unavailable"))?;
+    Ok(format!("\"{}\" --minimized", exe.to_string_lossy()))
+}
+
+/// Points an existing Run entry at the running executable. An entry left by an
+/// older install in another folder would otherwise keep launching that old build
+/// at login, which cannot read data written by newer versions.
+#[cfg(not(debug_assertions))]
+pub fn repair_autostart() {
+    use winreg::enums::*;
+    use winreg::RegKey;
+    let hkcu = RegKey::predef(HKEY_CURRENT_USER);
+    let Ok(key) = hkcu.open_subkey_with_flags(
+        r"Software\Microsoft\Windows\CurrentVersion\Run",
+        KEY_READ | KEY_SET_VALUE,
+    ) else {
+        return;
+    };
+    let Ok(current) = key.get_value::<String, _>("Lumen") else {
+        return;
+    };
+    let Ok(expected) = autostart_command() else {
+        return;
+    };
+    if !current.eq_ignore_ascii_case(&expected) && key.set_value("Lumen", &expected).is_err() {
+        log::warn!("Failed to update the autostart entry to the current executable");
+    }
 }
 
 pub fn is_autostart() -> bool {

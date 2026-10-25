@@ -25,25 +25,3 @@ export type VpnProtocol =
 	| 'WireGuard'
 	| 'SOCKS5'
 	| 'HTTP';
-
-export interface VpnServer {
-	id: string;
-	name: string;
-	country: string;
-	protocol: VpnProtocol;
-	latencyMs?: number;
-}
-
-export interface TrafficStats {
-	available: boolean;
-	uploadSpeed: number;
-	downloadSpeed: number;
-	durationSeconds: number;
-	upload: number; // bytes
-	download: number; // bytes
-}
-
-export interface AppError {
-	code: string;
-	message: string;
-}

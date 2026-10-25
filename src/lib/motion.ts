@@ -157,13 +157,20 @@ export function morphWidth(
 ): TransitionConfig {
 	if (reduced()) return fadeOnly();
 	const width = (node as HTMLElement).offsetWidth;
+	// Padding shrinks too: a border-box cannot get narrower than its padding,
+	// and the leftover would snap shut only when the node is removed.
+	const style = getComputedStyle(node);
+	const paddingLeft = parseFloat(style.paddingLeft);
+	const paddingRight = parseFloat(style.paddingRight);
 	// Closing does not bounce: the overshoot would reopen the gap.
 	const leaving = options?.direction === 'out';
 	return {
 		duration: leaving ? 260 : duration,
 		easing: leaving ? easeOut : springOut,
 		css: (t, u) =>
-			`width: ${Math.max(0, t) * width}px; opacity: ${Math.min(1, Math.max(0, t) * 1.4)};` +
+			`width: ${Math.max(0, t) * width}px; padding-left: ${Math.max(0, t) * paddingLeft}px;` +
+			`padding-right: ${Math.max(0, t) * paddingRight}px;` +
+			`opacity: ${Math.min(1, Math.max(0, t) * 1.4)};` +
 			`filter: blur(${Math.max(0, u) * 8}px); transform: scale(${0.6 + 0.4 * Math.min(1, t)})`,
 	};
 }

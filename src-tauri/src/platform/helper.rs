@@ -212,7 +212,8 @@ fn launch(id: String) -> Result<ProcessHandle> {
     }
 }
 
-#[allow(dead_code)]
+// Only the debug smoke test starts a tunnel without standby.
+#[cfg(debug_assertions)]
 pub async fn start(request: StartTunnel, data: &std::path::Path) -> Result<Helper> {
     start_internal(request, data, false).await
 }

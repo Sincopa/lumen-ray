@@ -35,7 +35,7 @@
 		height: 40px;
 		min-height: 0;
 		border-radius: 16px;
-		background: #00000026;
+		background: transparent;
 		border: 0;
 		display: flex;
 		align-items: center;
@@ -46,15 +46,17 @@
 		font-size: 12px;
 		font-weight: 500;
 		line-height: 16.2px;
-		letter-spacing: -0.2px;
+		letter-spacing: -0.24px;
 		color: #ffffff;
 		cursor: pointer;
 		transition: background 0.18s ease;
 		box-sizing: border-box;
 	}
 
-	.menu-item:hover:not(:disabled) {
-		background: #00000040;
+	/* Rows are bare; the pointed one lights up to 5% white. */
+	.menu-item:hover:not(:disabled),
+	.menu-item:focus-visible {
+		background: #ffffff0d;
 	}
 
 	.menu-item.danger:hover:not(:disabled) {

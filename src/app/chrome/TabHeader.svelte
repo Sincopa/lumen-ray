@@ -94,7 +94,7 @@
 							</div>
 							<div class="header-actions">
 								{#if slots.searchPlaceholder}
-									<span class="morph-slot" transition:morphWidth>
+									<span class="morph-slot" in:morphWidth out:morphWidth>
 										<IconButton
 											design
 											icon={searchIcon}
@@ -149,7 +149,7 @@
 			</div>
 
 			{#if slots.trailing}
-				<span class="morph-slot trailing" transition:morphWidth>
+				<span class="morph-slot trailing" in:morphWidth out:morphWidth>
 					{@render slots.trailing()}
 				</span>
 			{/if}
@@ -186,6 +186,11 @@
 	}
 	.header-pill.has-body {
 		background: var(--design-panel-open);
+		box-shadow:
+			var(--design-edge),
+			inset 0 0 21.7px rgba(255, 255, 255, 0.02);
+		-webkit-backdrop-filter: blur(25px);
+		backdrop-filter: blur(25px);
 	}
 	/* One grid cell: the leaving row and the arriving one overlap. */
 	.header-line {
@@ -224,10 +229,8 @@
 		align-items: center;
 		gap: 10px;
 		min-width: 0;
-		font-family: 'Satoshi', var(--font-family-base);
 		font-size: 16px;
-		font-weight: 500;
-		letter-spacing: -0.2px;
+		font-weight: 400;
 	}
 	.title-text {
 		line-height: 1.3;

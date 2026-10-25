@@ -6,12 +6,42 @@ import { shaderSettings } from '../stores/shaderSettings.svelte';
  *
  * Hidden when shaderSettings.tooltipsEnabled is false.
  * The tail is a CSS border triangle, so it fades with the body.
+ *
+ * The first tooltip waits a moment so a passing pointer does not set it off.
+ * Once one has been shown, its neighbours open at once and without animation,
+ * so sweeping along the nav reads labels instead of replaying the entrance.
  */
+const SHOW_DELAY = 300;
+const WARM_WINDOW = 300;
+let lastVisibleAt = 0;
+
+function isWarm() {
+	return performance.now() - lastVisibleAt < WARM_WINDOW;
+}
+
 export function tooltip(node: HTMLElement, text: string) {
 	let tip: HTMLDivElement | null = null;
 	let raf = 0;
+	let timer = 0;
 
-	function create() {
+	function schedule() {
+		if (tip || timer) return;
+		if (isWarm()) {
+			create(true);
+			return;
+		}
+		timer = window.setTimeout(() => {
+			timer = 0;
+			create();
+		}, SHOW_DELAY);
+	}
+
+	function handleFocus() {
+		// Clicking focuses the button too; only keyboard focus shows the label.
+		if (node.matches(':focus-visible')) create();
+	}
+
+	function create(instant = false) {
 		if (tip || !text) return;
 		// Respect the "show tooltips" setting
 		if (!shaderSettings.tooltipsEnabled) return;
@@ -29,16 +59,18 @@ export function tooltip(node: HTMLElement, text: string) {
 		parent.appendChild(tip);
 
 		position();
+		lastVisibleAt = performance.now();
+		if (instant) return;
 
-		// Start from small + transparent, animate to full size (spring easing)
+		// Grow out of the button below it (transform-origin: bottom center).
 		tip.style.opacity = '0';
-		tip.style.transform = 'scale(0.82)';
+		tip.style.transform = 'scale(0.96)';
 		// Double-RAF so the initial state is painted before the transition starts
 		raf = requestAnimationFrame(() => {
 			raf = requestAnimationFrame(() => {
 				if (!tip) return;
 				tip.style.transition =
-					'opacity 160ms ease, transform 200ms cubic-bezier(0.34, 1.56, 0.64, 1)';
+					'opacity 150ms var(--ease-out), transform 150ms var(--ease-out)';
 				tip.style.opacity = '1';
 				tip.style.transform = 'scale(1)';
 			});
@@ -66,20 +98,23 @@ export function tooltip(node: HTMLElement, text: string) {
 
 	function destroy() {
 		cancelAnimationFrame(raf);
+		clearTimeout(timer);
+		timer = 0;
 		if (tip) {
-			// Animate out: fade + shrink slightly (ease-in, shorter)
+			lastVisibleAt = performance.now();
+			// Leaves faster than it came, back towards the button.
 			tip.style.transition =
-				'opacity 120ms ease, transform 120ms cubic-bezier(0.4, 0, 1, 1)';
+				'opacity 100ms var(--ease-out), transform 100ms var(--ease-out)';
 			tip.style.opacity = '0';
-			tip.style.transform = 'scale(0.88)';
+			tip.style.transform = 'scale(0.96)';
 			const el = tip;
-			setTimeout(() => el.remove(), 130);
+			setTimeout(() => el.remove(), 110);
 			tip = null;
 		}
 	}
 
-	node.addEventListener('mouseenter', create);
-	node.addEventListener('focus', create);
+	node.addEventListener('mouseenter', schedule);
+	node.addEventListener('focus', handleFocus);
 	node.addEventListener('mouseleave', destroy);
 	node.addEventListener('blur', destroy);
 	node.addEventListener('click', destroy);
@@ -95,8 +130,8 @@ export function tooltip(node: HTMLElement, text: string) {
 		},
 		destroy() {
 			destroy();
-			node.removeEventListener('mouseenter', create);
-			node.removeEventListener('focus', create);
+			node.removeEventListener('mouseenter', schedule);
+			node.removeEventListener('focus', handleFocus);
 			node.removeEventListener('mouseleave', destroy);
 			node.removeEventListener('blur', destroy);
 			node.removeEventListener('click', destroy);

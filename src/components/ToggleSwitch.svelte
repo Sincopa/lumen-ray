@@ -89,7 +89,7 @@
 		position: absolute;
 		cursor: pointer;
 		inset: 0;
-		background-color: rgba(255, 255, 255, 0.02);
+		background-color: rgba(255, 255, 255, 0.04);
 		box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.15);
 		transition:
 			background-color 0.25s ease,
@@ -105,7 +105,7 @@
 		left: 2px;
 		top: 2px;
 		background-color: #7e7e7e;
-		transition: transform 0.25s cubic-bezier(0.22, 1, 0.36, 1);
+		transition: transform 0.25s var(--ease-spring);
 		border-radius: 50%;
 		box-shadow: 0 2px 7.7px rgba(0, 0, 0, 0.25);
 	}

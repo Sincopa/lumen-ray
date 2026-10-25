@@ -353,9 +353,9 @@
 		justify-content: space-between;
 		align-items: center;
 		width: calc(100% - 32px);
-		height: 64px;
-		padding: 16px;
-		border: 0;
+		height: 66px;
+		padding: 16px 18px 16px 16px;
+		border: 1px solid rgba(0, 0, 0, 0.1);
 		border-radius: 124px;
 		background: var(--design-glass);
 		-webkit-backdrop-filter: blur(25px);
@@ -382,6 +382,9 @@
 		height: 32px;
 		border-radius: 50%;
 		overflow: hidden;
+		/* Figma's inside stroke, drawn over the flag. */
+		outline: 1px solid rgba(0, 0, 0, 0.25);
+		outline-offset: -1px;
 	}
 
 	.server-details {

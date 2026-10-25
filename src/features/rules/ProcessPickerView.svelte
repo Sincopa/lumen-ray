@@ -373,7 +373,7 @@
 		font-size: 14px;
 		font-weight: 400;
 		line-height: 18.2px;
-		letter-spacing: -0.3px;
+		letter-spacing: -0.28px;
 		color: #ffffff;
 		overflow: hidden;
 		text-overflow: ellipsis;
@@ -415,10 +415,15 @@
 		border-radius: 50%;
 		background: #fff;
 		box-shadow: 0 2px 7.7px #00000040;
-		transform: scale(0);
-		transition: transform 180ms var(--ease-spring);
+		/* Grows out of the well rather than out of nothing. */
+		opacity: 0;
+		transform: scale(0.4);
+		transition:
+			opacity 120ms var(--ease-out),
+			transform 180ms var(--ease-spring);
 	}
 	.round-indicator.checked::after {
+		opacity: 1;
 		transform: scale(1);
 	}
 
@@ -560,7 +565,7 @@
 		width: 36px;
 		height: 36px;
 		border-radius: 50%;
-		background: #ffffff;
+		background: var(--design-light);
 		border: none;
 		cursor: pointer;
 		display: flex;
@@ -568,7 +573,7 @@
 		justify-content: center;
 		flex-shrink: 0;
 		opacity: 0;
-		box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+		box-shadow: var(--design-light-rim);
 		transition:
 			transform 160ms var(--ease-spring),
 			opacity 140ms ease;

@@ -197,19 +197,25 @@
 		opacity: 1;
 	}
 	.design.variant-surface {
-		background: var(--design-glass-dark);
-		box-shadow: none;
+		background: var(--design-glass-raised);
+		box-shadow: var(--design-glow);
 		backdrop-filter: blur(25px);
 	}
 	.design.variant-primary {
-		box-shadow: none;
+		background: var(--design-light);
+		box-shadow: var(--design-light-rim);
+	}
+	.design.variant-primary:hover:not(:disabled) {
+		background: #e4e4e4;
 	}
 	.design.variant-primary .btn-icon {
 		filter: brightness(0);
 	}
-	/* An unavailable confirm keeps its shape, dimmed. */
+	/* An unavailable confirm turns into dimmed glass. */
 	.design.variant-primary:disabled {
-		background: #262626;
+		background: var(--design-glass-raised);
+		box-shadow: var(--design-glow);
+		backdrop-filter: blur(25px);
 		opacity: 1;
 	}
 	.design.variant-primary:disabled .btn-icon {

@@ -81,7 +81,7 @@
 		overflow: hidden;
 		border-radius: var(--radius-window) var(--radius-window)
 			var(--radius-window-bottom) var(--radius-window-bottom);
-		background: #000000bf;
+		background: rgba(11, 11, 11, 0.9);
 		/* The source blur radius is twice the CSS blur value. */
 		-webkit-backdrop-filter: blur(12.5px);
 		backdrop-filter: blur(12.5px);

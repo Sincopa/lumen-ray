@@ -63,10 +63,15 @@
 		border-radius: 50%;
 		background: #fff;
 		box-shadow: 0 2px 7.7px #00000040;
-		transform: scale(0);
-		transition: transform 180ms var(--ease-spring);
+		/* Grows out of the well rather than out of nothing. */
+		opacity: 0;
+		transform: scale(0.4);
+		transition:
+			opacity 120ms var(--ease-out),
+			transform 180ms var(--ease-spring);
 	}
 	.select-checkbox.checked::after {
+		opacity: 1;
 		transform: scale(1);
 	}
 	.select-checkbox:hover:not(:disabled) {

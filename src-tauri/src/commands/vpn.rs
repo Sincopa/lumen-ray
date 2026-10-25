@@ -63,9 +63,3 @@ pub async fn get_connection_snapshot(
 ) -> Result<service::Snapshot> {
     Ok(state.snapshot.read().await.clone())
 }
-#[tauri::command]
-pub async fn get_stats(
-    state: tauri::State<'_, Arc<AppState>>,
-) -> Result<crate::services::stats_service::TrafficStats> {
-    Ok(state.traffic.read().await.clone())
-}

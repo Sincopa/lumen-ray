@@ -115,7 +115,7 @@
 		width: 100%;
 		margin: 0;
 		font-size: 32px;
-		font-weight: 500;
+		font-weight: 400;
 		line-height: 32px;
 		letter-spacing: 0;
 	}
@@ -124,10 +124,10 @@
 		width: 100%;
 		margin: 0;
 		color: #ffffff80;
-		font-size: 14px;
+		font-size: 16px;
 		font-weight: 400;
-		line-height: 18.2px;
-		letter-spacing: -0.3px;
+		line-height: 20.8px;
+		letter-spacing: -0.32px;
 	}
 
 	.confirm-actions {
@@ -158,10 +158,12 @@
 			opacity 180ms ease;
 	}
 	.round-button.cancel {
-		background: #ffffff0d;
+		background: var(--design-glass-raised);
+		box-shadow: var(--design-glow);
 	}
 	.round-button.delete {
 		background: #d0344126;
+		box-shadow: inset 0 0 21.7px #d034411a;
 	}
 	.round-button:active:not(:disabled) {
 		transform: scale(0.94);
@@ -186,8 +188,11 @@
 		transform: scale(0.985);
 	}
 	.confirm-button.cancel {
-		background: #ffffff0d;
-		color: #ffffffcc;
+		background: var(--design-glass-raised);
+		box-shadow: var(--design-glow);
+		-webkit-backdrop-filter: blur(25px);
+		backdrop-filter: blur(25px);
+		color: #fff;
 	}
 	.confirm-button.continue {
 		background: #fff;
