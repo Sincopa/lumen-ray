@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Lumen launcher icon. The artwork sits inside the mask's safe zone on its own
+     blue; the monochrome layer is the status bar face for themed icons. -->
+<adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
+    <background android:drawable="@color/lumen_launcher_background" />
+    <foreground android:drawable="@mipmap/ic_launcher_foreground" />
+    <monochrome>
+        <inset
+            android:drawable="@drawable/ic_lumen_status"
+            android:inset="28%" />
+    </monochrome>
+</adaptive-icon>

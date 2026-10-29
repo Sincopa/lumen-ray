@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { fade } from 'svelte/transition';
-	import { screen, rise, leaveInPlace } from '../lib/motion';
+	import { screen, rise, leaveInPlace, leaveScreen } from '../lib/motion';
 	import BackgroundShader from './chrome/BackgroundShader.svelte';
 	import WindowHeader from './chrome/WindowHeader.svelte';
 	import BottomNav from './chrome/BottomNav.svelte';
@@ -53,6 +53,17 @@
 			!!tabHeader.slots &&
 			!tabHeader.slots.hidden,
 	);
+
+	// The tab header pushes the view stack down as it appears and lets it rise as
+	// it leaves. The leaving screen holds the place it had before that change.
+	let viewContent = $state<HTMLDivElement>();
+	const leaving = { top: 0 };
+	$effect.pre(() => {
+		void shell.currentTab;
+		void shell.importing;
+		void showTabHeader;
+		if (viewContent) leaving.top = viewContent.offsetTop;
+	});
 
 	let subscriptionExpired = $derived(
 		selectedSubscription?.status === 'expired' ||
@@ -122,7 +133,7 @@
 		{/if}
 
 		<!-- Tab Views with directional fly transitions -->
-		<div class="view-content">
+		<div class="view-content" bind:this={viewContent}>
 			{#if shell.importing}
 				<div
 					class="tab-view"
@@ -149,7 +160,7 @@
 						in:screen|global={{
 							dir: shell.direction(shell.currentTab, shell.prevTab),
 						}}
-						out:fade|global={{ duration: 120 }}
+						out:leaveScreen|global={{ top: leaving.top }}
 					>
 						{#if shell.currentTab === 'home'}
 							{#if !hasSubscriptions}

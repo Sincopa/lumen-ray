@@ -1,0 +1,27 @@
+{
+	"$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
+	"identifier": "app.lumen",
+	"plugins": {
+		"deep-link": {
+			"mobile": [
+				{
+					"scheme": ["lumen"],
+					"appLink": false
+				}
+			]
+		}
+	},
+	"app": {
+		"windows": [
+			{
+				"title": "Lumen"
+			}
+		]
+	},
+	"bundle": {
+		"resources": [],
+		"android": {
+			"minSdkVersion": 26
+		}
+	}
+}

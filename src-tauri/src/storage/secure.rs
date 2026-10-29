@@ -57,8 +57,9 @@ fn crypt(input: &[u8], encrypt: bool) -> Result<Vec<u8>> {
     }
     Ok(bytes)
 }
-/// AES-256-GCM with a random key in the login Keychain. Blob: version, nonce, ciphertext.
-#[cfg(target_os = "macos")]
+/// AES-256-GCM with a random key in the login Keychain (macOS) or sealed by the
+/// Android Keystore (android/plugin RuntimeProvider). Blob: version, nonce, ciphertext.
+#[cfg(any(target_os = "macos", target_os = "android"))]
 mod keychain {
     use super::{BackendError, Result};
     use aes_gcm::{
@@ -72,13 +73,24 @@ mod keychain {
     fn failed(message: &str) -> BackendError {
         BackendError::new("STORAGE_FAILED", message)
     }
+    #[cfg(target_os = "macos")]
     fn random(buffer: &mut [u8]) -> Result<()> {
         security_framework::random::SecRandom::default()
             .copy_bytes(buffer)
             .map_err(|_| failed("macOS could not generate random data"))
     }
+    #[cfg(target_os = "android")]
+    fn random(buffer: &mut [u8]) -> Result<()> {
+        getrandom::getrandom(buffer).map_err(|_| failed("Android could not generate random data"))
+    }
+    /// The Keystore creates the key before Rust starts, so there is nothing to create here.
+    #[cfg(all(target_os = "android", not(test)))]
+    fn load(_create: bool) -> Result<Zeroizing<[u8; 32]>> {
+        crate::platform::android::storage_key()
+            .ok_or_else(|| failed("Android Keystore could not provide the Lumen key"))
+    }
     /// Only sealing creates a key, so a reset keychain cannot replace the key of existing data.
-    #[cfg(not(test))]
+    #[cfg(all(target_os = "macos", not(test)))]
     fn load(create: bool) -> Result<Zeroizing<[u8; 32]>> {
         use security_framework::passwords::{get_generic_password, set_generic_password};
         const SERVICE: &str = "app.lumen.desktop";
@@ -181,11 +193,11 @@ impl SecretStore for OsSecretStore {
         {
             crypt(input, true)
         }
-        #[cfg(target_os = "macos")]
+        #[cfg(any(target_os = "macos", target_os = "android"))]
         {
             keychain::seal(input)
         }
-        #[cfg(not(any(windows, target_os = "macos")))]
+        #[cfg(not(any(windows, target_os = "macos", target_os = "android")))]
         {
             let _ = input;
             Err(BackendError::new(
@@ -199,11 +211,11 @@ impl SecretStore for OsSecretStore {
         {
             crypt(input, false)
         }
-        #[cfg(target_os = "macos")]
+        #[cfg(any(target_os = "macos", target_os = "android"))]
         {
             keychain::open(input)
         }
-        #[cfg(not(any(windows, target_os = "macos")))]
+        #[cfg(not(any(windows, target_os = "macos", target_os = "android")))]
         {
             let _ = input;
             Err(BackendError::new(

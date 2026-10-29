@@ -143,7 +143,7 @@ jobs:
         with:
           tagName: v__VERSION__
           releaseName: Lumen v__VERSION__
-          releaseBody: Download the Windows installer or portable archive, or the macOS disk image, below. Updater metadata and a version-bound signature are included.
+          releaseBody: Download the Windows installer or portable archive, the macOS disk image, or an Android APK below. Updater metadata and a version-bound signature are included.
           releaseDraft: true
           prerelease: false
           generateReleaseNotes: true
@@ -264,9 +264,15 @@ jobs:
           sh src-tauri/build/verify-macos-bundle.sh "$app"
           ls "$bundle"/dmg/*.dmg
 
+  release-android:
+    needs: release-windows
+    uses: ./.github/workflows/android.yml
+    with:
+      prebuilt: true
+
   # Publish only after every platform's artifacts passed signature verification.
   publish:
-    needs: [release-windows, release-macos]
+    needs: [release-windows, release-macos, release-android]
     runs-on: ubuntu-24.04
     steps:
       - name: Checkout

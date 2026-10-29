@@ -30,7 +30,7 @@ pub async fn ping(state: &AppState, id: String) -> Result<serde_json::Value> {
     Ok(value)
 }
 async fn ping_inner(state: &AppState, id: &str) -> Result<serde_json::Value> {
-    #[cfg(any(windows, target_os = "macos"))]
+    #[cfg(any(windows, target_os = "macos", target_os = "android"))]
     {
         let Some(core) = isolated_core(state, id).await else {
             return Ok(serde_json::json!("timeout"));
@@ -43,7 +43,7 @@ async fn ping_inner(state: &AppState, id: &str) -> Result<serde_json::Value> {
             None => serde_json::json!("timeout"),
         })
     }
-    #[cfg(not(any(windows, target_os = "macos")))]
+    #[cfg(not(any(windows, target_os = "macos", target_os = "android")))]
     {
         let _ = (state, id);
         Ok(serde_json::json!("timeout"))
@@ -64,6 +64,63 @@ impl IsolatedCore {
     pub async fn stop(mut self) {
         let _ = self.child.kill().await;
     }
+}
+
+/// On Android the probe is a second Xray instance inside the app process,
+/// next to the tunnel; Lumen's own sockets bypass the VPN.
+#[cfg(target_os = "android")]
+pub(crate) struct IsolatedCore {
+    pub proxy_port: u16,
+    probe: i64,
+    _permit: tokio::sync::SemaphorePermit<'static>,
+}
+
+#[cfg(target_os = "android")]
+impl IsolatedCore {
+    pub async fn stop(self) {
+        crate::platform::android::stop_probe(self.probe).await;
+    }
+}
+
+/// Same reduced configuration as on desktop, with only the authenticated
+/// `probe` inbound: no HTTP proxy is opened on loopback.
+#[cfg(target_os = "android")]
+pub(crate) async fn isolated_core(state: &AppState, id: &str) -> Option<IsolatedCore> {
+    let permit = PROBES.acquire().await.ok()?;
+    let mut repo = state.repository.read().await.clone();
+    repo.rules.clear();
+    repo.routing_mode = "global".into();
+    repo.discord_voice_routes.clear();
+    repo.settings.dns_policy.enabled = false;
+    if repo.settings.dns_server == "system" {
+        repo.settings.dns_server = crate::storage::repository::Settings::default().dns_server;
+    }
+    let assets = crate::xray::geo::assets_for_core(&state.core.read().await);
+    let _startup = PROBE_STARTUP.lock().await;
+    // A port another app took between discovery and bind fails the start; new ports fix it.
+    for _ in 0..2 {
+        let (proxy, metrics) = crate::engine::xray::ports().ok()?;
+        let config = crate::xray::config::build(&repo, id, proxy, metrics, false).ok()?;
+        let mut config = serde_json::to_value(config).ok()?;
+        if let Some(inbounds) = config
+            .get_mut("inbounds")
+            .and_then(serde_json::Value::as_array_mut)
+        {
+            inbounds.retain(|inbound| inbound["tag"] == "probe");
+        }
+        let bytes = serde_json::to_vec(&config).ok()?;
+        // The embedded core has bound its inbound when start_probe returns.
+        if let Some(probe) =
+            crate::platform::android::start_probe(&bytes, &assets.to_string_lossy()).await
+        {
+            return Some(IsolatedCore {
+                proxy_port: proxy,
+                probe,
+                _permit: permit,
+            });
+        }
+    }
+    None
 }
 
 #[cfg(any(windows, target_os = "macos"))]
@@ -120,7 +177,8 @@ pub(crate) async fn isolated_core(state: &AppState, id: &str) -> Option<Isolated
 }
 
 /// Whole-probe budget, including the cold first request through the tunnel.
-const PROBE_BUDGET: Duration = Duration::from_secs(5);
+/// Mobile networks add a second or two to the REALITY/TLS handshake.
+const PROBE_BUDGET: Duration = Duration::from_secs(if cfg!(target_os = "android") { 8 } else { 5 });
 /// Timed requests sent over the warmed-up connection.
 const PROBE_SAMPLES: usize = 2;
 
@@ -132,7 +190,7 @@ const PROBE_SAMPLES: usize = 2;
 /// fastest of the following requests, which reuse that keep-alive connection
 /// and measure one HTTP exchange through the tunnel.
 async fn probe_target(proxy_port: u16, custom_url: &str) -> Option<u64> {
-    let proxy = reqwest::Proxy::all(format!("socks5h://127.0.0.1:{proxy_port}")).ok()?;
+    let proxy = crate::xray::probe::proxy(proxy_port).ok()?;
     let client = reqwest::Client::builder()
         .no_proxy()
         .proxy(proxy)
@@ -151,7 +209,15 @@ async fn probe_target(proxy_port: u16, custom_url: &str) -> Option<u64> {
             "https://cp.cloudflare.com/generate_204",
         ])
     {
-        let Ok(Some(cold)) = tokio::time::timeout_at(deadline, request(&client, endpoint)).await
+        // Some exits never answer plain HTTP on port 80 (the default ping URL).
+        // On Android a stalled first endpoint leaves time for the HTTPS ones.
+        let cold_deadline = if cfg!(target_os = "android") {
+            deadline.min(tokio::time::Instant::now() + PROBE_BUDGET / 2)
+        } else {
+            deadline
+        };
+        let Ok(Some(cold)) =
+            tokio::time::timeout_at(cold_deadline, request(&client, endpoint)).await
         else {
             if tokio::time::Instant::now() >= deadline {
                 return None;

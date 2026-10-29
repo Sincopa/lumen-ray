@@ -1,6 +1,6 @@
 import ru from '../../locales/ru.json';
 import en from '../../locales/en.json';
-import { isMac } from '../platform';
+import { isAndroid, isMac } from '../platform';
 
 export type SupportedLanguage = 'ru' | 'en';
 
@@ -34,10 +34,13 @@ function flattenDictionary(
 	return result;
 }
 
-// Strings that name Windows have macOS wording under "macos" with the same keys.
-function platformDictionary({ macos, ...dictionary }: typeof ru) {
+// Strings that name Windows have macOS and Android wording under "macos" and
+// "android" with the same keys.
+function platformDictionary({ macos, android, ...dictionary }: typeof ru) {
 	const result = flattenDictionary(dictionary);
-	return isMac ? flattenDictionary(macos, '', result) : result;
+	if (isMac) return flattenDictionary(macos, '', result);
+	if (isAndroid) return flattenDictionary(android, '', result);
+	return result;
 }
 
 // Locale files are static; resolve dotted keys once instead of on every render.

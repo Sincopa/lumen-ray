@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="lumen_tile_label">Lumen VPN</string>
+    <string name="lumen_channel_name">Состояние VPN</string>
+    <string name="lumen_notification_connecting">Подключение…</string>
+    <string name="lumen_notification_connected">Подключено</string>
+    <string name="lumen_notification_disconnect">Отключить</string>
+</resources>

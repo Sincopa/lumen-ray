@@ -83,6 +83,14 @@ impl AppState {
                 log::warn!("Could not save the system proxy mode: {}", error.code);
             }
         }
+        // Android always tunnels through VpnService; the system proxy mode does not exist.
+        #[cfg(target_os = "android")]
+        if repository.settings.network_mode != "tun" {
+            repository.settings.network_mode = "tun".into();
+            if let Err(error) = store.save(&repository) {
+                log::warn!("Could not save the Android tunnel mode: {}", error.code);
+            }
+        }
         // Restore proxies while an orphaned core still serves them. On failure keep
         // the core running so Reset network settings stays reachable.
         #[cfg(target_os = "macos")]

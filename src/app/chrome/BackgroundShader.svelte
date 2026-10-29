@@ -1,6 +1,12 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { shaderSettings } from '../../lib/stores/shaderSettings.svelte';
+	import { isAndroid } from '../../lib/platform';
+
+	/** The field is soft light: phone GPUs render it at a fraction of the screen. */
+	const MAX_DPR = isAndroid ? 0.6 : 1.5;
+	const TONE_EVERY = isAndroid ? 90 : 15;
+	const MAX_FPS = 30;
 
 	interface Props {
 		active?: boolean;
@@ -468,7 +474,7 @@ void main(){
 
 	function resize() {
 		if (!gl || !canvas || lost) return;
-		const dpr = Math.min(window.devicePixelRatio || 1, 1.5);
+		const dpr = Math.min(window.devicePixelRatio || 1, MAX_DPR);
 		const w = Math.round(canvas.clientWidth * dpr);
 		const h = Math.round(canvas.clientHeight * dpr);
 		if (canvas.width !== w || canvas.height !== h) {
@@ -718,7 +724,9 @@ void main(){
 			!shaderSettings.enabled
 		)
 			return;
-		if (now - lastFrame < 1000 / 30 && !reducedMotion) {
+		// Android already paces frames to 30 (framePacing.ts); the margin keeps
+		// a frame 33.3 ms after the last one from being skipped.
+		if (now - lastFrame < 1000 / MAX_FPS - 4 && !reducedMotion) {
 			frameId = requestAnimationFrame(render);
 			return;
 		}
@@ -774,8 +782,9 @@ void main(){
 		}
 
 		gl.drawArrays(gl.TRIANGLES, 0, 3);
-		// Read back right after drawing, about twice a second.
-		if (toneFrame++ % 15 === 0) sampleBackdropTone();
+		// Read back right after drawing, about twice a second. readPixels stalls
+		// the GPU pipeline, which phones feel: there it runs every three seconds.
+		if (toneFrame++ % TONE_EVERY === 0) sampleBackdropTone();
 		if (!reducedMotion) frameId = requestAnimationFrame(render);
 	}
 

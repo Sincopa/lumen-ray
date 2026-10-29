@@ -46,7 +46,6 @@
 	let selectMode = $state(false);
 	let selectingRule = $state<Rule | null>(null);
 	let pendingServerId = $state('');
-	let pickerSearchSignal = $state(0);
 	let editing = $state<Rule | null>(null);
 	let editorStep = $state<'type' | 'form'>('form');
 	let choosingProcess = $state(false);
@@ -274,7 +273,8 @@
 			name: '',
 			matcher: 'domain',
 			isDomain: true,
-			serverId: $catalogStore.selectedServerId || 'subscription',
+			// New rules follow the current subscription server, not a fixed one.
+			serverId: 'subscription',
 			enabled: true,
 		};
 	}
@@ -286,7 +286,6 @@
 	}
 
 	function openServerPicker(rule: Rule) {
-		pickerSearchSignal = 0;
 		selectingRule = rule;
 		pendingServerId = rule.serverId;
 	}
@@ -421,12 +420,10 @@
 			{:else if choosingServer}
 				<ServerPickerPanel
 					selectedId={editing.serverId}
-					searchSignal={pickerSearchSignal}
 					onSelect={(server) => {
 						if (editing) editing.serverId = server.id;
 						choosingServer = false;
 					}}
-					onSearch={() => pickerSearchSignal++}
 					onConfirm={() => {
 						choosingServer = false;
 					}}
@@ -452,7 +449,6 @@
 						choosingProcess = true;
 					}}
 					onSelectServer={() => {
-						pickerSearchSignal = 0;
 						choosingServer = true;
 					}}
 					onMatcherChange={(matcher) => {
@@ -466,9 +462,7 @@
 		{:else if selectingRule}
 			<ServerPickerPanel
 				selectedId={pendingServerId}
-				searchSignal={pickerSearchSignal}
 				onSelect={pickServer}
-				onSearch={() => pickerSearchSignal++}
 				onConfirm={confirmServer}
 			/>
 		{:else if showPresets}

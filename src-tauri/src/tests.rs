@@ -811,6 +811,76 @@ fn rule_for_another_server_is_a_live_outbound_and_route() {
         .any(|rule| rule["outboundTag"] == second.id && rule["domain"][0] == "domain:example.org"));
 }
 #[test]
+fn balanced_xray_subscription_skips_loopback_placeholder_and_keeps_burst_observatory() {
+    let sub = r#"[{
+        "remarks": "🇫🇲🏳️ БС | АВТО",
+        "burstObservatory": {
+            "subjectSelector": ["proxy"],
+            "pingConfig": {"destination": "http://www.gstatic.com/generate_204", "interval": "1m", "sampling": 1, "timeout": "3s"}
+        },
+        "outbounds": [
+            {
+                "tag": "proxy",
+                "protocol": "vless",
+                "settings": {"vnext": [{"address": "127.0.0.1", "port": 1234, "users": [{"id": "00000000-0000-4000-8000-000000000001", "encryption": "none", "flow": "xtls-rprx-vision"}]}]},
+                "streamSettings": {"network": "tcp", "security": "reality", "tcpSettings": {}, "realitySettings": {"fingerprint": "chrome", "publicKey": "test", "serverName": "example.com", "shortId": "abcd"}}
+            },
+            {
+                "tag": "proxy-5",
+                "protocol": "trojan",
+                "settings": {"servers": [{"address": "203.0.113.5", "password": "secret", "port": 443}]},
+                "streamSettings": {"network": "tcp", "security": "tls", "tcpSettings": {}, "tlsSettings": {"serverName": "a.example.com", "fingerprint": "firefox", "alpn": ["h2", "http/1.1"]}}
+            },
+            {
+                "tag": "proxy-8",
+                "protocol": "vless",
+                "settings": {"vnext": [{"address": "203.0.113.8", "port": 8443, "users": [{"id": "00000000-0000-4000-8000-000000000002", "encryption": "none", "flow": ""}]}]},
+                "streamSettings": {"network": "grpc", "security": "tls", "grpcSettings": {"serviceName": "grpc", "authority": "b.example.com"}, "sockopt": {"tcpNoDelay": true}, "tlsSettings": {"serverName": "b.example.com"}}
+            },
+            {"protocol": "freedom", "tag": "direct"},
+            {"protocol": "blackhole", "tag": "block"}
+        ],
+        "routing": {
+            "balancers": [{"tag": "Super_Balancer", "selector": ["proxy"], "strategy": {"type": "roundRobin"}, "fallbackTag": "direct"}],
+            "rules": [{"type": "field", "network": "tcp,udp", "balancerTag": "Super_Balancer"}]
+        }
+    }]"#;
+    let parsed = parser::parse(sub, "sub-test").unwrap();
+    assert_eq!(parsed.nodes.len(), 1);
+    let node = &parsed.nodes[0];
+    assert_eq!(node.name, "🇫🇲🏳️ БС | АВТО");
+    assert_eq!(node.address, "203.0.113.5");
+    let balancer = node.balancer.as_ref().unwrap();
+    let tags: Vec<_> = balancer
+        .outbounds
+        .iter()
+        .map(|o| o["tag"].as_str().unwrap())
+        .collect();
+    assert_eq!(tags, ["proxy-5", "proxy-8"]);
+    assert_eq!(
+        balancer.burst_observatory.as_ref().unwrap()["pingConfig"]["timeout"],
+        "3s"
+    );
+
+    let repo = Repository {
+        nodes: parsed.nodes.clone(),
+        ..Default::default()
+    };
+    let generated =
+        serde_json::to_value(config::build(&repo, &node.id, 10808, 10809, true).unwrap()).unwrap();
+    assert_eq!(generated["burstObservatory"]["subjectSelector"][0], "proxy");
+    assert!(generated.get("observatory").is_none());
+    assert_eq!(
+        generated["routing"]["balancers"][0]["tag"],
+        "Super_Balancer"
+    );
+    assert!(generated["outbounds"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .all(|o| o["settings"]["vnext"][0]["address"] != "127.0.0.1"));
+}
+#[test]
 fn balanced_xray_subscription_and_clean_names() {
     let sub = r#"[
         {
@@ -853,6 +923,12 @@ fn balanced_xray_subscription_and_clean_names() {
     let balancer = parsed.nodes[0].balancer.as_ref().unwrap();
     assert_eq!(balancer.tag, "auto-eu");
     assert_eq!(balancer.outbounds.len(), 2);
+    // No health check in the subscription: one is added for the balancer.
+    assert!(balancer.observatory.is_none());
+    assert_eq!(
+        balancer.burst_observatory.as_ref().unwrap()["subjectSelector"],
+        serde_json::json!(["proxy"])
+    );
 
     assert_eq!(parsed.nodes[1].name, "🇫🇮 Финляндия");
     assert!(parsed.nodes[1].balancer.is_none());

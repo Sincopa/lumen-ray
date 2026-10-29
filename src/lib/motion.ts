@@ -1,5 +1,6 @@
 import { quintOut } from 'svelte/easing';
 import type { TransitionConfig } from 'svelte/transition';
+import { isAndroid } from './platform';
 
 /*
  * Shared Svelte transitions. Curves mirror the CSS tokens in tokens.css:
@@ -9,6 +10,11 @@ import type { TransitionConfig } from 'svelte/transition';
  */
 
 export const easeOut = quintOut;
+
+/** A per-frame blur re-rasterizes the element; phone GPUs drop frames on it. */
+function blur(px: number) {
+	return isAndroid ? '' : `filter: blur(${px}px);`;
+}
 
 function reduced() {
 	return (
@@ -116,7 +122,7 @@ export function morphIn(
 		duration,
 		easing: springOut,
 		css: (t, u) =>
-			`opacity: ${Math.min(1, t * 1.4)}; filter: blur(${Math.max(0, u) * 8}px);` +
+			`opacity: ${Math.min(1, t * 1.4)}; ${blur(Math.max(0, u) * 8)}` +
 			`transform: scale(${0.7 + 0.3 * t})`,
 	};
 }
@@ -130,7 +136,7 @@ export function morphOut(
 		duration,
 		easing: easeOut,
 		css: (t, u) =>
-			`opacity: ${t}; filter: blur(${u * 8}px); transform: scale(${1 - u * 0.3})`,
+			`opacity: ${t}; ${blur(u * 8)} transform: scale(${1 - u * 0.3})`,
 	};
 }
 
@@ -146,7 +152,7 @@ export function morphGrow(
 		easing: springOut,
 		css: (t, u) =>
 			`clip-path: inset(-4px ${u * 100}% -4px -4px round 999px);` +
-			`opacity: ${Math.min(1, t * 2)}; filter: blur(${Math.max(0, u) * 6}px)`,
+			`opacity: ${Math.min(1, t * 2)}; ${blur(Math.max(0, u) * 6)}`,
 	};
 }
 
@@ -171,21 +177,48 @@ export function morphWidth(
 			`width: ${Math.max(0, t) * width}px; padding-left: ${Math.max(0, t) * paddingLeft}px;` +
 			`padding-right: ${Math.max(0, t) * paddingRight}px;` +
 			`opacity: ${Math.min(1, Math.max(0, t) * 1.4)};` +
-			`filter: blur(${Math.max(0, u) * 8}px); transform: scale(${0.6 + 0.4 * Math.min(1, t)})`,
+			`${blur(Math.max(0, u) * 8)} transform: scale(${0.6 + 0.4 * Math.min(1, t)})`,
 	};
 }
 
 /**
  * Fade-out that leaves the layout at once, so what follows does not wait to
- * move up. The app shell has 16px padding on each side.
+ * move up. The app shell has 16px padding on each side. The offset is pinned:
+ * an absolute flex item without one jumps to the top of its container.
  */
 export function leaveInPlace(
-	_node: Element,
+	node: Element,
 	{ duration = 120 } = {},
 ): TransitionConfig {
+	const { offsetTop, offsetLeft, offsetWidth } = node as HTMLElement;
 	return {
 		duration,
-		css: (t) => `position: absolute; width: calc(100% - 32px); opacity: ${t}`,
+		css: (t) =>
+			`position: absolute; top: ${offsetTop}px; left: ${offsetLeft}px;` +
+			`width: ${offsetWidth}px; opacity: ${t}`,
+	};
+}
+
+/**
+ * Fade-out for a screen in an absolute stack whose container may move as it
+ * leaves, for example when a header appears above it. The screen stays where
+ * it was until it is gone. `top` is the container's offsetTop before the
+ * change; offsets stay in CSS pixels under the UI zoom.
+ */
+export function leaveScreen(
+	node: Element,
+	{ duration = 120, top }: { duration?: number; top?: number } = {},
+): TransitionConfig {
+	const element = node as HTMLElement;
+	const parent = element.parentElement;
+	return {
+		duration,
+		tick: (t) => {
+			element.style.opacity = String(t);
+			if (top === undefined || !parent) return;
+			const shift = top - parent.offsetTop;
+			element.style.transform = shift ? `translateY(${shift}px)` : '';
+		},
 	};
 }
 
@@ -199,6 +232,6 @@ export function swap(
 		duration,
 		easing: easeOut,
 		css: (t, u) =>
-			`opacity: ${t}; transform: translateY(${u * y}px); filter: blur(${u * 2}px)`,
+			`opacity: ${t}; transform: translateY(${u * y}px); ${blur(u * 2)}`,
 	};
 }

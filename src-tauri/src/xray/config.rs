@@ -24,6 +24,8 @@ pub struct XrayConfig {
     metrics: Value,
     #[serde(skip_serializing_if = "Option::is_none")]
     observatory: Option<Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    burst_observatory: Option<Value>,
 }
 
 #[cfg(windows)]
@@ -80,6 +82,7 @@ pub fn live_routing_plan(
     if before.inbounds != after.inbounds
         || before.dns != after.dns
         || before.observatory != after.observatory
+        || before.burst_observatory != after.burst_observatory
         || before.routing["domainStrategy"] != after.routing["domainStrategy"]
         || before.routing["balancers"] != after.routing["balancers"]
     {
@@ -201,6 +204,31 @@ pub fn outbound(node: &VpnNode, tag: &str) -> Result<Value> {
     }
     Ok(json!({"tag":tag,"protocol":protocol,"settings":settings,"streamSettings":stream}))
 }
+/// Public resolvers that also answer DNS-over-TLS on port 853.
+const DOT_RESOLVERS: &[&str] = &[
+    "1.1.1.1",
+    "1.0.0.1",
+    "8.8.8.8",
+    "8.8.4.4",
+    "9.9.9.9",
+    "94.140.14.14",
+    "94.140.15.15",
+    "77.88.8.8",
+];
+
+/// The resolver address the Android VPN announces to apps: the chosen DNS
+/// server when it speaks DoT, Cloudflare otherwise. An address inside the
+/// tunnel made Android's automatic Private DNS retry DoT hundreds of times a
+/// second, each attempt a socket that kept Xray busy.
+pub fn android_tunnel_dns(settings: &crate::storage::repository::Settings) -> String {
+    let chosen = settings.dns_server.trim();
+    if DOT_RESOLVERS.contains(&chosen) {
+        chosen.to_string()
+    } else {
+        "1.1.1.1".to_string()
+    }
+}
+
 pub fn build(
     repo: &Repository,
     selected: &str,
@@ -214,26 +242,29 @@ pub fn build(
         .find(|n| n.id == selected)
         .ok_or_else(|| BackendError::new("INVALID_SERVER", "Select an available server"))?;
 
-    let (mut outbounds, balancer_tag, observatory) = if let Some(balancer) = &node.balancer {
-        let mut obs = balancer.outbounds.clone();
-        obs.push(json!({"tag":"direct","protocol":"freedom"}));
-        obs.push(json!({"tag":"block","protocol":"blackhole"}));
-        (
-            obs,
-            Some(balancer.tag.clone()),
-            balancer.observatory.clone(),
-        )
-    } else {
-        (
-            vec![
-                outbound(node, "proxy")?,
-                json!({"tag":"direct","protocol":"freedom"}),
-                json!({"tag":"block","protocol":"blackhole"}),
-            ],
-            None,
-            None,
-        )
-    };
+    let (mut outbounds, balancer_tag, observatory, burst_observatory) =
+        if let Some(balancer) = &node.balancer {
+            let mut obs = balancer.outbounds.clone();
+            obs.push(json!({"tag":"direct","protocol":"freedom"}));
+            obs.push(json!({"tag":"block","protocol":"blackhole"}));
+            (
+                obs,
+                Some(balancer.tag.clone()),
+                balancer.observatory.clone(),
+                balancer.burst_observatory.clone(),
+            )
+        } else {
+            (
+                vec![
+                    outbound(node, "proxy")?,
+                    json!({"tag":"direct","protocol":"freedom"}),
+                    json!({"tag":"block","protocol":"blackhole"}),
+                ],
+                None,
+                None,
+                None,
+            )
+        };
 
     let target_tag = balancer_tag.as_deref().unwrap_or("proxy");
     let target_field = if balancer_tag.is_some() {
@@ -242,10 +273,23 @@ pub fn build(
         "outboundTag"
     };
 
-    let mut rules = vec![
-        json!({"type":"field","inboundTag":["probe"], target_field: target_tag}),
-        json!({"type":"field","process":["self/"],"outboundTag":"direct"}),
-    ];
+    let mut rules = vec![json!({"type":"field","inboundTag":["probe"], target_field: target_tag})];
+    // Android's automatic Private DNS opens DNS-over-TLS to the VPN's resolver.
+    // That resolver is a real DoT server, reached like Xray's own DNS: direct in
+    // Rules mode, through the VPN otherwise. Plain port 53 is still hijacked below.
+    if cfg!(target_os = "android") && tun {
+        let resolver = android_tunnel_dns(&repo.settings);
+        rules.push(if repo.routing_mode == "rules" {
+            json!({"type":"field","ip":[resolver],"port":"853","network":"tcp","outboundTag":"direct"})
+        } else {
+            json!({"type":"field","ip":[resolver],"port":"853","network":"tcp",target_field:target_tag})
+        });
+    }
+    // Android keeps Lumen's own package outside the VPN instead (VpnService), and
+    // Android apps cannot read /proc/net to match processes.
+    if !cfg!(target_os = "android") {
+        rules.push(json!({"type":"field","process":["self/"],"outboundTag":"direct"}));
+    }
     // DNS, inbounds, outbounds and the router strategy must not depend on the
     // routing mode: switching All/Rules then only replaces rules through the API
     // in both TUN and system-proxy modes, without restarting the core.
@@ -256,7 +300,13 @@ pub fn build(
         {
             crate::platform::network::system_dns()?
         }
-        #[cfg(not(any(windows, target_os = "macos")))]
+        // Xray resolves through the system resolver of the physical network:
+        // Lumen's own package is outside the VPN.
+        #[cfg(target_os = "android")]
+        {
+            vec!["localhost".to_string()]
+        }
+        #[cfg(not(any(windows, target_os = "macos", target_os = "android")))]
         {
             return Err(BackendError::new(
                 "PLATFORM_UNSUPPORTED",
@@ -318,7 +368,11 @@ pub fn build(
     };
     // Hijack A/AAAA before LAN bypass, including queries originally sent to a local router.
     outbounds.push(json!({"tag":"dns","protocol":"dns"}));
-    if repo.routing_mode == "rules" || (tun && repo.settings.dns_policy.enabled) {
+    // Android announces a resolver address inside the tunnel, which only this
+    // rule answers.
+    if repo.routing_mode == "rules"
+        || (tun && (repo.settings.dns_policy.enabled || cfg!(target_os = "android")))
+    {
         rules.push(json!({"type":"field","port":"53","outboundTag":"dns"}));
     }
     if repo.settings.bypass_lan {
@@ -350,7 +404,13 @@ pub fn build(
             }
             None => "direct".to_string(),
         };
-        rules.push(json!({"type":"field","network":"udp","port":DISCORD_VOICE_PORTS,"process":process_names(DISCORD_PROCESSES),"outboundTag":tag}));
+        let mut voice =
+            json!({"type":"field","network":"udp","port":DISCORD_VOICE_PORTS,"outboundTag":tag});
+        // Android has no process matching; these ports are Discord's media range.
+        if !cfg!(target_os = "android") {
+            voice["process"] = json!(process_names(DISCORD_PROCESSES));
+        }
+        rules.push(voice);
     }
     let mut nodes = None;
     let mut outbound_tags: Option<std::collections::HashSet<String>> = None;
@@ -438,6 +498,10 @@ pub fn build(
                     compiled["domain"] = json!([domain_rule(value)?]);
                 }
             }
+            // On Android, application rules become the VpnService app lists.
+            crate::storage::repository::RuleMatcher::Application if cfg!(target_os = "android") => {
+                continue;
+            }
             crate::storage::repository::RuleMatcher::Application => {
                 compiled["process"] = json!(process_names(&rule.name));
             }
@@ -500,7 +564,7 @@ pub fn build(
         }
     }
     let mut inbounds = vec![
-        json!({"tag":"probe","listen":"127.0.0.1","port":proxy_port,"protocol":"socks","settings":{"auth":"noauth","udp":true}}),
+        json!({"tag":"probe","listen":"127.0.0.1","port":proxy_port,"protocol":"socks","settings":super::probe::inbound_settings()}),
     ];
     if !tun {
         inbounds.push(json!({"tag":"system-proxy","listen":"127.0.0.1","port":metrics_port.checked_add(1).ok_or_else(BackendError::invalid)?,"protocol":"http","settings":{}}));
@@ -521,7 +585,14 @@ pub fn build(
         // direct resolver cannot send them to a dead address. Direct traffic resolves
         // through Xray's own DNS (cached, direct in Rules mode) instead of looping the
         // Windows resolver back through the adapter.
-        inbounds.push(json!({"tag":"tun","protocol":"tun","settings":{"name":"LumenTun","mtu":1500,"gateway":["172.31.255.1/30","fd42:6c75:6d65::1/126"],"dns":dns_servers,"autoSystemRoutingTable":routes,"autoOutboundsInterface":"auto"},"sniffing":{"enabled":true,"destOverride":["http","tls","quic"],"routeOnly":false,"domainsExcluded":[
+        // On Android the VpnService owns the interface, its addresses, routes and
+        // DNS; Xray only reads the descriptor it is given.
+        let settings = if cfg!(target_os = "android") {
+            json!({"name":"LumenTun","mtu":1500})
+        } else {
+            json!({"name":"LumenTun","mtu":1500,"gateway":["172.31.255.1/30","fd42:6c75:6d65::1/126"],"dns":dns_servers,"autoSystemRoutingTable":routes,"autoOutboundsInterface":"auto"})
+        };
+        inbounds.push(json!({"tag":"tun","protocol":"tun","settings":settings,"sniffing":{"enabled":true,"destOverride":["http","tls","quic"],"routeOnly":false,"domainsExcluded":[
             // Local names resolve through LLMNR/mDNS, not Xray's resolver: keep the
             // address so the LAN bypass applies.
             "regexp:^[^.]+$","regexp:(^|\\.)(local|lan|home\\.arpa|internal)$","courier.push.apple.com"]}}));
@@ -547,7 +618,12 @@ pub fn build(
     }
 
     Ok(XrayConfig {
-        log: json!({"loglevel":"warning"}),
+        // On Android the access log goes to logcat, one line per connection of every app.
+        log: if cfg!(target_os = "android") {
+            json!({"loglevel":"warning","access":"none"})
+        } else {
+            json!({"loglevel":"warning"})
+        },
         api: None,
         inbounds,
         outbounds,
@@ -555,8 +631,15 @@ pub fn build(
         dns,
         stats: json!({}),
         policy: json!({"system":{"statsOutboundUplink":true,"statsOutboundDownlink":true}}),
-        metrics: json!({"tag":"metrics","listen":format!("127.0.0.1:{metrics_port}")}),
+        // Every Android app can reach loopback; traffic counters come from the
+        // embedded core there instead.
+        metrics: if cfg!(target_os = "android") {
+            Value::Null
+        } else {
+            json!({"tag":"metrics","listen":format!("127.0.0.1:{metrics_port}")})
+        },
         observatory,
+        burst_observatory,
     })
 }
 /// Discord voice media: current servers listen on 19294-19344, older ones on 50000-50100.

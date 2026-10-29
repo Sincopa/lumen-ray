@@ -299,12 +299,7 @@ async fn discover(proxy_port: u16, ip: Ipv4Addr) -> Option<bool> {
     let mut control = TcpStream::connect((Ipv4Addr::LOCALHOST, proxy_port))
         .await
         .ok()?;
-    control.write_all(&[5, 1, 0]).await.ok()?;
-    let mut greeting = [0u8; 2];
-    control.read_exact(&mut greeting).await.ok()?;
-    if greeting != [5, 0] {
-        return None;
-    }
+    crate::xray::probe::handshake(&mut control).await?;
     control
         .write_all(&[5, 3, 0, 1, 0, 0, 0, 0, 0, 0])
         .await

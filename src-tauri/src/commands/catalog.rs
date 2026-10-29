@@ -337,6 +337,12 @@ pub async fn get_processes() -> Result<Vec<crate::platform::processes::ProcessIt
         .await
         .map_err(|_| BackendError::new("PROCESS_FAILED", "Could not enumerate processes"))?
 }
+/// Android rules name apps by package; Lumen lists launchable apps instead of processes.
+#[cfg(target_os = "android")]
+#[tauri::command]
+pub async fn get_processes() -> Result<Vec<crate::platform::android::AppItem>> {
+    crate::platform::android::installed_apps().await
+}
 #[cfg(windows)]
 #[tauri::command]
 pub async fn get_rule_icons(
@@ -346,7 +352,14 @@ pub async fn get_rule_icons(
         .await
         .map_err(|_| BackendError::new("PROCESS_FAILED", "Could not resolve process icons"))
 }
-#[cfg(not(windows))]
+#[cfg(target_os = "android")]
+#[tauri::command]
+pub async fn get_rule_icons(
+    names: Vec<String>,
+) -> Result<std::collections::HashMap<String, String>> {
+    crate::platform::android::app_icons(&names).await
+}
+#[cfg(not(any(windows, target_os = "android")))]
 #[tauri::command]
 pub async fn get_rule_icons(
     _names: Vec<String>,

@@ -5,4 +5,5 @@ pub mod config;
 pub mod dns_policy;
 pub mod geo;
 pub mod logs;
+pub mod probe;
 pub mod updater;

@@ -180,7 +180,15 @@
 		"uiScaleDesc": "Increase scale for high-resolution (2K/4K) monitors",
 		"geoDatabases": "GeoIP / GeoSite databases",
 		"updateDatabases": "Update databases",
-		"geoDataCorrupted": "GeoIP/GeoSite databases are missing or corrupted"
+		"geoDataCorrupted": "GeoIP/GeoSite databases are missing or corrupted",
+		"androidSection": "Android",
+		"alwaysOn": "Always-on VPN and kill switch",
+		"alwaysOnHint": "Opens Android settings. For Lumen, turn on \"Always-on VPN\" and \"Block connections without VPN\" so traffic never leaves around the tunnel.",
+		"battery": "Background work",
+		"batteryOk": "Unrestricted",
+		"batteryLimited": "Restricted",
+		"batteryHint": "With restricted background work, Android may stop the VPN to save battery.",
+		"appsHint": "Selected apps bypass the VPN. Other app rules do not apply on Android."
 	},
 	"demo": {
 		"notice": "Demo mode · traffic is not protected",
@@ -234,7 +242,10 @@
 		"platformUnsupported": "TUN mode is not available on this platform yet. Choose System Proxy under Working Mode. (PLATFORM_UNSUPPORTED)",
 		"autostartUnavailable": "Move Lumen to the Applications folder to open it at login. (AUTOSTART_UNAVAILABLE)",
 		"GEO_DATA_MISSING": "GeoIP/GeoSite databases are missing or corrupted.",
-		"INVALID_GEO_TAG": "Invalid tag. Use Latin letters, digits, _, -, !, @"
+		"INVALID_GEO_TAG": "Invalid tag. Use Latin letters, digits, _, -, !, @",
+		"vpnPermissionDenied": "Allow Lumen to create a VPN connection in the Android prompt. (VPN_PERMISSION_DENIED)",
+		"vpnRevoked": "Android turned the VPN off: another VPN started or the permission was revoked in settings. Connect again. (VPN_REVOKED)",
+		"noConnectionPlan": "Open Lumen and connect once so the tile and auto-connect know the server. (NO_CONNECTION_PLAN)"
 	},
 	"presets": {
 		"requiresProxy": "Requires an active subscription or server for VPN rules",
@@ -293,7 +304,8 @@
 		"geoCategory": "{type} category",
 		"examplesLabel": "For example:",
 		"selectedCount": "selected",
-		"clear": "Clear"
+		"clear": "Clear",
+		"androidAppHint": "Selected apps bypass the VPN and use the regular network. Android cannot send a single app through another server."
 	},
 	"macos": {
 		"settings": {
@@ -316,6 +328,22 @@
 			"alreadyRunning": "Lumen is already running. Open it from the menu bar icon. (ALREADY_RUNNING)",
 			"processFailed": "Could not list macOS programs. (PROCESS_FAILED)",
 			"notificationFailed": "macOS did not show the notification. Allow notifications for Lumen in System Settings. (NOTIFICATION_FAILED)"
+		}
+	},
+	"android": {
+		"settings": {
+			"autoConnect": "Connect VPN automatically"
+		},
+		"errors": {
+			"invalidRule": "Enter a domain without a path or pick an app, then choose a server.",
+			"coreStartFailed": "Xray could not start inside the Android VPN service. Connect again; if it keeps failing, refresh the subscription. (CORE_START_FAILED)",
+			"tunFailed": "Android did not create the VPN interface. Turn off other VPN apps and retry. (TUN_FAILED)",
+			"tunNetworkUnreachable": "The server answers, but traffic does not go through Lumen. Turn off other VPNs and Android Private DNS, then reconnect. (TUN_NETWORK_UNREACHABLE)",
+			"permissionDenied": "Allow Lumen to create a VPN connection in the Android prompt. (PERMISSION_DENIED)",
+			"processFailed": "Could not list apps. Try again. (PROCESS_FAILED)"
+		},
+		"rules": {
+			"typeApplicationDesc": "Selected apps work without the VPN: banking apps, government services and others that refuse VPN connections."
 		}
 	}
 }

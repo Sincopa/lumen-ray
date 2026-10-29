@@ -53,13 +53,18 @@ pub fn parse(input: &str, subscription: &str) -> Result<ParsedSubscription> {
             }
             if let Some(outbounds) = root.get("outbounds").and_then(|v| v.as_array()) {
                 let remarks = root.get("remarks").and_then(|r| r.as_str());
-                let proxy_outbounds: Vec<&serde_json::Value> = outbounds
+                let mut proxy_outbounds: Vec<&serde_json::Value> = outbounds
                     .iter()
                     .filter(|o| {
                         ![Some("freedom"), Some("blackhole"), Some("dns")]
                             .contains(&o["protocol"].as_str())
                     })
                     .collect();
+                // Panels put a dummy loopback outbound next to real servers. A balancer
+                // selector also matches it by prefix and sends traffic nowhere.
+                if proxy_outbounds.iter().any(|o| !is_placeholder(o)) {
+                    proxy_outbounds.retain(|o| !is_placeholder(o));
+                }
 
                 if proxy_outbounds.is_empty() {
                     continue;
@@ -110,11 +115,27 @@ pub fn parse(input: &str, subscription: &str) -> Result<ParsedSubscription> {
                                     serde_json::json!({"type": "leastPing"}),
                                 )
                             };
+                            let observatory = root.get("observatory").cloned();
+                            let mut burst_observatory = root.get("burstObservatory").cloned();
+                            // Without health checks Xray keeps balancing onto dead servers,
+                            // and leastPing/leastLoad have no data at all.
+                            if observatory.is_none() && burst_observatory.is_none() {
+                                burst_observatory = Some(serde_json::json!({
+                                    "subjectSelector": selector,
+                                    "pingConfig": {
+                                        "destination": "https://www.gstatic.com/generate_204",
+                                        "interval": "1m",
+                                        "sampling": 1,
+                                        "timeout": "5s"
+                                    }
+                                }));
+                            }
                             node.balancer = Some(crate::domain::node::BalancerOptions {
                                 tag: b_tag,
                                 selector,
                                 strategy,
-                                observatory: root.get("observatory").cloned(),
+                                observatory,
+                                burst_observatory,
                                 outbounds: proxy_outbounds.into_iter().cloned().collect(),
                             });
                             let _ = node.identify();
@@ -216,4 +237,20 @@ pub fn parse(input: &str, subscription: &str) -> Result<ParsedSubscription> {
         }
     }
     Ok(result)
+}
+
+/// An outbound whose only server is loopback or unspecified cannot carry traffic.
+fn is_placeholder(outbound: &serde_json::Value) -> bool {
+    let settings = &outbound["settings"];
+    let address = settings["vnext"][0]["address"]
+        .as_str()
+        .or_else(|| settings["servers"][0]["address"].as_str())
+        .or_else(|| settings["address"].as_str());
+    address.is_some_and(|address| {
+        let host = address.trim_matches(['[', ']']);
+        host.eq_ignore_ascii_case("localhost")
+            || host
+                .parse::<std::net::IpAddr>()
+                .is_ok_and(|ip| ip.is_loopback() || ip.is_unspecified())
+    })
 }

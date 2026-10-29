@@ -12,6 +12,7 @@
 	import RuleTypeStep from './editor/RuleTypeStep.svelte';
 	import ServerField from './editor/ServerField.svelte';
 	import GeoField from './editor/GeoField.svelte';
+	import { isAndroid } from '../../lib/platform';
 	import {
 		buildRules,
 		canSave,
@@ -162,7 +163,10 @@
 
 	function handleSave() {
 		error = '';
-		const result = buildRules(rule, matcher, name, serverId);
+		// Android can keep apps out of the VPN (VpnService), not route them to
+		// another server.
+		const target = isAndroid && matcher === 'application' ? 'direct' : serverId;
+		const result = buildRules(rule, matcher, name, target);
 		if ('issue' in result) {
 			error = issueMessage(result.issue);
 			return;
@@ -244,12 +248,16 @@
 								<img src={chevronIcon} alt="" class="chevron-right" />
 							</button>
 						</div>
-						<ServerField
-							{serverId}
-							{server}
-							{subscriptionName}
-							onSelect={onSelectServer}
-						/>
+						{#if isAndroid}
+							<p class="field-hint">{t('rules.androidAppHint')}</p>
+						{:else}
+							<ServerField
+								{serverId}
+								{server}
+								{subscriptionName}
+								onSelect={onSelectServer}
+							/>
+						{/if}
 					{:else}
 						<ServerField
 							{serverId}

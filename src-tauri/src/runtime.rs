@@ -62,7 +62,7 @@ impl RuntimePaths {
 
     pub fn is_valid(&self) -> bool {
         // Wintun only backs the Windows TUN helper.
-        self.xray_binary().is_file() && (!cfg!(windows) || self.wintun_path().is_file())
+        has_runtime(&self.root) && (!cfg!(windows) || self.wintun_path().is_file())
     }
 }
 
@@ -90,17 +90,27 @@ impl From<&Path> for RuntimePaths {
     }
 }
 
+/// Android embeds Xray in the VPN service; its runtime is the geo databases
+/// RuntimeProvider copies out of the APK (LUMEN_RUNTIME_DIR).
+fn has_runtime(root: &Path) -> bool {
+    if cfg!(target_os = "android") {
+        root.join("xray").join("geosite.dat").is_file()
+    } else {
+        root.join("xray").join(XRAY_BINARY).is_file()
+    }
+}
+
 /// Resolves runtime paths checking candidates from base dir, env vars, current_exe, and development fallbacks.
 pub fn resolve_from(base: Option<&Path>) -> Result<RuntimePaths> {
     let mut candidates = Vec::new();
 
     // 1. Explicit base directory (e.g. from Tauri resource_dir or test override)
     if let Some(dir) = base {
-        if dir.join("xray").join(XRAY_BINARY).is_file() {
+        if has_runtime(dir) {
             candidates.push(dir.to_path_buf());
         }
         let runtime_sub = dir.join("runtime");
-        if runtime_sub.join("xray").join(XRAY_BINARY).is_file() {
+        if has_runtime(&runtime_sub) {
             candidates.push(runtime_sub);
         }
     }
@@ -108,11 +118,11 @@ pub fn resolve_from(base: Option<&Path>) -> Result<RuntimePaths> {
     // 2. Explicit environment variable override
     if let Some(env_dir) = std::env::var_os("LUMEN_RUNTIME_DIR") {
         let path = PathBuf::from(env_dir);
-        if path.join("xray").join(XRAY_BINARY).is_file() {
+        if has_runtime(&path) {
             candidates.push(path.clone());
         }
         let sub = path.join("runtime");
-        if sub.join("xray").join(XRAY_BINARY).is_file() {
+        if has_runtime(&sub) {
             candidates.push(sub);
         }
     }

@@ -1,4 +1,5 @@
 import { shaderSettings } from '../stores/shaderSettings.svelte';
+import { isAndroid } from '../platform';
 
 /**
  * Svelte action that renders a custom tooltip above the element on hover/focus.
@@ -20,6 +21,8 @@ function isWarm() {
 }
 
 export function tooltip(node: HTMLElement, text: string) {
+	// A tap emulates hover on Android, which would leave a label over the finger.
+	if (isAndroid) return { update() {}, destroy() {} };
 	let tip: HTMLDivElement | null = null;
 	let raf = 0;
 	let timer = 0;

@@ -1,7 +1,8 @@
 <script lang="ts">
 	import { onDestroy, onMount } from 'svelte';
 	import { runtime } from '../../lib/runtime';
-	import { getProcesses } from '../../lib/services/processes';
+	import { getProcesses, getRuleIcons } from '../../lib/services/processes';
+	import { isAndroid } from '../../lib/platform';
 	import { catalog } from '../../lib/services';
 	import { createDeferredTask } from '../../lib/utils/deferredTask';
 	import backIcon from '../../assets/back.svg';
@@ -79,10 +80,25 @@
 	);
 	onMount(() => {
 		let disposed = false;
+		// Android lists apps without icons first, then fills them in batches.
+		async function loadIcons(items: ProcessItem[]) {
+			for (let start = 0; start < items.length; start += 48) {
+				const names = items.slice(start, start + 48).map((item) => item.name);
+				const icons = await getRuleIcons(names).catch(
+					() => ({}) as Record<string, string>,
+				);
+				if (disposed) return;
+				processes = processes.map((item) =>
+					icons[item.name] ? { ...item, icon: icons[item.name] } : item,
+				);
+			}
+		}
 		if (runtime.isTauri)
 			void getProcesses()
 				.then((items) => {
-					if (!disposed) processes = items;
+					if (disposed) return;
+					processes = items;
+					if (isAndroid) void loadIcons(items);
 				})
 				.catch(() => catalog.persistenceError.set(true));
 		return () => {
@@ -177,6 +193,9 @@
 >
 	<!-- Processes List -->
 	<div class="process-list" role="list">
+		{#if isAndroid}
+			<p class="android-hint">{t('settings.appsHint')}</p>
+		{/if}
 		{#each filteredProcesses as item (item.id)}
 			{@const isChecked = selectedNames.has(processKey(item))}
 			<button
@@ -196,8 +215,13 @@
 						{/if}
 					</div>
 					<div class="process-info">
-						<span class="process-name">{item.name}</span>
-						<span class="process-detail">{item.detail}</span>
+						<!-- Android: the app label is the title, the package the detail. -->
+						<span class="process-name">
+							{isAndroid ? item.detail : item.name}
+						</span>
+						<span class="process-detail">
+							{isAndroid ? item.name : item.detail}
+						</span>
 					</div>
 				</div>
 
@@ -425,6 +449,13 @@
 	.round-indicator.checked::after {
 		opacity: 1;
 		transform: scale(1);
+	}
+
+	.android-hint {
+		color: rgba(255, 255, 255, 0.5);
+		font-size: 12px;
+		line-height: 1.4;
+		margin: 4px 4px 12px;
 	}
 
 	.empty-msg {

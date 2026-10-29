@@ -144,8 +144,14 @@ pub fn run() {
         }
         app::startup::record("ISOLATED_UI_SMOKE");
     }
-    let application = tauri::Builder::default()
-        .manage(app::startup::FrontendReadiness::default())
+    // Only the newest Lumen copy on this PC runs, and only one at a time.
+    #[cfg(windows)]
+    if !ui_smoke {
+        app::instances::launch_newest(&context.config().identifier);
+    }
+    let builder = tauri::Builder::default().manage(app::startup::FrontendReadiness::default());
+    #[cfg(not(target_os = "android"))]
+    let builder = builder
         .plugin(tauri_plugin_single_instance::init(|app, args, _| {
             for arg in args {
                 commands::deep_link::queue_import_link(app, &arg);
@@ -156,6 +162,11 @@ pub fn run() {
                 let _ = window.set_focus();
             }
         }))
+        .plugin(tauri_plugin_updater::Builder::new().build());
+    // VPN service, embedded Xray, Keystore and installed apps (android/plugin).
+    #[cfg(target_os = "android")]
+    let builder = builder.plugin(tauri_plugin_lumen::init());
+    let application = builder
         .plugin(tauri_plugin_deep_link::init())
         .plugin(
             tauri_plugin_log::Builder::default()
@@ -165,7 +176,6 @@ pub fn run() {
                 .rotation_strategy(tauri_plugin_log::RotationStrategy::KeepSome(3))
                 .build(),
         )
-        .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_notification::init())
         .invoke_handler(tauri::generate_handler![
             app::startup::frontend_ready,
@@ -195,10 +205,16 @@ pub fn run() {
             commands::updates::check_application_update,
             commands::updates::install_application_update,
             commands::geo::get_geo_database_info,
-            commands::geo::update_geo_databases
+            commands::geo::update_geo_databases,
+            commands::device::open_vpn_settings,
+            commands::device::get_battery_optimization,
+            commands::device::request_battery_exemption,
+            commands::device::send_to_background
         ])
         .setup(move |app| {
-            let resources = runtime::resolve_from(Some(&app.path().resource_dir()?))?;
+            // Android resources stay inside the APK; RuntimeProvider sets LUMEN_RUNTIME_DIR.
+            let resource_dir = app.path().resource_dir().ok();
+            let resources = runtime::resolve_from(resource_dir.as_deref())?;
             app::startup::record("RUNTIME_RESOLVED");
             let data = app.path().app_local_data_dir()?;
             let data = smoke_path.clone().unwrap_or(data);
@@ -216,8 +232,11 @@ pub fn run() {
                     .close_to_tray = false;
             }
             app::startup::record("APPLICATION_DATA_READY");
+            #[cfg(target_os = "android")]
+            platform::android::install(app.handle());
+            // The Android core is compiled into the APK and never updated apart from it.
             let active = crate::xray::updater::current(&state.data.join("core"));
-            if active != crate::xray::bundle::VERSION {
+            if !cfg!(target_os = "android") && active != crate::xray::bundle::VERSION {
                 let resolved = tauri::async_runtime::block_on(async {
                     tokio::time::timeout(
                         std::time::Duration::from_secs(15),
@@ -237,8 +256,15 @@ pub fn run() {
             if !ui_smoke {
                 platform::windows::repair_autostart();
             }
+            #[cfg(windows)]
+            if !ui_smoke {
+                app::instances::listen_for_handoff(app.handle().clone(), &app.config().identifier);
+            }
             if !ui_smoke {
                 services::vpn_service::monitor(state.clone(), app.handle().clone());
+                // Adopts a tunnel Always-on, the tile or boot started before the UI.
+                #[cfg(target_os = "android")]
+                platform::android::watch(state.clone(), app.handle().clone());
                 let startup = state.clone();
                 let handle = app.handle().clone();
                 tauri::async_runtime::spawn(async move {
@@ -265,7 +291,7 @@ pub fn run() {
                     .try_read()
                     .map(|r| r.settings.start_minimized)
                     .unwrap_or(false);
-            if start_minimized {
+            if start_minimized && !cfg!(target_os = "android") {
                 if let Some(window) = tauri::Manager::get_webview_window(app.handle(), "main") {
                     let _ = window.hide();
                 }

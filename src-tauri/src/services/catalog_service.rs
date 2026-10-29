@@ -755,6 +755,12 @@ pub fn generate_preset_rules(preset_id: &str, target_proxy: &str) -> Result<Vec<
         ]),
         _ => Err(BackendError::new("INVALID_PRESET", "Unknown rule preset")),
     }?;
+    // Android apps can only bypass the VPN; the Discord.exe rule would be a no-op.
+    if cfg!(target_os = "android") {
+        rules.retain(|rule| {
+            !matches!(rule.matcher, RuleMatcher::Application) || rule.server_id == "direct"
+        });
+    }
     if matches!(preset_id, "russia-optimized" | "bypass-blocking") {
         // Telegram is throttled by DPI but absent from the antifilter lists, so
         // t.me and web.telegram.org time out on the direct path without these.

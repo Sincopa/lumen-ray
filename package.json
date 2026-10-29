@@ -1,8 +1,8 @@
 {
 	"name": "lumen",
 	"private": true,
-	"version": "0.2.11",
-	"description": "Desktop VPN and proxy client for Windows and macOS, built with Svelte 5 and Tauri 2",
+	"version": "0.2.12",
+	"description": "VPN and proxy client for Windows, macOS and Android, built with Svelte 5 and Tauri 2",
 	"license": "SEE LICENSE IN LICENSE",
 	"type": "module",
 	"scripts": {
@@ -23,6 +23,11 @@
 		"tauri:dev:macos": "sh src-tauri/build/prepare-core-macos.sh && tauri dev",
 		"tauri:build:macos": "tauri build --target universal-apple-darwin",
 		"build:macos": "tauri build --target universal-apple-darwin --config src-tauri/tauri.release.conf.json",
+		"android:core": "bash android/core/build.sh",
+		"android:init": "bash android/scripts/init.sh",
+		"android:dev": "bash android/scripts/init.sh && tauri android dev",
+		"android:build": "bash android/scripts/build-apk.sh",
+		"android:build:debug": "bash android/scripts/build-apk.sh debug",
 		"release:version": "node src-tauri/build/set-version.mjs"
 	},
 	"engines": {

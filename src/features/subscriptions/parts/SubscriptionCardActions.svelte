@@ -30,6 +30,7 @@
 	icon={reloadIcon}
 	ariaLabel={t('common.reload')}
 	disabled={busy}
+	class={busy ? 'card-refresh refreshing' : 'card-refresh'}
 	onclick={onRefresh}
 />
 <IconButton
@@ -57,9 +58,21 @@
 	:global(.card-chevron.expanded) {
 		transform: rotate(0);
 	}
+	/* Only the card being refreshed spins; the others stay available. */
+	:global(.card-refresh.refreshing .btn-icon) {
+		animation: card-refresh-spin 900ms linear infinite;
+	}
+	@keyframes -global-card-refresh-spin {
+		to {
+			transform: rotate(360deg);
+		}
+	}
 	@media (prefers-reduced-motion: reduce) {
 		:global(.card-chevron) {
 			transition: none;
+		}
+		:global(.card-refresh.refreshing .btn-icon) {
+			animation: none;
 		}
 	}
 </style>

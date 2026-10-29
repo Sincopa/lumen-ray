@@ -1,0 +1,17 @@
+[package]
+name = "tauri-plugin-lumen"
+version = "0.2.11"
+description = "Android VPN service, Xray core and platform bridge for Lumen"
+license = "LicenseRef-Proprietary"
+publish = false
+edition = "2021"
+rust-version = "1.92"
+links = "tauri-plugin-lumen"
+
+[dependencies]
+tauri = { version = "2.11.3" }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+[build-dependencies]
+tauri-plugin = { version = "2.6.3", features = ["build"] }

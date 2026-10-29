@@ -10,7 +10,14 @@
 	import SettingRow from '../../components/SettingRow.svelte';
 	import ToggleSwitch from '../../components/ToggleSwitch.svelte';
 	import { runtime } from '../../lib/runtime';
-	import { supportsTun } from '../../lib/platform';
+	import { invoke } from '@tauri-apps/api/core';
+	import {
+		isAndroid,
+		isDesktopWindow,
+		supportsCoreUpdate,
+		supportsSystemProxy,
+		supportsTun,
+	} from '../../lib/platform';
 	import {
 		nativeSettings,
 		settingsError,
@@ -65,7 +72,48 @@
 	let scroller = $state<HTMLDivElement | null>(null);
 	let mainScroll = 0;
 
+	/** Android: whether Doze may stop the VPN service. */
+	let batteryUnrestricted = $state<boolean | null>(null);
+
+	async function readBattery() {
+		if (!isAndroid || !runtime.isTauri) return;
+		try {
+			batteryUnrestricted = await invoke<boolean>('get_battery_optimization');
+		} catch {
+			batteryUnrestricted = null;
+		}
+	}
+
+	function requestBattery() {
+		void invoke('request_battery_exemption').catch(() => {});
+	}
+
+	function openVpnSettings() {
+		void invoke('open_vpn_settings').catch(() => {});
+	}
+
+	// Android back steps out of a sub-page before leaving settings.
+	$effect(() => {
+		if (!isAndroid) return;
+		const onBack = (event: Event) => {
+			if (currentSubView === 'main') return;
+			event.preventDefault();
+			void back();
+		};
+		// The exemption dialog returns to Lumen; read the new state then.
+		const onVisible = () => {
+			if (document.visibilityState === 'visible') void readBattery();
+		};
+		window.addEventListener('lumen-back', onBack);
+		document.addEventListener('visibilitychange', onVisible);
+		return () => {
+			window.removeEventListener('lumen-back', onBack);
+			document.removeEventListener('visibilitychange', onVisible);
+		};
+	});
+
 	onMount(() => {
+		void readBattery();
 		if (resumeScroll !== null) {
 			const top = resumeScroll;
 			resumeScroll = null;
@@ -205,20 +253,24 @@
 								onchange={(val) => shaderSettings.setEnabled(val)}
 							/>
 						</SettingRow>
-						<SettingRow label={t('settings.tooltips')}>
-							<ToggleSwitch
-								mode="checkbox"
-								ariaLabel={t('settings.tooltips')}
-								checked={shaderSettings.tooltipsEnabled}
-								onchange={(val) => shaderSettings.setTooltipsEnabled(val)}
+						{#if isDesktopWindow}
+							<SettingRow label={t('settings.tooltips')}>
+								<ToggleSwitch
+									mode="checkbox"
+									ariaLabel={t('settings.tooltips')}
+									checked={shaderSettings.tooltipsEnabled}
+									onchange={(val) => shaderSettings.setTooltipsEnabled(val)}
+								/>
+							</SettingRow>
+						{/if}
+						{#if isDesktopWindow}
+							<SettingRow
+								label={t('settings.uiScale')}
+								value="{uiScaleValue}%"
+								showChevron
+								onclick={() => open('uiScale')}
 							/>
-						</SettingRow>
-						<SettingRow
-							label={t('settings.uiScale')}
-							value="{uiScaleValue}%"
-							showChevron
-							onclick={() => open('uiScale')}
-						/>
+						{/if}
 						<SettingRow
 							label={t('settings.appVersion')}
 							showChevron
@@ -230,15 +282,17 @@
 				<section class="settings-section">
 					<h2 class="section-title">{t('settings.systemSection')}</h2>
 					<div class="settings-group">
-						<SettingRow label={t('settings.autoStart')}>
-							<ToggleSwitch
-								mode="checkbox"
-								disabled={!runtime.isTauri}
-								ariaLabel={t('settings.autoStart')}
-								checked={runtime.isTauri ? $nativeSettings.autoStart : false}
-								onchange={(val) => updateNativeSettings({ autoStart: val })}
-							/>
-						</SettingRow>
+						{#if isDesktopWindow}
+							<SettingRow label={t('settings.autoStart')}>
+								<ToggleSwitch
+									mode="checkbox"
+									disabled={!runtime.isTauri}
+									ariaLabel={t('settings.autoStart')}
+									checked={runtime.isTauri ? $nativeSettings.autoStart : false}
+									onchange={(val) => updateNativeSettings({ autoStart: val })}
+								/>
+							</SettingRow>
+						{/if}
 						<SettingRow label={t('settings.autoConnect')}>
 							<ToggleSwitch
 								mode="checkbox"
@@ -249,27 +303,29 @@
 									updateNativeSettings({ autoConnect: value })}
 							/>
 						</SettingRow>
-						<SettingRow label={t('settings.closeToTray')}>
-							<ToggleSwitch
-								mode="checkbox"
-								disabled={!runtime.isTauri}
-								ariaLabel={t('settings.closeToTray')}
-								checked={runtime.isTauri ? $nativeSettings.closeToTray : true}
-								onchange={(val) => updateNativeSettings({ closeToTray: val })}
-							/>
-						</SettingRow>
-						<SettingRow label={t('settings.startMinimized')}>
-							<ToggleSwitch
-								mode="checkbox"
-								disabled={!runtime.isTauri}
-								ariaLabel={t('settings.startMinimized')}
-								checked={runtime.isTauri
-									? $nativeSettings.startMinimized
-									: false}
-								onchange={(val) =>
-									updateNativeSettings({ startMinimized: val })}
-							/>
-						</SettingRow>
+						{#if isDesktopWindow}
+							<SettingRow label={t('settings.closeToTray')}>
+								<ToggleSwitch
+									mode="checkbox"
+									disabled={!runtime.isTauri}
+									ariaLabel={t('settings.closeToTray')}
+									checked={runtime.isTauri ? $nativeSettings.closeToTray : true}
+									onchange={(val) => updateNativeSettings({ closeToTray: val })}
+								/>
+							</SettingRow>
+							<SettingRow label={t('settings.startMinimized')}>
+								<ToggleSwitch
+									mode="checkbox"
+									disabled={!runtime.isTauri}
+									ariaLabel={t('settings.startMinimized')}
+									checked={runtime.isTauri
+										? $nativeSettings.startMinimized
+										: false}
+									onchange={(val) =>
+										updateNativeSettings({ startMinimized: val })}
+								/>
+							</SettingRow>
+						{/if}
 						<SettingRow
 							label={t('settings.notifications')}
 							showChevron
@@ -278,19 +334,53 @@
 					</div>
 				</section>
 
+				{#if isAndroid}
+					<section class="settings-section">
+						<h2 class="section-title">{t('settings.androidSection')}</h2>
+						<div class="settings-group">
+							<SettingRow
+								label={t('settings.alwaysOn')}
+								showChevron
+								onclick={openVpnSettings}
+							/>
+							<SettingRow
+								label={t('settings.battery')}
+								value={batteryUnrestricted === null
+									? ''
+									: t(
+											batteryUnrestricted
+												? 'settings.batteryOk'
+												: 'settings.batteryLimited',
+										)}
+								showChevron={batteryUnrestricted === false}
+								onclick={batteryUnrestricted === false
+									? requestBattery
+									: undefined}
+							/>
+						</div>
+						<SettingHint
+							text={batteryUnrestricted === false
+								? t('settings.batteryHint')
+								: t('settings.alwaysOnHint')}
+						/>
+					</section>
+				{/if}
+
 				<section class="settings-section">
 					<h2 class="section-title">{t('settings.networkSection')}</h2>
 					<div class="settings-group">
-						<SettingRow
-							label={t('settings.routingMode')}
-							value={t(
-								networkMode === 'tun'
-									? 'settings.modeTunShort'
-									: 'settings.modeProxyShort',
-							)}
-							showChevron
-							onclick={() => open('routingMode')}
-						/>
+						{#if supportsSystemProxy}
+							<SettingRow
+								label={t('settings.routingMode')}
+								value={t(
+									networkMode === 'tun'
+										? 'settings.modeTunShort'
+										: 'settings.modeProxyShort',
+								)}
+								showChevron
+								onclick={() => open('routingMode')}
+							/>
+						{/if}
 						<SettingRow label={t('settings.autoReconnect')}>
 							<ToggleSwitch
 								mode="checkbox"
@@ -343,26 +433,32 @@
 							showChevron
 							onclick={() => open('pingUrl')}
 						/>
-						<SettingRow
-							label={t('settings.resetProxy')}
-							showChevron
-							onclick={() => open('resetProxy')}
-						/>
-						<SettingRow
-							label={t('settings.xrayCore')}
-							showChevron
-							onclick={() => open('xrayCore')}
-						/>
+						{#if supportsSystemProxy}
+							<SettingRow
+								label={t('settings.resetProxy')}
+								showChevron
+								onclick={() => open('resetProxy')}
+							/>
+						{/if}
+						{#if supportsCoreUpdate}
+							<SettingRow
+								label={t('settings.xrayCore')}
+								showChevron
+								onclick={() => open('xrayCore')}
+							/>
+						{/if}
 						<SettingRow
 							label={t('settings.geoDatabases')}
 							showChevron
 							onclick={() => open('geo')}
 						/>
-						<SettingRow
-							label={t('settings.logConsole')}
-							showChevron
-							onclick={() => open('logConsole')}
-						/>
+						{#if isDesktopWindow}
+							<SettingRow
+								label={t('settings.logConsole')}
+								showChevron
+								onclick={() => open('logConsole')}
+							/>
+						{/if}
 					</div>
 					<SettingHint
 						text={runtime.isTauri

@@ -265,13 +265,17 @@ pub fn ensure_initialized(
     };
     crate::xray::updater::atomic_write(&staging.path().join("geoip.dat"), &ip)?;
     crate::xray::updater::atomic_write(&staging.path().join("geosite.dat"), &site)?;
+    // Android has no Xray executable to run; both files matched the compiled hashes.
+    #[cfg(not(target_os = "android"))]
     validate_geo_files_sync(&core, staging.path())?;
+    #[cfg(target_os = "android")]
+    let _ = core;
     commit(data, staging, meta)
 }
 
 pub async fn update(data: &Path, core_path: &Path) -> Result<GeoDatabaseInfo> {
     let _lock = lock(data)?;
-    if !core_path.is_file() {
+    if !cfg!(target_os = "android") && !core_path.is_file() {
         return Err(error());
     }
     let release_url = format!("{GEO_REPOSITORY}/releases/latest");
@@ -323,7 +327,21 @@ pub async fn update(data: &Path, core_path: &Path) -> Result<GeoDatabaseInfo> {
 
     verify_download(geoip_asset, &geoip_hash)?;
     verify_download(geosite_asset, &geosite_hash)?;
+    #[cfg(not(target_os = "android"))]
     validate_geo_files_sync(core_path, staging.path())?;
+    #[cfg(target_os = "android")]
+    {
+        let config = serde_json::to_vec(&geo_test_config()).map_err(|_| error())?;
+        let assets = staging.path().to_string_lossy().into_owned();
+        crate::platform::android::validate(&config, &assets)
+            .await
+            .map_err(|_| {
+                BackendError::new(
+                    "GEO_UPDATE_FAILED",
+                    "Xray rejected the geo database validation configuration",
+                )
+            })?;
+    }
 
     let meta = GeoDatabaseMetadata {
         version: release.tag_name,
@@ -384,12 +402,9 @@ async fn download_file(url: &str, max_size: usize) -> Result<Vec<u8>> {
     Ok(bytes)
 }
 
-pub fn validate_geo_files_sync(core_path: &Path, asset_dir: &Path) -> Result<()> {
-    // Concurrent first-run preparations otherwise spawn one Go worker pool per
-    // database check and can starve each other until their deadlines expire.
-    static VALIDATION: std::sync::Mutex<()> = std::sync::Mutex::new(());
-    let _validation = VALIDATION.lock().map_err(|_| error())?;
-    let test_config = serde_json::json!({
+/// Loads the categories Lumen's presets use, so a database without them fails.
+fn geo_test_config() -> serde_json::Value {
+    serde_json::json!({
         "log": { "loglevel": "none" },
         "inbounds": [{ "port": std::net::TcpListener::bind("127.0.0.1:0").ok().and_then(|l| l.local_addr().ok()).map(|a| a.port()).unwrap_or(10808), "protocol": "socks" }],
         "outbounds": [{ "tag": "direct", "protocol": "freedom" }],
@@ -405,9 +420,16 @@ pub fn validate_geo_files_sync(core_path: &Path, asset_dir: &Path) -> Result<()>
                 { "type": "field", "ip": ["geoip:ru"], "outboundTag": "direct" }
             ]
         }
-    });
+    })
+}
 
-    let config_bytes = serde_json::to_vec(&test_config).map_err(|_| error())?;
+#[cfg_attr(target_os = "android", allow(dead_code))]
+pub fn validate_geo_files_sync(core_path: &Path, asset_dir: &Path) -> Result<()> {
+    // Concurrent first-run preparations otherwise spawn one Go worker pool per
+    // database check and can starve each other until their deadlines expire.
+    static VALIDATION: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    let _validation = VALIDATION.lock().map_err(|_| error())?;
+    let config_bytes = serde_json::to_vec(&geo_test_config()).map_err(|_| error())?;
     let mut cmd = std::process::Command::new(core_path);
     #[cfg(windows)]
     {

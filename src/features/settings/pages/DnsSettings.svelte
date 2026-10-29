@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { runtime } from '../../../lib/runtime';
-	import { supportsTun } from '../../../lib/platform';
+	import { isAndroid, supportsTun } from '../../../lib/platform';
 	import {
 		nativeSettings,
 		updateNativeSettings,
@@ -95,4 +95,7 @@
 		alert={customInvalid}
 	/>
 {/if}
-<SettingHint text={supportsTun ? t('settings.dnsTunOnly') : undefined} />
+<!-- Android always tunnels, so the setting always applies there. -->
+<SettingHint
+	text={supportsTun && !isAndroid ? t('settings.dnsTunOnly') : undefined}
+/>

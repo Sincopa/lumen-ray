@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { onDestroy } from 'svelte';
+	import { get } from 'svelte/store';
 	import { SvelteSet } from 'svelte/reactivity';
 	import { createDeferredTask } from '../../lib/utils/deferredTask';
 	import { flip } from 'svelte/animate';
@@ -13,6 +14,7 @@
 	} from '../../lib/motion';
 	import { catalog, connection } from '../../lib/services';
 	import { errorCode } from '../../lib/services/errors';
+	import { canSwitch, isActive } from '../../lib/services/connection';
 	import { refreshSubscriptionWithStatus } from '../../lib/services/maintenance';
 	import { t } from '../../lib/i18n';
 	import type { Subscription } from '../../lib/services/catalog';
@@ -39,7 +41,8 @@
 	let editInputEl = $state<HTMLInputElement | null>(null);
 	let deleting = $state<Subscription | null>(null);
 	let menu = $state<string | null>(null);
-	let busy = $state<string | null>(null);
+	// Each card refreshes on its own; one refresh does not lock the others.
+	const refreshing = new SvelteSet<string>();
 	let error = $state('');
 	let deleteBusy = $state(false);
 	let sharing = $state<Subscription | null>(null);
@@ -91,6 +94,17 @@
 	async function activateSubscription(id: string) {
 		try {
 			await catalog.selectSubscription(id);
+			// The subscription brings back the server last chosen in it. A running
+			// tunnel moves there too instead of staying on the old subscription.
+			const serverId = get(catalog.state).selectedServerId;
+			const snapshot = get(connection.state);
+			if (
+				serverId &&
+				isActive(snapshot.status) &&
+				canSwitch(snapshot.status) &&
+				snapshot.info?.serverId !== serverId
+			)
+				await connection.switchServer(serverId);
 		} catch (cause) {
 			error = t('errors.' + errorCode(cause));
 		}
@@ -98,6 +112,13 @@
 
 	function selectSubscription(id: string) {
 		if (activeSubId !== id) void activateSubscription(id);
+	}
+
+	/** The whole card selects it; its own buttons and fields keep their clicks. */
+	function selectFromCard(id: string, event: MouseEvent) {
+		const target = event.target as HTMLElement | null;
+		if (target?.closest('button, input, a, .popup-menu')) return;
+		selectSubscription(id);
 	}
 
 	function toggleExpanded(id: string) {
@@ -123,15 +144,15 @@
 
 	// Action handlers
 	async function refresh(id: string) {
-		if (busy) return;
-		busy = id;
+		if (refreshing.has(id)) return;
+		refreshing.add(id);
 		error = '';
 		try {
 			await refreshSubscriptionWithStatus(id);
 		} catch (e) {
 			error = t('errors.' + errorCode(e));
 		} finally {
-			busy = null;
+			refreshing.delete(id);
 		}
 	}
 
@@ -224,7 +245,7 @@
 	{#if activeSub}
 		<SubscriptionCardActions
 			name={activeSub.name}
-			busy={busy !== null}
+			busy={refreshing.has(activeSub.id)}
 			menuOpen={menu === activeSub.id}
 			expanded={expanded.has(activeSub.id)}
 			onRefresh={() => refresh(activeSub.id)}
@@ -269,7 +290,12 @@
 				in:pop={{ start: 0.96, duration: 220 }}
 				out:pop={{ start: 0.96, duration: 180 }}
 			>
-				<article class="sub-card" class:expanded={expanded.has(sub.id)}>
+				<article
+					class="sub-card"
+					class:expanded={expanded.has(sub.id)}
+					role="presentation"
+					onclick={(e) => selectFromCard(sub.id, e)}
+				>
 					<div class="card-header" class:is-editing={editingId === sub.id}>
 						{#if editingId === sub.id}
 							<div class="rename-wrap" in:morphGrow>
@@ -292,7 +318,7 @@
 							<div class="actions-group">
 								<SubscriptionCardActions
 									name={sub.name}
-									busy={busy !== null}
+									busy={refreshing.has(sub.id)}
 									menuOpen={menu === sub.id}
 									expanded={expanded.has(sub.id)}
 									onRefresh={() => refresh(sub.id)}
@@ -302,12 +328,7 @@
 							</div>
 						{/if}
 					</div>
-					<div
-						class="card-body"
-						class:expanded={expanded.has(sub.id)}
-						role="presentation"
-						onclick={() => selectSubscription(sub.id)}
-					>
+					<div class="card-body" class:expanded={expanded.has(sub.id)}>
 						{#if expanded.has(sub.id)}
 							<div transition:reveal>
 								<SubscriptionDetails {sub} />

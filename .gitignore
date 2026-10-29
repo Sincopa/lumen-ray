@@ -69,3 +69,11 @@ installers/
 
 # Local development utilities
 scripts/
+
+# Android: built by android/core/build.sh, signing material stays local
+android/plugin/android/libs/lumen-core.aar
+android/plugin/android/libs/lumen-core.json
+android/keystore/
+android/keystore.properties
+# Android build scripts are part of the project, unlike local scripts/ above
+!android/scripts/

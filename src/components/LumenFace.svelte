@@ -6,6 +6,7 @@
 	import { bridgeDuration, displacement } from '../lib/utils/lumenBridge';
 	import { loopsBeforeGesture, pickGesture } from '../lib/utils/lumenGestures';
 	import type { VpnConnectionState } from '../lib/types/models';
+	import { isAndroid } from '../lib/platform';
 
 	let {
 		status = 'disconnected',
@@ -209,6 +210,9 @@
 						progressiveLoad: false,
 					},
 				});
+				// Android paces animation frames to 30 a second (framePacing.ts);
+				// without subframes the face draws each of them once.
+				if (isAndroid) player.setSubframe(false);
 				player.addEventListener('DOMLoaded', () => {
 					if (!disposed) {
 						ready = true;

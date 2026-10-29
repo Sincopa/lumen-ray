@@ -269,10 +269,7 @@ impl SubscriptionClient {
     pub fn through_proxy(&self, port: u16) -> Result<Self> {
         let client = reqwest::Client::builder()
             .no_proxy()
-            .proxy(
-                reqwest::Proxy::all(format!("socks5h://127.0.0.1:{port}"))
-                    .map_err(|_| BackendError::invalid())?,
-            )
+            .proxy(crate::xray::probe::proxy(port).map_err(|_| BackendError::invalid())?)
             .timeout(Duration::from_secs(30))
             .redirect(reqwest::redirect::Policy::none())
             .build()

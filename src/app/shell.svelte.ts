@@ -1,6 +1,7 @@
 import { get } from 'svelte/store';
 import { catalog, connection } from '../lib/services';
 import { errorCode } from '../lib/services/errors';
+import { canSwitch, isActive } from '../lib/services/connection';
 import { t } from '../lib/i18n';
 import { runtime } from '../lib/runtime';
 
@@ -54,9 +55,8 @@ class Shell {
 
 	chooseServer = async (server: { id: string }) => {
 		const snapshot = get(connection.state);
-		if (snapshot.busy) return;
-		const wasActive =
-			snapshot.status === 'connected' || snapshot.status === 'connecting';
+		if (!canSwitch(snapshot.status)) return;
+		const wasActive = isActive(snapshot.status);
 		try {
 			if (wasActive) {
 				if (snapshot.info?.serverId !== server.id) {

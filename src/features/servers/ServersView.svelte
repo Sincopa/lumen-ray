@@ -2,7 +2,6 @@
 	import { onDestroy } from 'svelte';
 	import { fade } from 'svelte/transition';
 	import { pop, rise } from '../../lib/motion';
-	import { createDeferredTask } from '../../lib/utils/deferredTask';
 	import CountryFlag from '../../components/CountryFlag.svelte';
 	import IconButton from '../../components/IconButton.svelte';
 	import StatusDot from '../../components/StatusDot.svelte';
@@ -14,27 +13,22 @@
 	import type { Server } from '../../lib/services/catalog';
 	import MaterialIcon from '../../components/MaterialIcon.svelte';
 	import reloadIcon from '../../assets/reload.svg';
-	import searchIcon from '../../assets/search.svg';
-	import crossIcon from '../../assets/close.svg';
 	import { tabHeader } from '../../app/tabHeader.svelte';
 
-	const searchTask = createDeferredTask();
-	onDestroy(() => {
-		searchTask.cancel();
-	});
 	const catalogStore = catalog.state;
 	const pingingServers = catalog.pinging;
 	let {
 		selectedId = '',
 		disabled = false,
 		compact = false,
-		searchSignal = 0,
+		query = '',
 		onSelect,
 	}: {
 		selectedId?: string;
 		disabled?: boolean;
 		compact?: boolean;
-		searchSignal?: number;
+		/** The compact picker's search; its bar owns the field. */
+		query?: string;
 		onManageSubscription?: () => void;
 		onSelect?: (server: {
 			id: string;
@@ -43,10 +37,6 @@
 		}) => void;
 	} = $props();
 
-	let query = $state('');
-	let searching = $state(false);
-	let searchClosing = $state(false);
-	let searchInputEl = $state<HTMLInputElement | null>(null);
 	let busy = $state(false);
 	let error = $state('');
 	const subscriptionsById = $derived(
@@ -110,27 +100,6 @@
 		}
 	}
 
-	function handleOpenSearch() {
-		searching = true;
-		searchClosing = false;
-		searchTask.schedule(() => {
-			searchInputEl?.focus();
-		}, 180);
-	}
-
-	function handleCloseSearch() {
-		searchClosing = true;
-		searchTask.schedule(() => {
-			searching = false;
-			searchClosing = false;
-			query = '';
-		}, 240);
-	}
-
-	$effect(() => {
-		if (searchSignal > 0) handleOpenSearch();
-	});
-
 	// The tab shows the shared header; the compact picker keeps its own search.
 	const headerOwner = {};
 	$effect(() => {
@@ -180,12 +149,6 @@
 	}
 </script>
 
-<svelte:window
-	onkeydown={(event) => {
-		if (event.key === 'Escape' && searching) handleCloseSearch();
-	}}
-/>
-
 {#snippet headerActions()}
 	<IconButton
 		design
@@ -197,63 +160,6 @@
 {/snippet}
 
 <section class="servers-view" class:compact aria-label={t('servers.title')}>
-	{#if compact}
-		<div class="header-wrapper" class:open={searching}>
-			<div class="header-pill">
-				<!-- Standard header content -->
-				<div class="header-normal" class:header-hidden={searching}>
-					<div class="header-card-title">
-						<span class="title-text">
-							{activeSubscription?.name ?? t('servers.title')}
-						</span>
-						<StatusDot variant="active" />
-					</div>
-					<div class="header-card-actions">
-						<IconButton
-							design
-							icon={searchIcon}
-							ariaLabel={t('common.search')}
-							onclick={handleOpenSearch}
-						/>
-						<IconButton
-							design
-							icon={reloadIcon}
-							ariaLabel={t('servers.reloadServers')}
-							disabled={busy || !$catalogStore.servers.length}
-							onclick={refresh}
-						/>
-					</div>
-				</div>
-
-				<!-- Search bar inside header pill -->
-				<div
-					class="header-search"
-					class:search-open={searching && !searchClosing}
-					class:search-closing={searchClosing}
-				>
-					<img src={searchIcon} alt="" class="search-header-icon" />
-					<input
-						bind:this={searchInputEl}
-						type="text"
-						class="search-header-input"
-						placeholder={t('servers.searchPlaceholder') || 'Поиск серверов...'}
-						bind:value={query}
-						autocomplete="off"
-						spellcheck="false"
-					/>
-					<button
-						type="button"
-						class="close-search-btn"
-						onclick={handleCloseSearch}
-						aria-label={t('common.close')}
-					>
-						<img src={crossIcon} alt="" class="close-icon" />
-					</button>
-				</div>
-			</div>
-		</div>
-	{/if}
-
 	{#if error}<p role="alert" transition:rise>{error}</p>{/if}
 
 	<div class="servers-list">
@@ -382,10 +288,6 @@
 		display: inline-flex;
 		flex-shrink: 0;
 	}
-	/* The compact picker is a bare list. Search reuses the header. */
-	.compact .header-wrapper:not(.open) {
-		display: none;
-	}
 	.servers-view {
 		display: flex;
 		flex-direction: column;
@@ -394,164 +296,6 @@
 		min-height: 0;
 		position: relative;
 	}
-	.header-wrapper {
-		position: relative;
-		flex-shrink: 0;
-	}
-	.header-pill {
-		position: relative;
-		height: var(--design-header-height);
-		background: var(--design-panel);
-		border-radius: 124px;
-		-webkit-backdrop-filter: blur(14px);
-		backdrop-filter: blur(14px);
-		box-sizing: border-box;
-		width: 100%;
-		overflow: hidden;
-		border: 0;
-		transition: border-color 180ms ease;
-	}
-
-	.header-pill:focus-within {
-		border-color: rgba(255, 255, 255, 0.35);
-	}
-
-	.header-normal {
-		width: 100%;
-		height: 100%;
-		padding: 0 20px 0 23px;
-		display: flex;
-		justify-content: space-between;
-		align-items: center;
-		box-sizing: border-box;
-		gap: 8px;
-		transition:
-			opacity 200ms ease,
-			transform 200ms ease;
-	}
-
-	.header-normal.header-hidden {
-		opacity: 0;
-		pointer-events: none;
-		transform: scale(0.96);
-	}
-
-	.header-card-title {
-		display: flex;
-		align-items: center;
-		gap: 10px;
-		min-width: 0;
-		font-size: 16px;
-		font-weight: 400;
-		letter-spacing: 0;
-	}
-
-	.title-text {
-		line-height: 1.3;
-		white-space: nowrap;
-		overflow: hidden;
-		text-overflow: ellipsis;
-	}
-
-	.header-card-actions {
-		display: flex;
-		align-items: center;
-		gap: 8px;
-		flex-shrink: 0;
-	}
-
-	/* Header Search Bar */
-	.header-search {
-		position: absolute;
-		left: 0;
-		top: 0;
-		width: 100%;
-		height: 100%;
-		padding: 0 8px 0 20px;
-		display: flex;
-		align-items: center;
-		gap: 12px;
-		box-sizing: border-box;
-		opacity: 0;
-		pointer-events: none;
-		transform: scale(0.96);
-		transition:
-			opacity 220ms ease,
-			transform 220ms cubic-bezier(0.22, 1, 0.36, 1);
-	}
-
-	.header-search.search-open {
-		opacity: 1;
-		pointer-events: auto;
-		transform: scale(1);
-	}
-
-	.header-search.search-closing {
-		opacity: 0;
-		pointer-events: none;
-		transform: scale(0.96);
-	}
-
-	.search-header-icon {
-		width: 28px;
-		height: 28px;
-		object-fit: contain;
-		filter: brightness(0) invert(1);
-		opacity: 0.6;
-		flex-shrink: 0;
-	}
-
-	.search-header-input {
-		flex: 1;
-		height: 100%;
-		background: transparent !important;
-		border: none !important;
-		outline: none !important;
-		box-shadow: none !important;
-		border-radius: 0 !important;
-		color: #ffffff;
-		font-size: 14px;
-		font-family: inherit;
-		padding: 0 !important;
-		-webkit-appearance: none;
-		appearance: none;
-	}
-
-	.search-header-input::placeholder {
-		color: rgba(255, 255, 255, 0.4);
-	}
-
-	.close-search-btn {
-		width: 36px;
-		height: 36px;
-		border-radius: 50%;
-		background: #ffffff;
-		border: none !important;
-		cursor: pointer;
-		display: flex;
-		align-items: center;
-		justify-content: center;
-		padding: 0;
-		flex-shrink: 0;
-		transition: transform 160ms var(--ease-spring);
-		box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
-	}
-
-	.close-search-btn:hover {
-		transform: scale(1.06);
-	}
-
-	.close-search-btn:active {
-		transform: scale(0.94);
-	}
-
-	.close-icon {
-		width: 14px;
-		height: 14px;
-		object-fit: contain;
-		filter: brightness(0);
-	}
-
 	.ping-spinner {
 		width: 14px;
 		height: 14px;

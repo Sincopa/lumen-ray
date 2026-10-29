@@ -96,6 +96,32 @@ body,
 	min-width: 0;
 	background: transparent;
 }
+/* Android is full screen: no window corners, and the UI keeps a phone width on
+   tablets while the background fills the screen. */
+:root[data-platform='android'] {
+	--radius-window: 0px;
+	--radius-window-bottom: 0px;
+	-webkit-tap-highlight-color: transparent;
+}
+:root[data-platform='android'] body {
+	background: #08080b;
+	overscroll-behavior: none;
+}
+:root[data-platform='android'] .app-ui {
+	max-width: min(100vw, 560px);
+}
+/* Android WebView repaints every backdrop blur on each frame of the shader,
+   the face animation and scrolling, which drops the UI to a few frames per
+   second on phones. Glass there is a slightly denser tint instead. */
+:root[data-platform='android'] {
+	--design-glass: rgba(0, 0, 0, 0.32);
+}
+:root[data-platform='android'] *,
+:root[data-platform='android'] *::before,
+:root[data-platform='android'] *::after {
+	-webkit-backdrop-filter: none !important;
+	backdrop-filter: none !important;
+}
 /* The opaque native window clips its own corners on macOS. */
 :root[data-platform='macos'] {
 	--radius-window: 0px;

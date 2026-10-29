@@ -24,7 +24,8 @@ pub struct XraySession {
     pub proxy_port: u16,
     pub metrics_port: u16,
     pub started: Option<Instant>,
-    #[cfg(any(windows, target_os = "macos"))]
+    /// Server the running core carries; a failed switch restores the snapshot only for it.
+    #[cfg(any(windows, target_os = "macos", target_os = "android"))]
     pub prepared_server_id: Option<String>,
     #[cfg(any(windows, target_os = "macos"))]
     pub prepared_config_hash: Option<[u8; 32]>,
@@ -84,6 +85,10 @@ fn api_available(session: &XraySession) -> bool {
             .child
             .as_ref()
             .is_some_and(|child| matches!(child.try_wait(), Ok(None)))
+}
+/// Android always tunnels through VpnService; there is no system proxy mode.
+fn tun_mode(repo: &Repository) -> bool {
+    cfg!(target_os = "android") || repo.settings.network_mode == "tun"
 }
 /// TUN on macOS needs a privileged helper that does not exist yet.
 fn supported(repo: &Repository) -> Result<()> {
@@ -150,45 +155,50 @@ pub async fn validate(core: &std::path::Path, config: &[u8]) -> Result<()> {
             .lines()
             .find(|line| line.contains("Failed to start"))
             .unwrap_or(&output);
-        if failure.contains("failed to open geoip.dat")
-            || failure.contains("failed to open geosite.dat")
-            || failure.contains("failed to check code")
-            || failure.contains("illegal ip rule: geoip:")
-            || failure.contains("illegal domain rule: geosite:")
-        {
-            return Err(BackendError::new(
-                "GEO_DATA_MISSING",
-                "GeoIP/GeoSite database files are missing or corrupted. Please update databases in Settings.",
-            ));
-        }
-        let category = [
-            "fingerprint",
-            "password",
-            "shortId",
-            "serverName",
-            "flow",
-            "ALPN",
-            "alpn",
-            "encryption",
-            "security",
-            "Vision",
-            "REALITY",
-            "routing",
-            "Host",
-            "headers",
-            "removed",
-            "WebSocket",
-            "XHTTP",
-        ]
-        .into_iter()
-        .find(|s| failure.contains(s))
-        .unwrap_or("configuration");
-        return Err(BackendError::new(
-            "INVALID_CONFIG",
-            format!("Xray rejected {category} parameters"),
-        ));
+        return Err(rejection(failure));
     }
     Ok(())
+}
+/// Maps an Xray load failure to a code the UI explains, without echoing
+/// server parameters from the message.
+fn rejection(failure: &str) -> BackendError {
+    if failure.contains("failed to open geoip.dat")
+        || failure.contains("failed to open geosite.dat")
+        || failure.contains("failed to check code")
+        || failure.contains("illegal ip rule: geoip:")
+        || failure.contains("illegal domain rule: geosite:")
+    {
+        return BackendError::new(
+            "GEO_DATA_MISSING",
+            "GeoIP/GeoSite database files are missing or corrupted. Please update databases in Settings.",
+        );
+    }
+    let category = [
+        "fingerprint",
+        "password",
+        "shortId",
+        "serverName",
+        "flow",
+        "ALPN",
+        "alpn",
+        "encryption",
+        "security",
+        "Vision",
+        "REALITY",
+        "routing",
+        "Host",
+        "headers",
+        "removed",
+        "WebSocket",
+        "XHTTP",
+    ]
+    .into_iter()
+    .find(|s| failure.contains(s))
+    .unwrap_or("configuration");
+    BackendError::new(
+        "INVALID_CONFIG",
+        format!("Xray rejected {category} parameters"),
+    )
 }
 pub(crate) fn ports() -> Result<(u16, u16)> {
     let error = || BackendError::new("CORE_START_FAILED", "No local ports available");
@@ -425,6 +435,12 @@ async fn update_running_core(
         apply_live_rules(state, selected, None, repo, session)
             .await
             .map(|status| status == crate::engine::LiveRoutingStatus::Applied)
+    } else if session.started.is_some() {
+        // A routing patch steers only new connections. Open ones (browser
+        // keep-alive, QUIC, voice) would stay on the old server until they
+        // close, so a server change on a carrying core restarts it. A standby
+        // core carries nothing and still switches through its API.
+        return false;
     } else {
         switch_server_live(state, repo, selected, config_hash, session).await
     };
@@ -499,7 +515,7 @@ fn live_switch_plan(
     let base = config(base_repo, base_server)?;
     let before = config(previous_repo, previous_server)?;
     let after = config(repo, next_server)?;
-    if ["inbounds", "dns", "observatory"]
+    if ["inbounds", "dns", "observatory", "burstObservatory"]
         .into_iter()
         .any(|key| base[key] != after[key])
         || ["domainStrategy", "balancers"]
@@ -723,7 +739,7 @@ mod live_switch_tests {
     }
 
     #[tokio::test]
-    async fn system_proxy_core_takes_rules_modes_and_servers_without_restart() {
+    async fn system_proxy_core_takes_rules_live_and_restarts_for_servers() {
         use crate::storage::repository::{Rule, RuleMatcher};
         let directory = tempfile::tempdir().unwrap();
         let runtime = crate::runtime::RuntimePaths::new(
@@ -772,12 +788,15 @@ mod live_switch_tests {
                     .await?,
                 crate::engine::LiveRoutingStatus::Applied
             );
+            // A server change restarts the core so open connections move too.
             XrayBackend
                 .connect(&state, &rules, &second.id, &mut session)
                 .await?;
             let s = &mut session;
             assert_eq!(s.prepared_server_id.as_deref(), Some(second.id.as_str()));
-            assert!(s.pending_live_switch.take().is_some());
+            assert!(s.pending_live_switch.is_none());
+            assert_ne!(s.started, started);
+            let started = s.started;
             let mut toggled = rules.clone();
             toggled.rules[0].enabled = false;
             assert_eq!(
@@ -791,7 +810,7 @@ mod live_switch_tests {
                 apply_live_rules(&state, &second.id, None, &global, s).await?,
                 crate::engine::LiveRoutingStatus::Applied
             );
-            // The process that served the first connection is still the same one.
+            // Rule and mode changes keep the process serving the second server.
             assert_eq!(s.started, started);
             Ok::<_, BackendError>(())
         }
@@ -1196,11 +1215,59 @@ pub(crate) async fn start(
     ))
 }
 
+/// Hands the configuration to LumenVpnService, which runs Xray on the
+/// VpnService descriptor, then waits for the probe inbound like `start`.
+#[cfg(target_os = "android")]
+async fn start_android(
+    core: &std::path::Path,
+    repo: &Repository,
+    selected: &str,
+    session: &mut XraySession,
+    proxy_port: u16,
+    metrics_port: u16,
+) -> Result<()> {
+    let core_at = Instant::now();
+    let config = crate::xray::config::build(repo, selected, proxy_port, metrics_port, true)?;
+    let bytes = serde_json::to_vec(&config)
+        .map_err(|_| BackendError::new("INVALID_CONFIG", "Could not serialize Xray config"))?;
+    let assets = crate::xray::geo::assets_for_core(core);
+    crate::platform::android::start(repo, selected, &bytes, &assets.to_string_lossy()).await?;
+    log::info!(
+        "engine=xray VPN timing: Android tunnel up {} ms",
+        core_at.elapsed().as_millis()
+    );
+    session.proxy_port = proxy_port;
+    session.metrics_port = metrics_port;
+    session.started = Some(Instant::now());
+    session.prepared_server_id = Some(selected.into());
+    for _ in 0..200 {
+        if tokio::net::TcpStream::connect((std::net::Ipv4Addr::LOCALHOST, proxy_port))
+            .await
+            .is_ok()
+        {
+            return Ok(());
+        }
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    }
+    Err(BackendError::new(
+        "CORE_START_FAILED",
+        "Xray did not become ready",
+    ))
+}
+
 pub async fn stop(session: &mut XraySession) -> Result<()> {
     let mut failures = Vec::new();
     // A process we failed to stop still owns the tunnel. Dropping the
     // bookkeeping would make the monitor treat that live tunnel as idle.
     let mut retained = false;
+    // Only a tunnel this session started: Always-on or the tile may run one the
+    // UI has not adopted yet.
+    #[cfg(target_os = "android")]
+    if session.started.is_some() || crate::platform::android::active() {
+        if let Err(error) = crate::platform::android::stop().await {
+            failures.push(error);
+        }
+    }
     #[cfg(windows)]
     if let Some(mut helper) = session.helper.take() {
         if !helper.exited() {
@@ -1226,9 +1293,12 @@ pub async fn stop(session: &mut XraySession) -> Result<()> {
         }
     }
     if !retained {
-        #[cfg(any(windows, target_os = "macos"))]
+        #[cfg(any(windows, target_os = "macos", target_os = "android"))]
         {
             session.prepared_server_id = None;
+        }
+        #[cfg(any(windows, target_os = "macos"))]
+        {
             session.prepared_config_hash = None;
             session.prepared_core_version = None;
             session.prepared_geo_hash = None;
@@ -1279,13 +1349,7 @@ pub struct XrayBackend;
 impl CoreBackend for XrayBackend {
     fn validate(&self, repo: &Repository, selected: &str) -> Result<()> {
         supported(repo)?;
-        crate::xray::config::build(
-            repo,
-            selected,
-            10808,
-            10809,
-            repo.settings.network_mode == "tun",
-        )?;
+        crate::xray::config::build(repo, selected, 10808, 10809, tun_mode(repo))?;
         Ok(())
     }
     fn validate_runtime<'a>(
@@ -1296,18 +1360,17 @@ impl CoreBackend for XrayBackend {
     ) -> BackendFuture<'a, ()> {
         Box::pin(async move {
             supported(repo)?;
-            let config = crate::xray::config::build(
-                repo,
-                selected,
-                10808,
-                10809,
-                repo.settings.network_mode == "tun",
-            )?;
-            validate(
-                &state.core.read().await,
-                &serde_json::to_vec(&config).map_err(|_| BackendError::invalid())?,
-            )
-            .await
+            let config = crate::xray::config::build(repo, selected, 10808, 10809, tun_mode(repo))?;
+            let bytes = serde_json::to_vec(&config).map_err(|_| BackendError::invalid())?;
+            #[cfg(target_os = "android")]
+            {
+                let assets = crate::xray::geo::assets_for_core(&state.core.read().await);
+                crate::platform::android::validate(&bytes, &assets.to_string_lossy())
+                    .await
+                    .map_err(|output| rejection(&output))
+            }
+            #[cfg(not(target_os = "android"))]
+            validate(&state.core.read().await, &bytes).await
         })
     }
     fn connect<'a>(
@@ -1320,7 +1383,7 @@ impl CoreBackend for XrayBackend {
         Box::pin(async move {
             let s = session;
             supported(repo)?;
-            let tun = repo.settings.network_mode == "tun";
+            let tun = tun_mode(repo);
             #[cfg(any(windows, target_os = "macos"))]
             let hash = configuration_fingerprint(repo, selected, tun)?;
             let core = state.core.read().await.clone();
@@ -1433,7 +1496,9 @@ impl CoreBackend for XrayBackend {
                     }
                 }
             }
-            #[cfg(not(windows))]
+            // Android replaces the running core and keeps the VPN interface up,
+            // so a server switch never lets traffic out around the tunnel.
+            #[cfg(not(any(windows, target_os = "android")))]
             if !reuse {
                 stop(s).await?;
             }
@@ -1450,7 +1515,9 @@ impl CoreBackend for XrayBackend {
                     hash,
                 )
                 .await;
-                #[cfg(not(windows))]
+                #[cfg(target_os = "android")]
+                return start_android(&core, repo, selected, s, proxy_port, metrics_port).await;
+                #[cfg(not(any(windows, target_os = "android")))]
                 return Err(BackendError::new("TUN_FAILED", "Tunnel was not ready"));
             }
             start(&core, s, &bytes, proxy_port, metrics_port).await?;
@@ -1484,7 +1551,7 @@ impl CoreBackend for XrayBackend {
             if s.started.is_some() {
                 return Ok(());
             }
-            if repo.settings.network_mode != "tun" || selected.is_none() {
+            if !tun_mode(repo) || selected.is_none() {
                 return stop(s).await;
             }
             supported(repo)?;
@@ -1647,6 +1714,10 @@ pub async fn reassert_routes(session: &mut XraySession) -> Result<()> {
 }
 
 pub fn failed(session: &mut XraySession) -> bool {
+    #[cfg(target_os = "android")]
+    if session.started.is_some() {
+        return crate::platform::android::failed();
+    }
     #[cfg(windows)]
     if session.helper.as_ref().is_some_and(|h| h.exited()) {
         return true;

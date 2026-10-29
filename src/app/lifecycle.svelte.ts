@@ -4,6 +4,7 @@ import { getCurrentWindow } from '@tauri-apps/api/window';
 import { invoke } from '@tauri-apps/api/core';
 import { LogicalSize } from '@tauri-apps/api/dpi';
 import { listen } from '@tauri-apps/api/event';
+import { onBackButtonPress } from '@tauri-apps/api/app';
 import { catalog, connection } from '../lib/services';
 import { shaderSettings } from '../lib/stores/shaderSettings.svelte';
 import { runtime } from '../lib/runtime';
@@ -16,6 +17,7 @@ import {
 	refreshAllSubscriptions,
 } from '../lib/services/maintenance';
 import { i18n } from '../lib/i18n';
+import { isAndroid } from '../lib/platform';
 import { shell } from './shell.svelte';
 
 function watchStore<T>(store: Readable<T>) {
@@ -39,13 +41,42 @@ async function applyScale(scale: number) {
 
 	document.documentElement.style.setProperty('--ui-zoom', String(scale));
 
-	if (runtime.isTauri) {
+	// The Android activity is the screen; only the content zooms.
+	if (runtime.isTauri && !isAndroid) {
 		try {
 			await getCurrentWindow().setSize(new LogicalSize(w, h));
 		} catch (e) {
 			console.error('[scale] Failed to resize Tauri window:', e);
 		}
 	}
+}
+
+/**
+ * Android back: close what is open, step back to Home, then leave Lumen in the
+ * background with the VPN still running. Screens that close on Escape mark the
+ * synthetic Escape as handled; nested pages listen for `lumen-back`.
+ */
+function handleBack() {
+	const overlay =
+		shell.brightnessOpen ||
+		shell.importing ||
+		shell.ruleChrome !== 'default' ||
+		!!document.querySelector('[aria-modal="true"]');
+	const escape = new KeyboardEvent('keydown', {
+		key: 'Escape',
+		bubbles: true,
+		cancelable: true,
+	});
+	window.dispatchEvent(escape);
+	if (overlay || escape.defaultPrevented) return;
+	const back = new CustomEvent('lumen-back', { cancelable: true });
+	window.dispatchEvent(back);
+	if (back.defaultPrevented) return;
+	if (shell.currentTab !== 'home') {
+		shell.goToTab('home');
+		return;
+	}
+	void invoke('send_to_background').catch(() => {});
 }
 
 function notify(kind: 'disconnect' | 'reconnect' | 'expiry' | 'update') {
@@ -97,6 +128,20 @@ export function installLifecycle() {
 		window.addEventListener('keydown', handleKeyDown);
 
 		let unlistenNavigate: (() => void) | undefined;
+		let unlistenBack: (() => void) | undefined;
+		// The tile, the notification or Always-on may change the tunnel while
+		// Lumen is in the background, where the WebView does not run.
+		const handleVisible = () => {
+			if (!document.hidden) void connection.refresh();
+		};
+		if (runtime.isTauri && isAndroid) {
+			void onBackButtonPress(handleBack)
+				.then((listener) => {
+					unlistenBack = () => void listener.unregister();
+				})
+				.catch(() => {});
+			document.addEventListener('visibilitychange', handleVisible);
+		}
 		if (runtime.isTauri) {
 			listen('navigate:settings', () => {
 				shell.goToTab('settings');
@@ -108,7 +153,9 @@ export function installLifecycle() {
 		return () => {
 			window.removeEventListener('contextmenu', handleContextMenu);
 			window.removeEventListener('keydown', handleKeyDown);
+			document.removeEventListener('visibilitychange', handleVisible);
 			unlistenNavigate?.();
+			unlistenBack?.();
 		};
 	});
 

@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- The blue of the icon artwork. -->
+    <color name="lumen_launcher_background">#FF00A4FD</color>
+</resources>

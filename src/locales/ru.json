@@ -180,7 +180,15 @@
 		"uiScaleDesc": "Увеличьте масштаб для мониторов высокого разрешения",
 		"geoDatabases": "Базы GeoIP / GeoSite",
 		"updateDatabases": "Обновить базы",
-		"geoDataCorrupted": "Базы GeoIP/GeoSite отсутствуют или повреждены"
+		"geoDataCorrupted": "Базы GeoIP/GeoSite отсутствуют или повреждены",
+		"androidSection": "Android",
+		"alwaysOn": "Постоянный VPN и блокировка без VPN",
+		"alwaysOnHint": "Откроются настройки Android. Для Lumen включите «Постоянная VPN» и «Блокировать соединения без VPN»: так трафик не уйдёт мимо туннеля.",
+		"battery": "Работа в фоне",
+		"batteryOk": "Без ограничений",
+		"batteryLimited": "Ограничена",
+		"batteryHint": "Если работа в фоне ограничена, Android может остановить VPN при экономии заряда.",
+		"appsHint": "Выбранные приложения работают в обход VPN. Остальные правила для приложений на Android не применяются."
 	},
 	"demo": {
 		"notice": "Демо-режим · трафик не защищён",
@@ -234,7 +242,10 @@
 		"platformUnsupported": "Режим TUN пока недоступен на этой платформе. Выберите «Системный прокси» в разделе «Режим работы». (PLATFORM_UNSUPPORTED)",
 		"autostartUnavailable": "Переместите Lumen в папку «Программы», чтобы он открывался при входе в систему. (AUTOSTART_UNAVAILABLE)",
 		"GEO_DATA_MISSING": "Базы GeoIP/GeoSite не найдены или повреждены.",
-		"INVALID_GEO_TAG": "Недопустимый тег. Используйте латинские буквы, цифры, _, -, !, @"
+		"INVALID_GEO_TAG": "Недопустимый тег. Используйте латинские буквы, цифры, _, -, !, @",
+		"vpnPermissionDenied": "Разрешите Lumen создать VPN-подключение в системном запросе Android. (VPN_PERMISSION_DENIED)",
+		"vpnRevoked": "Android отключил VPN: запущен другой VPN или разрешение отозвано в настройках. Подключитесь снова. (VPN_REVOKED)",
+		"noConnectionPlan": "Откройте Lumen и подключитесь один раз, чтобы плитка и автозапуск знали сервер. (NO_CONNECTION_PLAN)"
 	},
 	"presets": {
 		"requiresProxy": "Требуется активная подписка или сервер для VPN-правил",
@@ -293,7 +304,8 @@
 		"geoCategory": "{type} категория",
 		"examplesLabel": "Например:",
 		"selectedCount": "Выбрано",
-		"clear": "Очистить"
+		"clear": "Очистить",
+		"androidAppHint": "Выбранные приложения будут работать без VPN, через обычную сеть. Направить отдельное приложение через другой сервер Android не позволяет."
 	},
 	"macos": {
 		"settings": {
@@ -316,6 +328,22 @@
 			"alreadyRunning": "Lumen уже запущен. Откройте его через значок в строке меню. (ALREADY_RUNNING)",
 			"processFailed": "Не удалось получить список программ macOS. (PROCESS_FAILED)",
 			"notificationFailed": "macOS не показала уведомление. Разрешите уведомления для Lumen в Системных настройках. (NOTIFICATION_FAILED)"
+		}
+	},
+	"android": {
+		"settings": {
+			"autoConnect": "Включать VPN автоматически"
+		},
+		"errors": {
+			"invalidRule": "Введите домен без пути или выберите приложение, затем укажите сервер.",
+			"coreStartFailed": "Не удалось запустить Xray внутри VPN-службы Android. Повторите подключение; если ошибка повторяется, обновите подписку. (CORE_START_FAILED)",
+			"tunFailed": "Android не создал VPN-интерфейс. Отключите другой VPN-клиент и повторите попытку. (TUN_FAILED)",
+			"tunNetworkUnreachable": "Сервер отвечает, но трафик не идёт через Lumen. Отключите другие VPN и «Частный DNS» в настройках Android, затем переподключитесь. (TUN_NETWORK_UNREACHABLE)",
+			"permissionDenied": "Разрешите Lumen создать VPN-подключение в системном запросе Android. (PERMISSION_DENIED)",
+			"processFailed": "Не удалось получить список приложений. Повторите попытку. (PROCESS_FAILED)"
+		},
+		"rules": {
+			"typeApplicationDesc": "Выбранные приложения будут работать без VPN: банки, госуслуги и другие, которые не пускают с VPN."
 		}
 	}
 }

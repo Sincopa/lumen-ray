@@ -70,6 +70,8 @@ pub struct BalancerOptions {
     pub strategy: serde_json::Value,
     #[serde(default)]
     pub observatory: Option<serde_json::Value>,
+    #[serde(default)]
+    pub burst_observatory: Option<serde_json::Value>,
     pub outbounds: Vec<serde_json::Value>,
 }
 #[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]

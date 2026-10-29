@@ -77,10 +77,8 @@ pub fn client(proxy_port: Option<u16>) -> Result<reqwest::Client> {
         .connect_timeout(Duration::from_secs(3))
         .timeout(Duration::from_secs(5));
     if let Some(port) = proxy_port {
-        builder = builder.proxy(
-            reqwest::Proxy::all(format!("socks5h://127.0.0.1:{port}"))
-                .map_err(|_| BackendError::invalid())?,
-        );
+        builder =
+            builder.proxy(crate::xray::probe::proxy(port).map_err(|_| BackendError::invalid())?);
     }
     builder.build().map_err(|_| {
         BackendError::new("NETWORK_ERROR", "Could not initialize network verification")

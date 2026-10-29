@@ -40,6 +40,11 @@ const FILES: &[&str] = &["xray", "LICENSE", "xray.txt", "geoip.dat", "geosite.da
 pub fn prepare(runtime: impl Into<RuntimePaths>, data: &Path) -> Result<PathBuf> {
     let runtime = runtime.into();
     crate::xray::geo::ensure_initialized(&runtime, data)?;
+    // Android runs Xray inside the VPN service. The path only names the version
+    // directory that `geo::assets_for_core` resolves the active databases from.
+    #[cfg(target_os = "android")]
+    return Ok(data.join("core").join(VERSION).join(XRAY_BINARY));
+    #[cfg(not(target_os = "android"))]
     prepare_files(&runtime, data, false)
 }
 
@@ -50,6 +55,7 @@ pub fn prepare_for_tunnel(runtime: impl Into<RuntimePaths>, data: &Path) -> Resu
     prepare_files(&runtime.into(), data, true)
 }
 
+#[cfg_attr(target_os = "android", allow(dead_code))]
 fn prepare_files(runtime: &RuntimePaths, data: &Path, tunnel: bool) -> Result<PathBuf> {
     // Trust anchor is compiled into the application, never a mutable runtime manifest.
     let manifest: Manifest = serde_json::from_str(MANIFEST).map_err(|_| error())?;

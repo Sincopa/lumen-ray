@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { getCurrentWindow } from '@tauri-apps/api/window';
 	import { runtime } from '../../lib/runtime';
-	import { isMac } from '../../lib/platform';
+	import { isDesktopWindow, isMac } from '../../lib/platform';
 	import { t } from '../../lib/i18n';
 	import minimizeIcon from '../../assets/minimize.svg';
 	import maximizeIcon from '../../assets/maximize.svg';
@@ -68,8 +68,8 @@
 			</button>
 		{/if}
 
-		<!-- macOS uses the native traffic lights instead. -->
-		{#if showControls && !isMac}
+		<!-- macOS uses the native traffic lights instead; Android has no window. -->
+		{#if showControls && !isMac && isDesktopWindow}
 			<div class="controls-pill">
 				<button
 					class="control-btn"

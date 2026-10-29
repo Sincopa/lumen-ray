@@ -44,6 +44,9 @@ export const ERROR_CODES = [
 	'notificationFailed',
 	'platformUnsupported',
 	'autostartUnavailable',
+	'vpnPermissionDenied',
+	'vpnRevoked',
+	'noConnectionPlan',
 	'unknown',
 ] as const;
 
@@ -105,6 +108,10 @@ const NATIVE_CODES: Record<string, ErrorCode> = {
 	NOTIFICATION_FAILED: 'notificationFailed',
 	PLATFORM_UNSUPPORTED: 'platformUnsupported',
 	AUTOSTART_UNAVAILABLE: 'autostartUnavailable',
+	VPN_PERMISSION_DENIED: 'vpnPermissionDenied',
+	VPN_REVOKED: 'vpnRevoked',
+	NO_CONNECTION_PLAN: 'noConnectionPlan',
+	APPS_UNAVAILABLE: 'processFailed',
 };
 
 export function errorCode(error: unknown): ErrorCode {

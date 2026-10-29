@@ -1,3 +1,5 @@
+#[cfg(target_os = "android")]
+pub mod android;
 #[cfg(target_os = "macos")]
 #[path = "macos/autostart.rs"]
 pub mod autostart;

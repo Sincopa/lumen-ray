@@ -5,6 +5,20 @@ import { errorCode, withTimeout, type ErrorCode } from './errors';
 
 const pending = ['connecting', 'disconnecting', 'reconnecting'];
 
+/** The tunnel is up or on its way up, so a server pick switches it. */
+export function isActive(status: VpnConnectionState) {
+	return (
+		status === 'connected' ||
+		status === 'connecting' ||
+		status === 'reconnecting'
+	);
+}
+
+/** A server switch may supersede a pending connection, not a disconnect. */
+export function canSwitch(status: VpnConnectionState) {
+	return status !== 'disconnecting' && status !== 'initializing';
+}
+
 /** A superseded request (for example, cancelled by Disconnect) is not a failure. */
 function cancelled(cause: unknown) {
 	return (
@@ -116,6 +130,19 @@ export class ConnectionController {
 		}
 	}
 
+	/** Re-reads the native state, e.g. when Android brings Lumen back to the front. */
+	async refresh() {
+		if (this.current.busy) return;
+		const revision = this.eventRevision;
+		try {
+			const { status, info, error } = await this.readConnection();
+			if (revision === this.eventRevision && !this.current.busy)
+				this.update({ status, info, error: error ? errorCode(error) : null });
+		} catch {
+			/* The next state event corrects the screen. */
+		}
+	}
+
 	async toggle(serverId: string | null) {
 		if (this.current.busy) {
 			return;
@@ -152,7 +179,9 @@ export class ConnectionController {
 	}
 
 	async switchServer(serverId: string) {
-		if (this.current.busy) {
+		// A pending connection (a mode change reconnecting, an earlier pick) is
+		// superseded by the backend; only a disconnect in progress wins.
+		if (!canSwitch(this.current.status)) {
 			return;
 		}
 		if (!serverId) {
@@ -160,9 +189,7 @@ export class ConnectionController {
 			return;
 		}
 
-		const wasActive =
-			this.current.status === 'connected' ||
-			this.current.status === 'connecting';
+		const wasActive = isActive(this.current.status);
 
 		this.update({
 			busy: true,

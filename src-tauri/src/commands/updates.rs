@@ -4,12 +4,15 @@ use crate::{
     xray::updater,
 };
 use std::sync::Arc;
+#[cfg(not(target_os = "android"))]
 use tauri_plugin_updater::UpdaterExt;
 
+#[cfg(not(target_os = "android"))]
 const DEFAULT_UPDATE_ENDPOINT: &str =
     "https://github.com/Sincopa/lumen-ray/releases/latest/download/latest.json";
 // Public verification keys are safe to ship with the application. The private signing key
 // remains stored only in GitHub Actions secrets.
+#[cfg(not(target_os = "android"))]
 const DEFAULT_UPDATE_PUBLIC_KEY: &str = "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDI4NzdGRUNENEU4QzJBMDgKUldRSUtveE96ZjUzS1BpTnFIR1ozMlNYSDNPcXNlZzFwSXJmeWVjbGh3OEhXcm8xRmMxRlJobEEK";
 
 #[derive(serde::Serialize)]
@@ -18,6 +21,7 @@ pub struct ApplicationUpdate {
     pub current_version: String,
     pub version: Option<String>,
 }
+#[cfg(not(target_os = "android"))]
 fn application_updater(app: &tauri::AppHandle) -> Result<tauri_plugin_updater::Updater> {
     let endpoint = option_env!("LUMEN_UPDATE_ENDPOINT").unwrap_or(DEFAULT_UPDATE_ENDPOINT);
     let key = option_env!("LUMEN_UPDATE_PUBLIC_KEY")
@@ -38,6 +42,7 @@ fn application_updater(app: &tauri::AppHandle) -> Result<tauri_plugin_updater::U
         .build()
         .map_err(|_| BackendError::new("UPDATE_FAILED", "Could not initialize signed updater"))
 }
+#[cfg(not(target_os = "android"))]
 #[tauri::command]
 pub async fn check_application_update(app: tauri::AppHandle) -> Result<ApplicationUpdate> {
     let current_version = app.package_info().version.to_string();
@@ -51,6 +56,7 @@ pub async fn check_application_update(app: tauri::AppHandle) -> Result<Applicati
         version: update.map(|u| u.version),
     })
 }
+#[cfg(not(target_os = "android"))]
 #[tauri::command]
 pub async fn install_application_update(
     state: tauri::State<'_, Arc<AppState>>,
@@ -79,6 +85,66 @@ pub async fn install_application_update(
     }
     Ok(())
 }
+/// Android APKs come from GitHub Releases; Android itself checks that an update
+/// carries the same signature before installing it.
+#[cfg(target_os = "android")]
+const RELEASES_API: &str = "https://api.github.com/repos/Sincopa/lumen-ray/releases/latest";
+#[cfg(target_os = "android")]
+const RELEASES_PAGE: &str = "https://github.com/Sincopa/lumen-ray/releases/latest";
+
+#[cfg(target_os = "android")]
+async fn latest_release_version() -> Result<String> {
+    #[derive(serde::Deserialize)]
+    struct Release {
+        tag_name: String,
+    }
+    let failed = || BackendError::new("UPDATE_FAILED", "Could not check application updates");
+    let release: Release = reqwest::Client::builder()
+        .user_agent(concat!("Lumen/", env!("CARGO_PKG_VERSION")))
+        .timeout(std::time::Duration::from_secs(15))
+        .build()
+        .map_err(|_| failed())?
+        .get(RELEASES_API)
+        .send()
+        .await
+        .map_err(|_| failed())?
+        .error_for_status()
+        .map_err(|_| failed())?
+        .json()
+        .await
+        .map_err(|_| failed())?;
+    Ok(release.tag_name.trim_start_matches('v').to_string())
+}
+
+#[cfg(target_os = "android")]
+fn newer(candidate: &str, current: &str) -> bool {
+    let parse = |value: &str| -> Vec<u64> {
+        value
+            .split(['.', '-'])
+            .map_while(|part| part.parse().ok())
+            .collect()
+    };
+    parse(candidate) > parse(current)
+}
+
+#[cfg(target_os = "android")]
+#[tauri::command]
+pub async fn check_application_update(app: tauri::AppHandle) -> Result<ApplicationUpdate> {
+    let current_version = app.package_info().version.to_string();
+    let latest = latest_release_version().await?;
+    Ok(ApplicationUpdate {
+        version: newer(&latest, &current_version).then_some(latest),
+        current_version,
+    })
+}
+
+/// Opens the release page; the APK is installed by Android's package installer.
+#[cfg(target_os = "android")]
+#[tauri::command]
+pub async fn install_application_update() -> Result<()> {
+    crate::platform::android::open_url(RELEASES_PAGE).await
+}
+
 pub fn version(path: &std::path::Path) -> String {
     path.parent()
         .and_then(|p| p.file_name())
@@ -90,6 +156,10 @@ pub fn version(path: &std::path::Path) -> String {
 pub async fn check_core_update(
     state: tauri::State<'_, Arc<AppState>>,
 ) -> Result<Option<updater::CoreUpdate>> {
+    // The Android core is compiled into the APK and updates with it.
+    if cfg!(target_os = "android") {
+        return Ok(None);
+    }
     let current = version(&state.core.read().await);
     updater::check(&current).await
 }
@@ -98,6 +168,12 @@ pub async fn install_core_update(
     state: tauri::State<'_, Arc<AppState>>,
     app: tauri::AppHandle,
 ) -> Result<String> {
+    if cfg!(target_os = "android") {
+        return Err(BackendError::new(
+            "PLATFORM_UNSUPPORTED",
+            "Xray updates with the Android application",
+        ));
+    }
     let _guard = state.updates.lock().await;
     let previous = state.core.read().await.clone();
     let update = updater::check(&version(&previous))

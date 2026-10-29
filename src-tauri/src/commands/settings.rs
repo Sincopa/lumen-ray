@@ -34,6 +34,10 @@ pub async fn set_settings(
     mut settings: Settings,
 ) -> Result<SettingsDto> {
     let _transaction = state.updates.lock().await;
+    // Android always tunnels; a stale "proxy" from the UI must not change the core.
+    if cfg!(target_os = "android") {
+        settings.network_mode = "tun".into();
+    }
     validate_settings(&settings)?;
     #[cfg(any(windows, target_os = "macos"))]
     {
