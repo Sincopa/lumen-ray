@@ -8,6 +8,10 @@ on:
         description: Verify locally signed APKs already attached to the draft release
         type: boolean
         default: false
+      release_tag:
+        description: Release tag to check when recovering an existing draft
+        type: string
+        default: ''
 
 permissions:
   contents: write
@@ -50,6 +54,8 @@ jobs:
 
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
+        with:
+          packages: platform-tools
 
       - name: Install SDK packages
         run: sdkmanager --install "platforms;android-36" "build-tools;36.1.0" "ndk;${NDK_VERSION}"
@@ -125,6 +131,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.release_tag || github.ref }}
 
       - name: Download signed APKs
         env:
@@ -147,9 +155,8 @@ jobs:
 
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
-
-      - name: Install verification tools
-        run: sdkmanager --install 'build-tools;36.1.0'
+        with:
+          packages: 'build-tools;36.1.0'
 
       - name: Verify signatures and 16 KB alignment
         run: |

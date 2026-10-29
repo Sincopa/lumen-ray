@@ -100,8 +100,16 @@ jobs:
           cmp "$unpacked/Lumen.app/Contents/MacOS/$executable" "$mount/Lumen.app/Contents/MacOS/$executable"
           cmp "$unpacked/Lumen.app/Contents/Resources/runtime/xray/xray" "$mount/Lumen.app/Contents/Resources/runtime/xray/xray"
 
+  verify-android:
+    permissions:
+      contents: write
+    uses: ./.github/workflows/android.yml
+    with:
+      prebuilt: true
+      release_tag: ${{ inputs.tag }}
+
   publish:
-    needs: verify-macos
+    needs: [verify-macos, verify-android]
     runs-on: ubuntu-24.04
     permissions:
       contents: write
