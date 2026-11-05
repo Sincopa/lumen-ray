@@ -55,6 +55,18 @@ pub fn run_helper_if_requested() -> bool {
             .is_some_and(platform::process::signal);
         std::process::exit(if success { 0 } else { 1 });
     }
+    #[cfg(windows)]
+    match args.get(1).map(String::as_str) {
+        Some("--lumen-service") => {
+            platform::service::run();
+            return true;
+        }
+        Some("--lumen-install-service") => std::process::exit(platform::service::install()),
+        Some("--lumen-uninstall-service") => std::process::exit(platform::service::uninstall()),
+        // The service copy in Program Files is not a Lumen installation.
+        _ if platform::service::is_service_binary() => return true,
+        _ => {}
+    }
     if args.get(1).map(String::as_str) != Some("--lumen-tunnel") {
         return false;
     }
@@ -156,11 +168,7 @@ pub fn run() {
             for arg in args {
                 commands::deep_link::queue_import_link(app, &arg);
             }
-            if let Some(window) = app.get_webview_window("main") {
-                let _ = window.show();
-                let _ = window.unminimize();
-                let _ = window.set_focus();
-            }
+            app::window::reveal(app);
         }))
         .plugin(tauri_plugin_updater::Builder::new().build());
     // VPN service, embedded Xray, Keystore and installed apps (android/plugin).
@@ -291,11 +299,14 @@ pub fn run() {
                     .try_read()
                     .map(|r| r.settings.start_minimized)
                     .unwrap_or(false);
-            if start_minimized && !cfg!(target_os = "android") {
+            #[cfg(not(target_os = "android"))]
+            if start_minimized {
                 if let Some(window) = tauri::Manager::get_webview_window(app.handle(), "main") {
-                    let _ = window.hide();
+                    app::window::conceal(&window);
                 }
             }
+            #[cfg(target_os = "android")]
+            let _ = start_minimized;
 
             app.manage(state);
             use tauri_plugin_deep_link::DeepLinkExt;
@@ -313,6 +324,10 @@ pub fn run() {
             Ok(())
         })
         .on_window_event(|window, event| {
+            #[cfg(not(target_os = "android"))]
+            if let tauri::WindowEvent::Resized(_) = event {
+                app::window::follow_state(window);
+            }
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
                 let state = window
                     .app_handle()
@@ -324,6 +339,11 @@ pub fn run() {
                     .unwrap_or(true);
                 if close_to_tray {
                     api.prevent_close();
+                    #[cfg(not(target_os = "android"))]
+                    if let Some(window) = window.app_handle().get_webview_window(window.label()) {
+                        app::window::conceal(&window);
+                    }
+                    #[cfg(target_os = "android")]
                     let _ = window.hide();
                 }
             }
@@ -348,11 +368,7 @@ pub fn run() {
         // The Dock icon brings back a window hidden to the menu bar.
         #[cfg(target_os = "macos")]
         if let tauri::RunEvent::Reopen { .. } = event {
-            if let Some(window) = app.get_webview_window("main") {
-                let _ = window.show();
-                let _ = window.unminimize();
-                let _ = window.set_focus();
-            }
+            app::window::reveal(app);
             return;
         }
         // Cmd+Q, logout and shutdown terminate through applicationWillTerminate,

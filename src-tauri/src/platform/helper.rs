@@ -1,20 +1,26 @@
 //! Single-session elevated worker. Neither paths nor executable arguments are accepted over IPC.
+//!
+//! The session runs either in the Lumen Tunnel service (`super::service`, no
+//! prompt) or, when the service is unavailable, in a one-off helper process
+//! started through UAC.
 use crate::{
     domain::errors::{BackendError, Result},
     storage::repository::Repository,
 };
 use std::{
     os::windows::io::AsRawHandle,
+    pin::Pin,
+    task::{Context, Poll},
     time::{Duration, Instant},
 };
 use tokio::{
-    io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt},
+    io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, ReadBuf},
     net::windows::named_pipe::{ClientOptions, NamedPipeClient, NamedPipeServer, ServerOptions},
 };
 use windows_sys::Win32::{
     Foundation::{CloseHandle, HANDLE},
     System::{
-        Pipes::{GetNamedPipeClientProcessId, GetNamedPipeServerProcessId},
+        Pipes::{GetNamedPipeClientProcessId, GetNamedPipeServerProcessId, PeekNamedPipe},
         Threading::{
             GetProcessId, OpenProcess, QueryFullProcessImageNameW, WaitForSingleObject,
             PROCESS_QUERY_LIMITED_INFORMATION,
@@ -39,9 +45,70 @@ struct StartRequest {
     standby: bool,
 }
 pub struct Helper {
-    pipe: NamedPipeServer,
-    process: ProcessHandle,
+    pipe: Link,
     standby: bool,
+}
+/// The authenticated pipe to the elevated side of a session.
+enum Link {
+    /// A helper process started through UAC; Lumen owns the pipe.
+    Process(NamedPipeServer, ProcessHandle),
+    /// The Lumen Tunnel service; the service owns the pipe.
+    Service(NamedPipeClient),
+}
+impl Link {
+    fn exited(&self) -> bool {
+        match self {
+            Link::Process(_, process) => unsafe { WaitForSingleObject(process.0, 0) == 0 },
+            // A session the service ended (or lost with the service) breaks the pipe.
+            Link::Service(pipe) => unsafe {
+                let mut available = 0;
+                PeekNamedPipe(
+                    pipe.as_raw_handle() as _,
+                    std::ptr::null_mut(),
+                    0,
+                    std::ptr::null_mut(),
+                    &mut available,
+                    std::ptr::null_mut(),
+                ) == 0
+            },
+        }
+    }
+}
+impl AsyncRead for Link {
+    fn poll_read(
+        self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        buf: &mut ReadBuf<'_>,
+    ) -> Poll<std::io::Result<()>> {
+        match self.get_mut() {
+            Link::Process(pipe, _) => Pin::new(pipe).poll_read(cx, buf),
+            Link::Service(pipe) => Pin::new(pipe).poll_read(cx, buf),
+        }
+    }
+}
+impl AsyncWrite for Link {
+    fn poll_write(
+        self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        buf: &[u8],
+    ) -> Poll<std::io::Result<usize>> {
+        match self.get_mut() {
+            Link::Process(pipe, _) => Pin::new(pipe).poll_write(cx, buf),
+            Link::Service(pipe) => Pin::new(pipe).poll_write(cx, buf),
+        }
+    }
+    fn poll_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<std::io::Result<()>> {
+        match self.get_mut() {
+            Link::Process(pipe, _) => Pin::new(pipe).poll_flush(cx),
+            Link::Service(pipe) => Pin::new(pipe).poll_flush(cx),
+        }
+    }
+    fn poll_shutdown(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<std::io::Result<()>> {
+        match self.get_mut() {
+            Link::Process(pipe, _) => Pin::new(pipe).poll_shutdown(cx),
+            Link::Service(pipe) => Pin::new(pipe).poll_shutdown(cx),
+        }
+    }
 }
 struct ProcessHandle(HANDLE);
 unsafe impl Send for ProcessHandle {}
@@ -156,7 +223,7 @@ impl Helper {
         }
     }
     pub fn exited(&self) -> bool {
-        unsafe { WaitForSingleObject(self.process.0, 0) == 0 }
+        self.pipe.exited()
     }
 }
 fn error() -> BackendError {
@@ -237,35 +304,7 @@ async fn start_internal(
         geo,
         standby,
     };
-    let id = uuid::Uuid::new_v4().to_string();
-    let mut pipe = ServerOptions::new()
-        .first_pipe_instance(true)
-        .reject_remote_clients(true)
-        .create(format!(r"\\.\pipe\lumen-{id}"))
-        .map_err(|_| error())?;
-    let process = tokio::task::spawn_blocking(move || launch(id))
-        .await
-        .map_err(|_| error())??;
-    log::info!(
-        "VPN timing: TUN helper launched {} ms",
-        started_at.elapsed().as_millis()
-    );
-    tokio::time::timeout(Duration::from_secs(30), pipe.connect())
-        .await
-        .map_err(|_| error())?
-        .map_err(|_| error())?;
-    log::info!(
-        "VPN timing: TUN pipe connected {} ms",
-        started_at.elapsed().as_millis()
-    );
-    let mut pid = 0;
-    unsafe {
-        if GetNamedPipeClientProcessId(pipe.as_raw_handle() as _, &mut pid) == 0
-            || pid != GetProcessId(process.0)
-        {
-            return Err(error());
-        }
-    }
+    let mut pipe = connect(started_at).await?;
     write_frame(
         &mut pipe,
         &serde_json::to_vec(&request).map_err(|_| error())?,
@@ -349,11 +388,89 @@ async fn start_internal(
         "VPN timing: TUN helper acknowledged {} ms",
         started_at.elapsed().as_millis()
     );
-    Ok(Helper {
-        pipe,
-        process,
-        standby,
-    })
+    Ok(Helper { pipe, standby })
+}
+
+/// The tunnel service when it is installed and built from this binary; it needs
+/// no prompt. Installing or updating it asks for administrator permission once.
+/// Without the service, a helper process asks for this session only.
+async fn connect(started_at: Instant) -> Result<Link> {
+    use super::service::Opened;
+    let mut opened = super::service::open().await;
+    if matches!(opened, Opened::Install) {
+        match super::service::install_elevated().await {
+            Ok(()) => {
+                log::info!(
+                    "VPN timing: tunnel service installed {} ms",
+                    started_at.elapsed().as_millis()
+                );
+                opened = super::service::open().await;
+            }
+            // The user declined: do not ask a second time for a helper.
+            Err(failure) if failure.code == "PERMISSION_DENIED" => return Err(failure),
+            Err(failure) => {
+                log::warn!("Tunnel service installation failed: {}", failure.message);
+                opened = Opened::Unavailable;
+            }
+        }
+    }
+    match opened {
+        Opened::Ready(pipe) => {
+            log::info!(
+                "VPN timing: tunnel service connected {} ms",
+                started_at.elapsed().as_millis()
+            );
+            Ok(Link::Service(pipe))
+        }
+        Opened::Install | Opened::Unavailable => {
+            log::warn!("Tunnel service unavailable; starting a helper for this session");
+            launch_helper(started_at).await
+        }
+    }
+}
+
+async fn launch_helper(started_at: Instant) -> Result<Link> {
+    let id = uuid::Uuid::new_v4().to_string();
+    let pipe = ServerOptions::new()
+        .first_pipe_instance(true)
+        .reject_remote_clients(true)
+        .create(format!(r"\\.\pipe\lumen-{id}"))
+        .map_err(|_| error())?;
+    // The helper's own log arrives here. A tunnel without it still works.
+    let log_pipe = ServerOptions::new()
+        .first_pipe_instance(true)
+        .reject_remote_clients(true)
+        .access_outbound(false)
+        .create(super::helper_log::pipe_name(&id))
+        .ok();
+    let process = tokio::task::spawn_blocking(move || launch(id))
+        .await
+        .map_err(|_| error())??;
+    log::info!(
+        "VPN timing: TUN helper launched {} ms",
+        started_at.elapsed().as_millis()
+    );
+    tokio::time::timeout(Duration::from_secs(30), pipe.connect())
+        .await
+        .map_err(|_| error())?
+        .map_err(|_| error())?;
+    log::info!(
+        "VPN timing: TUN pipe connected {} ms",
+        started_at.elapsed().as_millis()
+    );
+    let mut pid = 0;
+    let helper_pid = unsafe { GetProcessId(process.0) };
+    unsafe {
+        if GetNamedPipeClientProcessId(pipe.as_raw_handle() as _, &mut pid) == 0
+            || pid != helper_pid
+        {
+            return Err(error());
+        }
+    }
+    if let Some(log_pipe) = log_pipe {
+        super::helper_log::forward(log_pipe, helper_pid);
+    }
+    Ok(Link::Process(pipe, process))
 }
 async fn write_asset<W: AsyncWrite + Unpin>(
     writer: &mut W,
@@ -417,13 +534,63 @@ fn verify_parent(pid: u32) -> Result<ProcessHandle> {
         Ok(handle)
     }
 }
+/// The client's installation folder while the service runs its session. The
+/// service binary lives apart from Lumen's runtime; every executable taken from
+/// there is checked against the compiled-in hashes before it is staged.
+static RUNTIME_BASE: std::sync::Mutex<Option<std::path::PathBuf>> = std::sync::Mutex::new(None);
+
+pub(super) fn set_runtime_base(base: Option<std::path::PathBuf>) {
+    if let Ok(mut slot) = RUNTIME_BASE.lock() {
+        *slot = base;
+    }
+}
+
 fn resolve_resources() -> Result<crate::runtime::RuntimePaths> {
-    crate::runtime::resolve()
+    let base = RUNTIME_BASE.lock().ok().and_then(|slot| slot.clone());
+    crate::runtime::resolve_from(base.as_deref())
+}
+
+/// Set once by the service: a stop request ends sessions like a closed pipe,
+/// routes first, then Xray.
+static SHUTDOWN: std::sync::OnceLock<tokio::sync::watch::Receiver<bool>> =
+    std::sync::OnceLock::new();
+
+pub(super) fn watch_shutdown(stop: tokio::sync::watch::Receiver<bool>) {
+    let _ = SHUTDOWN.set(stop);
+}
+
+async fn shutdown_requested() {
+    match SHUTDOWN.get() {
+        Some(stop) => {
+            let _ = stop.clone().wait_for(|stopping| *stopping).await;
+        }
+        None => std::future::pending().await,
+    }
 }
 pub async fn run(id: &str, parent: u32) -> Result<()> {
     let worker_started = Instant::now();
     uuid::Uuid::parse_str(id).map_err(|_| error())?;
     let _parent = verify_parent(parent)?;
+    super::helper_log::install(id, parent);
+    log::info!("Started");
+    let result = serve(id, parent, worker_started).await;
+    match &result {
+        Ok(()) => log::info!(
+            "Stopped after {} s",
+            worker_started.elapsed().as_secs()
+        ),
+        Err(failure) => log::warn!(
+            "Stopped after {} s: {} ({})",
+            worker_started.elapsed().as_secs(),
+            failure.code,
+            failure.message
+        ),
+    }
+    super::helper_log::finish();
+    result
+}
+
+async fn serve(id: &str, parent: u32, worker_started: Instant) -> Result<()> {
     let mut pipe = ClientOptions::new()
         .open(format!(r"\\.\pipe\lumen-{id}"))
         .map_err(|_| error())?;
@@ -433,11 +600,19 @@ pub async fn run(id: &str, parent: u32) -> Result<()> {
             return Err(error());
         }
     }
-    let bytes = tokio::time::timeout(Duration::from_secs(15), read_frame(&mut pipe))
+    serve_session(&mut pipe, worker_started).await
+}
+
+/// One tunnel session on an authenticated pipe, in the helper or the service.
+pub(super) async fn serve_session<P: AsyncRead + AsyncWrite + Unpin>(
+    pipe: &mut P,
+    worker_started: Instant,
+) -> Result<()> {
+    let bytes = tokio::time::timeout(Duration::from_secs(15), read_frame(pipe))
         .await
         .map_err(|_| error())??;
     let envelope: StartRequest = serde_json::from_slice(&bytes).map_err(|_| error())?;
-    let result = run_session(&mut pipe, envelope, worker_started).await;
+    let result = run_session(pipe, envelope, worker_started).await;
     if let Err(failure) = &result {
         let status = match failure.code {
             "TUN_ADAPTER_TIMEOUT" => 2,
@@ -448,7 +623,7 @@ pub async fn run(id: &str, parent: u32) -> Result<()> {
         };
         let _ = pipe.write_u8(status).await;
         if status == 3 || status == 4 || status == 5 {
-            let _ = write_frame(&mut pipe, failure.message.as_bytes()).await;
+            let _ = write_frame(pipe, failure.message.as_bytes()).await;
         }
     }
     result
@@ -458,6 +633,8 @@ enum SessionEvent {
     Command(std::io::Result<u8>),
     Exited,
     Sweep,
+    /// The tunnel service is stopping (Windows shutdown or an update).
+    Shutdown,
 }
 
 fn reload_status(result: &Result<()>) -> u8 {
@@ -468,6 +645,32 @@ fn reload_status(result: &Result<()>) -> u8 {
         Err(error) if error.code == "ROUTING_CONFLICT" => 4,
         Err(_) => 5,
     }
+}
+
+const WINTUN_FAILURE: &str = "Wintun adapter startup failed";
+
+/// Start Xray on a fresh LumenTun. Called only while this helper runs no core,
+/// so a LumenTun that is still registered belongs to a core that is gone: Xray
+/// would open that dead adapter by name and fail with a Wintun error.
+async fn spawn_core(
+    core: &std::path::Path,
+    bytes: &[u8],
+) -> Result<super::process::CoreProcess> {
+    let cleanup_at = Instant::now();
+    let removed = tokio::task::spawn_blocking(super::network::clear_stale_lumen_adapters)
+        .await
+        .unwrap_or(0);
+    if removed > 0 {
+        log::warn!(
+            "Removed {removed} stale LumenTun adapter(s) before starting Xray ({} ms)",
+            cleanup_at.elapsed().as_millis()
+        );
+    }
+    let spawned = super::process::CoreProcess::spawn(core, bytes).await;
+    if let Err(failure) = &spawned {
+        log::warn!("Xray could not be launched: {} ({})", failure.code, failure.message);
+    }
+    spawned
 }
 
 /// Remove default routes first. Xray is stopped only after the table confirms
@@ -543,7 +746,7 @@ async fn respawn_standby(
         return;
     }
     tokio::time::sleep(Duration::from_millis(500)).await;
-    match super::process::CoreProcess::spawn(core, bytes).await {
+    match spawn_core(core, bytes).await {
         Ok(spawned) => {
             *child = Some(spawned);
             let ready = match child.as_mut() {
@@ -593,8 +796,8 @@ fn restore_active_routes(
     }
 }
 
-async fn apply_reload(
-    pipe: &mut NamedPipeClient,
+async fn apply_reload<P: AsyncRead + AsyncWrite + Unpin>(
+    pipe: &mut P,
     child: &mut Option<super::process::CoreProcess>,
     routes: &mut super::network::TunnelRoutes,
     bytes: &mut Vec<u8>,
@@ -627,22 +830,36 @@ async fn apply_reload(
         envelope.tunnel.metrics_port,
     )?;
     let next = serde_json::to_vec(&config).map_err(|_| error())?;
-    let runtime = resolve_resources()?;
-    let bundled = if envelope.tunnel.core_version == crate::xray::bundle::VERSION {
-        crate::xray::bundle::prepare_for_tunnel(&runtime, data)?
-    } else {
-        crate::xray::bundle::prepare(&runtime, data)?;
-        crate::xray::updater::prepare(&envelope.tunnel.core_version, &data.join("core")).await?
-    };
-    crate::xray::geo::install_trusted_snapshot(data, envelope.geo, &geoip, &geosite)?;
+    let bundled = stage_core(
+        &envelope.tunnel.core_version,
+        data,
+        envelope.geo,
+        &geoip,
+        &geosite,
+    )
+    .await?;
     // Keep the previous config until the replacement is actually listening.
     // A failed wait used to leave the new process in place and overwrite the
     // bytes Sweep would use for the next restart.
-    *child = Some(super::process::CoreProcess::spawn(&bundled, &next).await?);
-    let ready = {
+    *child = Some(spawn_core(&bundled, &next).await?);
+    let mut ready = {
         let running = child.as_mut().ok_or_else(error)?;
         wait_for_standby(running, envelope.tunnel.proxy_port).await
     };
+    // Windows can still be tearing down the previous core's adapter when the
+    // new one opens it. Clear it again and retry once on the same elevation.
+    if matches!(&ready, Err(failure) if failure.message == WINTUN_FAILURE) {
+        log::warn!("Xray could not open LumenTun after reload; retrying after adapter cleanup");
+        if let Some(running) = child.as_mut() {
+            let _ = running.kill().await;
+        }
+        *child = None;
+        *child = Some(spawn_core(&bundled, &next).await?);
+        ready = {
+            let running = child.as_mut().ok_or_else(error)?;
+            wait_for_standby(running, envelope.tunnel.proxy_port).await
+        };
+    }
     if let Err(failure) = ready {
         if let Some(running) = child.as_mut() {
             let _ = running.kill().await;
@@ -677,8 +894,28 @@ async fn apply_reload(
     Ok(())
 }
 
-async fn run_session(
-    mut pipe: &mut NamedPipeClient,
+/// Stage what the session runs: the bundled Xray and Wintun (checked against the
+/// compiled-in hashes), the trusted geo snapshot, then an updated core if one is
+/// selected (checked against its release digest, validated with that snapshot).
+/// Nothing from the client's runtime folder runs before its hash matched.
+async fn stage_core(
+    version: &str,
+    data: &std::path::Path,
+    geo: crate::xray::geo::GeoDatabaseMetadata,
+    geoip: &[u8],
+    geosite: &[u8],
+) -> Result<std::path::PathBuf> {
+    let runtime = resolve_resources()?;
+    let bundled = crate::xray::bundle::prepare_for_tunnel(&runtime, data)?;
+    crate::xray::geo::install_trusted_snapshot(data, geo, geoip, geosite)?;
+    if version == crate::xray::bundle::VERSION {
+        return Ok(bundled);
+    }
+    crate::xray::updater::prepare(version, &data.join("core")).await
+}
+
+async fn run_session<P: AsyncRead + AsyncWrite + Unpin>(
+    mut pipe: &mut P,
     envelope: StartRequest,
     worker_started: Instant,
 ) -> Result<()> {
@@ -711,24 +948,21 @@ async fn run_session(
     };
     let mut bytes = serde_json::to_vec(&config).map_err(|_| error())?;
     let config_ready = worker_started.elapsed().as_millis() as u32;
-    let runtime = resolve_resources()?;
     let staging = super::staging::Directory::create()?;
     let data = tempfile::tempdir_in(staging.path()).map_err(|_| error())?;
-    // The authenticated pipe supplies the Geo snapshot; avoid initializing bundled Geo here.
-    let bundled_core = if request.core_version == crate::xray::bundle::VERSION {
-        crate::xray::bundle::prepare_for_tunnel(&runtime, data.path())?
-    } else {
-        // Updated cores are still validated against a complete bundled fallback.
-        crate::xray::bundle::prepare(&runtime, data.path())?
-    };
-    let mut core = if request.core_version == crate::xray::bundle::VERSION {
-        bundled_core
-    } else {
-        crate::xray::updater::prepare(&request.core_version, &data.path().join("core")).await?
-    };
+    // The authenticated pipe supplies the Geo snapshot; bundled Geo is not initialized here.
+    let mut core = stage_core(
+        &request.core_version,
+        data.path(),
+        envelope.geo,
+        &geoip,
+        &geosite,
+    )
+    .await?;
+    // ~17 MB that would otherwise stay in the service for the whole session.
+    drop((geoip, geosite));
     let core_ready = worker_started.elapsed().as_millis() as u32;
-    crate::xray::geo::install_trusted_snapshot(data.path(), envelope.geo, &geoip, &geosite)?;
-    let geo_ready = worker_started.elapsed().as_millis() as u32;
+    let geo_ready = core_ready;
     for _ in 0..10 {
         if super::network::release_lumen_routes().is_ok() {
             break;
@@ -738,19 +972,32 @@ async fn run_session(
     if !super::network::routes_released() {
         log::warn!("Leftover LumenTun routes were still installed at helper start");
     }
-    let mut child = super::process::CoreProcess::spawn(&core, &bytes).await?;
+    let mut child = spawn_core(&core, &bytes).await?;
     let xray_spawned = worker_started.elapsed().as_millis() as u32;
     // A closed pipe, including a parent crash, removes routes before Xray exits.
     let mut ready = false;
     let mut routes = None;
     let mut proxy_port = request.proxy_port;
-    for _ in 0..if standby { 800 } else { 400 } {
+    let attempts = if standby { 800 } else { 400 };
+    let mut remaining = attempts;
+    let mut adapter_retried = false;
+    while remaining > 0 {
+        remaining -= 1;
         if child.try_wait().map_err(|_| error())?.is_some() {
             let message = child
                 .diagnostic_category()
                 .unwrap_or("Xray exited before the tunnel was ready");
             tokio::time::sleep(Duration::from_millis(20)).await;
             release_then_stop(&mut child).await;
+            // Windows can still be tearing down a dead LumenTun when Xray opens
+            // it. Clear it again and retry once without a new elevation.
+            if message == WINTUN_FAILURE && !adapter_retried {
+                log::warn!("Xray could not open LumenTun; retrying after adapter cleanup");
+                adapter_retried = true;
+                remaining = attempts;
+                child = spawn_core(&core, &bytes).await?;
+                continue;
+            }
             return Err(BackendError::new("CORE_START_FAILED", message));
         }
         let network_ready = if standby {
@@ -785,6 +1032,17 @@ async fn run_session(
         tokio::time::sleep(Duration::from_millis(25)).await;
     }
     if !ready {
+        // Which half was missing tells a Wintun problem from a core that never
+        // opened its local port.
+        let port_open = tokio::net::TcpStream::connect((std::net::Ipv4Addr::LOCALHOST, proxy_port))
+            .await
+            .is_ok();
+        log::warn!(
+            "LumenTun was not ready after {} ms (adapter up: {}, core port open: {})",
+            worker_started.elapsed().as_millis(),
+            super::network::tunnel_adapter_ready(),
+            port_open
+        );
         if !standby && super::network::tunnel_ready() {
             if let Err(failure) = super::network::verify_tunnel_routes() {
                 release_then_stop(&mut child).await;
@@ -828,11 +1086,13 @@ async fn run_session(
                 tokio::select! {
                     command = pipe.read_u8() => SessionEvent::Command(command),
                     _ = running.wait() => SessionEvent::Exited,
+                    _ = shutdown_requested() => SessionEvent::Shutdown,
                 }
             } else {
                 tokio::select! {
                     command = pipe.read_u8() => SessionEvent::Command(command),
                     _ = tokio::time::sleep(Duration::from_millis(200)) => SessionEvent::Sweep,
+                    _ = shutdown_requested() => SessionEvent::Shutdown,
                 }
             };
             match event {
@@ -857,6 +1117,14 @@ async fn run_session(
                         tokio::time::sleep(Duration::from_millis(25)).await;
                         result = routes.activate();
                     }
+                    match &result {
+                        Ok(()) => log::info!("Routes activated"),
+                        Err(failure) => log::warn!(
+                            "Route activation failed: {} ({})",
+                            failure.code,
+                            failure.message
+                        ),
+                    }
                     let (code, detail) = match result {
                         Ok(()) => (1, None),
                         Err(failure) if failure.code == "ROUTING_CONFLICT" => {
@@ -873,12 +1141,19 @@ async fn run_session(
                 SessionEvent::Command(Ok(2)) => {
                     restore_routes = false;
                     let ok = routes.deactivate().is_ok() && super::network::routes_released();
+                    if ok {
+                        log::info!("Routes released");
+                    } else {
+                        log::warn!("Routes could not be released");
+                    }
                     pipe.write_u8(if ok { 1 } else { 0 })
                         .await
                         .map_err(|_| error())?;
                 }
                 SessionEvent::Command(Ok(3)) => {
                     restore_routes = false;
+                    let reload_at = Instant::now();
+                    log::info!("Reloading the tunnel core");
                     let result = apply_reload(
                         pipe,
                         &mut child,
@@ -896,20 +1171,38 @@ async fn run_session(
                             failure.code,
                             failure.message
                         );
+                    } else {
+                        log::info!(
+                            "Tunnel core reloaded in {} ms",
+                            reload_at.elapsed().as_millis()
+                        );
                     }
                     pipe.write_u8(code).await.map_err(|_| error())?;
                 }
                 SessionEvent::Command(Ok(0)) => {
+                    log::info!("Stop requested");
                     if retire(routes, &mut child).await {
                         pipe.write_u8(1).await.map_err(|_| error())?;
                         break;
                     }
                     pipe.write_u8(0).await.map_err(|_| error())?;
                 }
-                SessionEvent::Command(Ok(_)) => {
+                SessionEvent::Command(Ok(command)) => {
+                    log::warn!("Unknown command {command}");
                     pipe.write_u8(0).await.map_err(|_| error())?;
                 }
+                SessionEvent::Shutdown => {
+                    log::info!("Tunnel service is stopping; releasing routes");
+                    for _ in 0..25 {
+                        if retire(routes, &mut child).await {
+                            break;
+                        }
+                        tokio::time::sleep(Duration::from_millis(200)).await;
+                    }
+                    break;
+                }
                 SessionEvent::Command(Err(_)) => {
+                    log::info!("Lumen closed the helper pipe; releasing routes");
                     while !retire(routes, &mut child).await {
                         tokio::time::sleep(Duration::from_millis(200)).await;
                     }
@@ -921,6 +1214,7 @@ async fn run_session(
         tokio::select! {
             _ = pipe.read_u8() => {}
             _ = child.wait() => {}
+            _ = shutdown_requested() => {}
         }
         release_then_stop(&mut child).await;
         let _ = pipe.write_u8(1).await;

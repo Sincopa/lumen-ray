@@ -102,10 +102,70 @@ pub fn assets_for_core(core: &Path) -> PathBuf {
     if let Some(data) = parent.parent().and_then(Path::parent) {
         if metadata_path(data).is_file() {
             // Invalid metadata must fail closed, never silently load older bundled files.
-            return active_dir(data).unwrap_or_else(|_| geo_dir(data).join("invalid"));
+            return active_dir(data)
+                .map(|generation| core_assets(&generation))
+                .unwrap_or_else(|_| geo_dir(data).join("invalid"));
         }
     }
     parent.to_path_buf()
+}
+
+/// Folder inside a generation with the copy Xray loads; see `geo_compact`.
+const COMPACT: &str = "compact";
+
+/// The generation's compacted copy when it has one, otherwise the verified pair.
+fn core_assets(generation: &Path) -> PathBuf {
+    let compact = generation.join(COMPACT);
+    if compact.join("geoip.dat").is_file() && compact.join("geosite.dat").is_file() {
+        compact
+    } else {
+        generation.to_path_buf()
+    }
+}
+
+/// Add a compacted copy of a verified pair to its generation folder in one
+/// rename. Any failure leaves Xray on the original files.
+fn write_compact(generation: &Path, ip: &[u8], site: &[u8]) {
+    if generation.join(COMPACT).exists() {
+        return;
+    }
+    let started = std::time::Instant::now();
+    let Some(compacted) = super::geo_compact::compact(site) else {
+        return;
+    };
+    let Ok(staging) = tempfile::tempdir_in(generation) else {
+        return;
+    };
+    if crate::xray::updater::atomic_write(&staging.path().join("geoip.dat"), ip).is_err()
+        || crate::xray::updater::atomic_write(&staging.path().join("geosite.dat"), &compacted)
+            .is_err()
+    {
+        return;
+    }
+    let staging = staging.keep();
+    if std::fs::rename(&staging, generation.join(COMPACT)).is_err() {
+        let _ = std::fs::remove_dir_all(&staging);
+        return;
+    }
+    log::info!(
+        "Geo database compacted for Xray: geosite {} -> {} KB in {} ms",
+        site.len() / 1024,
+        compacted.len() / 1024,
+        started.elapsed().as_millis()
+    );
+}
+
+/// Generations committed before compaction existed get their copy here.
+fn ensure_compact(data: &Path) {
+    let Ok(generation) = active_dir(data) else {
+        return;
+    };
+    if generation.join(COMPACT).exists() {
+        return;
+    }
+    if let Ok((_, ip, site)) = snapshot(data) {
+        write_compact(&generation, &ip, &site);
+    }
 }
 fn verify_pair(dir: &Path, meta: &GeoDatabaseMetadata) -> Result<(Vec<u8>, Vec<u8>)> {
     let ip = std::fs::read(dir.join("geoip.dat")).map_err(|_| error())?;
@@ -169,6 +229,12 @@ fn lock(data: &Path) -> Result<std::fs::File> {
     Ok(file)
 }
 fn commit(data: &Path, staging: tempfile::TempDir, mut meta: GeoDatabaseMetadata) -> Result<()> {
+    if let (Ok(ip), Ok(site)) = (
+        std::fs::read(staging.path().join("geoip.dat")),
+        std::fs::read(staging.path().join("geosite.dat")),
+    ) {
+        write_compact(staging.path(), &ip, &site);
+    }
     let id = uuid::Uuid::new_v4().to_string();
     let destination = geo_dir(data).join(&id);
     std::fs::rename(staging.path(), &destination).map_err(|_| error())?;
@@ -232,6 +298,7 @@ pub fn ensure_initialized(
     let runtime = runtime.into();
     let _lock = lock(data)?;
     if info(data).valid {
+        ensure_compact(data);
         return Ok(());
     }
     let core = runtime.xray_binary();
@@ -497,6 +564,25 @@ mod tests {
         crate::runtime::RuntimePaths::new(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("runtime"))
     }
     #[test]
+    fn cores_load_the_compacted_copy_and_xray_accepts_it() {
+        let data = tempfile::tempdir().unwrap();
+        let rt = runtime();
+        ensure_initialized(&rt, data.path()).unwrap();
+        let generation = active_dir(data.path()).unwrap();
+        let compact = generation.join(COMPACT);
+        assert!(compact.join("geosite.dat").is_file());
+        let core = data.path().join("core").join("1.0.0").join("xray.exe");
+        assert_eq!(assets_for_core(&core), compact);
+        // The verified pair itself is unchanged.
+        assert!(snapshot(data.path()).is_ok());
+        validate_geo_files_sync(&rt.xray_binary(), &compact).unwrap();
+        // A generation from an older build gets its copy on the next start.
+        std::fs::remove_dir_all(&compact).unwrap();
+        assert_eq!(assets_for_core(&core), generation);
+        ensure_initialized(&rt, data.path()).unwrap();
+        assert_eq!(assets_for_core(&core), compact);
+    }
+    #[test]
     fn interrupted_invalid_and_concurrent_updates_preserve_last_good_pair() {
         let data = tempfile::tempdir().unwrap();
         let rt = runtime();
@@ -541,10 +627,12 @@ mod tests {
         let data = tempfile::tempdir().unwrap();
         let rt = runtime();
         let core = crate::xray::bundle::prepare(&rt, data.path()).unwrap();
-        assert_eq!(assets_for_core(&core), active_dir(data.path()).unwrap());
+        // Cores load the compacted copy inside the active generation.
+        let active = || active_dir(data.path()).unwrap().join(COMPACT);
+        assert_eq!(assets_for_core(&core), active());
         let (meta, ip, site) = snapshot(data.path()).unwrap();
         install_snapshot(data.path(), &core, meta, &ip, &site).unwrap();
-        assert_eq!(assets_for_core(&core), active_dir(data.path()).unwrap());
+        assert_eq!(assets_for_core(&core), active());
         std::fs::write(
             active_dir(data.path()).unwrap().join("geosite.dat"),
             vec![1; 2000],

@@ -4,6 +4,7 @@ pub mod bundle;
 pub mod config;
 pub mod dns_policy;
 pub mod geo;
+mod geo_compact;
 pub mod logs;
 pub mod probe;
 pub mod updater;

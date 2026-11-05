@@ -7,6 +7,8 @@ pub mod device_identity;
 #[cfg(windows)]
 pub mod helper;
 #[cfg(windows)]
+pub mod helper_log;
+#[cfg(windows)]
 pub mod icons;
 #[cfg(windows)]
 pub mod network;
@@ -31,6 +33,8 @@ pub mod proxy;
 #[cfg(target_os = "macos")]
 #[path = "macos/proxy.rs"]
 pub mod proxy;
+#[cfg(windows)]
+pub mod service;
 #[cfg(all(windows, debug_assertions))]
 pub mod smoke;
 #[cfg(windows)]

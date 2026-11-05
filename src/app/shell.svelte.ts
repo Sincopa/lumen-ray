@@ -53,13 +53,23 @@ class Shell {
 		connection.toggle(get(catalog.state).selectedServerId);
 	};
 
+	/**
+	 * A pick returns to the home screen at once. A connection on its way up is
+	 * superseded by the new server instead of making the user wait for it.
+	 */
 	chooseServer = async (server: { id: string }) => {
 		const snapshot = get(connection.state);
-		if (!canSwitch(snapshot.status)) return;
-		const wasActive = isActive(snapshot.status);
+		if (snapshot.status === 'initializing') return;
+		const wasActive = isActive(snapshot.status) && canSwitch(snapshot.status);
+		// Where the tunnel is, or is heading: picking it again changes nothing.
+		const current =
+			snapshot.status === 'connected'
+				? snapshot.info?.serverId
+				: (snapshot.target ?? undefined);
+		this.goToTab('home');
 		try {
 			if (wasActive) {
-				if (snapshot.info?.serverId !== server.id) {
+				if (current !== server.id) {
 					await connection.switchServer(server.id);
 				}
 				const after = get(connection.state);
@@ -74,7 +84,6 @@ class Shell {
 			} else {
 				await catalog.selectServer(server.id);
 			}
-			this.goToTab('home');
 		} catch (e) {
 			this.actionError = t('errors.' + errorCode(e));
 		}

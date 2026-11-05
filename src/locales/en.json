@@ -32,6 +32,7 @@
 		"disconnected": "Disconnected",
 		"clickToConnect": "Click to connect",
 		"clickToDisconnect": "Click to disconnect",
+		"clickToCancel": "Click to cancel connecting",
 		"hoursUnit": "h",
 		"minutesUnit": "m",
 		"secondsUnit": "s",

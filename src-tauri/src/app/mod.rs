@@ -7,3 +7,5 @@ pub mod tray;
 #[cfg(target_os = "android")]
 #[path = "tray_android.rs"]
 pub mod tray;
+#[cfg(not(target_os = "android"))]
+pub mod window;

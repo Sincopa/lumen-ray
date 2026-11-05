@@ -167,17 +167,10 @@ async fn handle_tray_menu_event(
 ) {
     match id {
         "show" => {
-            if let Some(window) = tauri::Manager::get_webview_window(app, "main") {
-                let _ = window.show();
-                let _ = window.unminimize();
-                let _ = window.set_focus();
-            }
+            super::window::reveal(app);
         }
         "settings" => {
-            if let Some(window) = tauri::Manager::get_webview_window(app, "main") {
-                let _ = window.show();
-                let _ = window.unminimize();
-                let _ = window.set_focus();
+            if let Some(window) = super::window::reveal(app) {
                 let _ = window.emit("navigate:settings", ());
             }
         }
@@ -266,11 +259,9 @@ pub fn install(app: &tauri::App, state: &Arc<AppState>) -> tauri::Result<()> {
                     let is_visible = window.is_visible().unwrap_or(false);
                     let is_minimized = window.is_minimized().unwrap_or(false);
                     if is_visible && !is_minimized {
-                        let _ = window.hide();
+                        super::window::conceal(&window);
                     } else {
-                        let _ = window.show();
-                        let _ = window.unminimize();
-                        let _ = window.set_focus();
+                        super::window::reveal(app);
                     }
                 }
             }

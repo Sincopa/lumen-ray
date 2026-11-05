@@ -30,6 +30,138 @@ fn tunnel_luid() -> Option<NET_LUID_LH> {
     }
 }
 
+/// Remove every Wintun device named LumenTun, whatever its state.
+///
+/// Called only by the elevated helper while it runs no Xray of its own. A
+/// LumenTun left behind by a killed or crashed core (Windows shows it "in a
+/// problem state") is opened by name by the next Xray instead of being
+/// recreated, and that Xray then exits with a Wintun error on every attempt.
+/// Adapters of other applications (any other Wintun name) are never touched.
+/// Returns how many devices were removed.
+pub fn clear_stale_lumen_adapters() -> usize {
+    use windows_sys::Win32::{
+        Devices::{
+            DeviceAndDriverInstallation::{
+                SetupDiCallClassInstaller, SetupDiDestroyDeviceInfoList, SetupDiEnumDeviceInfo,
+                SetupDiGetClassDevsW, SetupDiGetDevicePropertyW, SetupDiSetClassInstallParamsW,
+                DIF_REMOVE, DI_REMOVEDEVICE_GLOBAL, GUID_DEVCLASS_NET, SP_CLASSINSTALL_HEADER,
+                SP_DEVINFO_DATA, SP_REMOVEDEVICE_PARAMS,
+            },
+            Properties::{DEVPROPTYPE, DEVPROP_TYPE_STRING},
+        },
+        Foundation::DEVPROPKEY,
+    };
+    // DEVPKEY_Wintun_Name: wintun.dll stores the adapter name here on every
+    // device it creates under the SWD\Wintun enumerator.
+    const WINTUN_NAME: DEVPROPKEY = DEVPROPKEY {
+        fmtid: windows_sys::core::GUID::from_u128(0x3361c968_2f2e_4660_b47e_699cdc4c32b9),
+        pid: 3,
+    };
+    let enumerator: Vec<u16> = "SWD\\Wintun".encode_utf16().chain(Some(0)).collect();
+    let name = &LUMEN_TUN_ALIAS[..LUMEN_TUN_ALIAS.len() - 1];
+    let mut removed = 0;
+    unsafe {
+        // Flags 0: include devices that are no longer present (phantoms).
+        let set = SetupDiGetClassDevsW(
+            &GUID_DEVCLASS_NET,
+            enumerator.as_ptr(),
+            std::ptr::null_mut(),
+            0,
+        );
+        if set == -1 {
+            return 0;
+        }
+        let mut ours = Vec::new();
+        for index in 0.. {
+            let mut device = SP_DEVINFO_DATA {
+                cbSize: std::mem::size_of::<SP_DEVINFO_DATA>() as u32,
+                ..Default::default()
+            };
+            if SetupDiEnumDeviceInfo(set, index, &mut device) == 0 {
+                break;
+            }
+            let mut kind: DEVPROPTYPE = 0;
+            let mut value = [0u16; 128];
+            if SetupDiGetDevicePropertyW(
+                set,
+                &device,
+                &WINTUN_NAME,
+                &mut kind,
+                value.as_mut_ptr().cast(),
+                std::mem::size_of_val(&value) as u32,
+                std::ptr::null_mut(),
+                0,
+            ) == 0
+                || kind != DEVPROP_TYPE_STRING
+            {
+                continue;
+            }
+            let length = value.iter().position(|&c| c == 0).unwrap_or(value.len());
+            let matches = length == name.len()
+                && value[..length]
+                    .iter()
+                    .zip(name)
+                    .all(|(&a, &b)| char_eq_ignore_ascii_case(a, b));
+            if matches {
+                ours.push(device);
+            }
+        }
+        for device in ours {
+            let params = SP_REMOVEDEVICE_PARAMS {
+                ClassInstallHeader: SP_CLASSINSTALL_HEADER {
+                    cbSize: std::mem::size_of::<SP_CLASSINSTALL_HEADER>() as u32,
+                    InstallFunction: DIF_REMOVE,
+                },
+                Scope: DI_REMOVEDEVICE_GLOBAL,
+                HwProfile: 0,
+            };
+            if SetupDiSetClassInstallParamsW(
+                set,
+                &device,
+                &params.ClassInstallHeader,
+                std::mem::size_of::<SP_REMOVEDEVICE_PARAMS>() as u32,
+            ) != 0
+                && SetupDiCallClassInstaller(DIF_REMOVE, set, &device) != 0
+            {
+                removed += 1;
+            } else {
+                log::warn!(
+                    "Could not remove a stale LumenTun adapter (Windows error {})",
+                    std::io::Error::last_os_error().raw_os_error().unwrap_or(0)
+                );
+            }
+        }
+        SetupDiDestroyDeviceInfoList(set);
+    }
+    if removed > 0 {
+        // The interface disappears a moment after its device. Starting Xray
+        // before that would let it open the dying adapter again.
+        let mut gone = false;
+        for _ in 0..40 {
+            if tunnel_luid().is_none() {
+                gone = true;
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        }
+        if !gone {
+            log::warn!("LumenTun was still registered 2 s after its device was removed");
+        }
+    }
+    removed
+}
+
+fn char_eq_ignore_ascii_case(a: u16, b: u16) -> bool {
+    let lower = |c: u16| {
+        if (b'A' as u16..=b'Z' as u16).contains(&c) {
+            c + 32
+        } else {
+            c
+        }
+    };
+    lower(a) == lower(b)
+}
+
 /// DNS configured on the active physical adapter, before creating LumenTun.
 /// Do not silently replace the user's system resolver with a public provider.
 pub fn system_dns() -> crate::domain::errors::Result<Vec<String>> {

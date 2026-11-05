@@ -19,6 +19,11 @@ export function canSwitch(status: VpnConnectionState) {
 	return status !== 'disconnecting' && status !== 'initializing';
 }
 
+/** A connection on its way up can be cancelled from the main button. */
+export function canCancel(status: VpnConnectionState) {
+	return status === 'connecting' || status === 'reconnecting';
+}
+
 /** A superseded request (for example, cancelled by Disconnect) is not a failure. */
 function cancelled(cause: unknown) {
 	return (
@@ -34,16 +39,25 @@ export interface ConnectionSnapshot {
 	info: VpnConnectionInfo | null;
 	busy: boolean;
 	error: ErrorCode | null;
+	/** The server a pending connection is heading to, shown before it connects. */
+	target: string | null;
 }
 
 export class ConnectionController {
 	private unsubscribe?: () => void;
 	private eventRevision = 0;
+	/**
+	 * Every connect, switch and cancel takes a ticket. Only the latest request
+	 * settles the screen: an earlier one that the backend superseded finishes
+	 * later with CANCELLED and must not overwrite what the user chose since.
+	 */
+	private request = 0;
 	private current: ConnectionSnapshot = {
 		status: 'initializing',
 		info: null,
 		busy: true,
 		error: null,
+		target: null,
 	};
 
 	readonly state = writable(this.current);
@@ -57,6 +71,7 @@ export class ConnectionController {
 
 	private update(patch: Partial<ConnectionSnapshot>) {
 		this.current = { ...this.current, ...patch };
+		if (!pending.includes(this.current.status)) this.current.target = null;
 		if (patch.error) {
 			if (this.errorTimer) clearTimeout(this.errorTimer);
 			this.errorTimer = setTimeout(() => {
@@ -143,7 +158,26 @@ export class ConnectionController {
 		}
 	}
 
+	/** Runs one request; only the latest request settles the screen. */
+	private async settle(ticket: number, action: () => Promise<unknown>) {
+		try {
+			await withTimeout(action(), this.timeoutMs);
+			if (ticket !== this.request) return;
+			const { status, info } = await this.readConnection();
+			if (ticket === this.request) this.update({ status, info });
+		} catch (e) {
+			if (ticket === this.request) await this.reconcileAfterError(e);
+		} finally {
+			if (ticket === this.request)
+				this.update({ busy: pending.includes(this.current.status) });
+		}
+	}
+
 	async toggle(serverId: string | null) {
+		// The main button cancels a connection that is still on its way up.
+		if (canCancel(this.current.status)) {
+			return this.cancel();
+		}
 		if (this.current.busy) {
 			return;
 		}
@@ -154,28 +188,33 @@ export class ConnectionController {
 			return;
 		}
 
+		const ticket = ++this.request;
 		this.update({
 			busy: true,
 			error: null,
 			status: disconnecting ? 'disconnecting' : 'connecting',
+			target: disconnecting ? null : serverId,
 		});
+		await this.settle(ticket, () =>
+			disconnecting ? this.vpn.disconnect() : this.vpn.connect(serverId!),
+		);
+	}
 
-		try {
-			await withTimeout(
-				disconnecting ? this.vpn.disconnect() : this.vpn.connect(serverId!),
-				this.timeoutMs,
-			);
-
-			const { status, info } = await this.readConnection();
-
-			this.update({ status, info });
-		} catch (e) {
-			await this.reconcileAfterError(e);
-		} finally {
-			this.update({
-				busy: pending.includes(this.current.status),
-			});
-		}
+	/**
+	 * Stops a pending connection. The backend supersedes the attempt at its next
+	 * step and tears down what it started; the screen shows the stop at once.
+	 */
+	async cancel() {
+		if (!canCancel(this.current.status)) return;
+		const ticket = ++this.request;
+		this.update({
+			busy: true,
+			error: null,
+			status: 'disconnecting',
+			info: null,
+			target: null,
+		});
+		await this.settle(ticket, () => this.vpn.disconnect());
 	}
 
 	async switchServer(serverId: string) {
@@ -191,13 +230,14 @@ export class ConnectionController {
 
 		const wasActive = isActive(this.current.status);
 
+		const ticket = ++this.request;
 		this.update({
 			busy: true,
 			error: null,
 			status: 'connecting',
+			target: serverId,
 		});
-
-		try {
+		await this.settle(ticket, async () => {
 			if (wasActive && !this.vpn.getSnapshot) {
 				try {
 					await withTimeout(this.vpn.disconnect(), this.timeoutMs);
@@ -205,21 +245,7 @@ export class ConnectionController {
 					// A failed disconnect during a server switch is ignored.
 				}
 			}
-
-			await withTimeout(
-				this.vpn.connectExact?.(serverId) ?? this.vpn.connect(serverId),
-				this.timeoutMs,
-			);
-
-			const { status, info } = await this.readConnection();
-
-			this.update({ status, info });
-		} catch (e) {
-			await this.reconcileAfterError(e);
-		} finally {
-			this.update({
-				busy: pending.includes(this.current.status),
-			});
-		}
+			await (this.vpn.connectExact?.(serverId) ?? this.vpn.connect(serverId));
+		});
 	}
 }

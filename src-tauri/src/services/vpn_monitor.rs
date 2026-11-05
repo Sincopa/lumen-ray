@@ -1,10 +1,16 @@
 use super::vpn_service::{publish, release_to_standby, schedule_recovery, stop, Snapshot};
 
+/// How long checks must keep failing before the tunnel is released. VPN servers
+/// regularly stall for 10-40 seconds and Xray reconnects on its own once they
+/// answer; releasing sooner turned each stall into a visible disconnect, sent
+/// traffic outside the tunnel and spent the automatic recovery budget.
+const RELEASE_AFTER: Duration = Duration::from_secs(45);
+
 /// A network-address change is not an outage. The tunnel is released only after
-/// repeated failed checks, and that release keeps the elevated helper.
-pub(crate) fn should_release_tunnel(unhealthy: u8, physical_changed: bool) -> bool {
-    let _ = physical_changed;
-    unhealthy >= 3
+/// repeated failed checks over `RELEASE_AFTER`, and that release keeps the
+/// elevated helper.
+pub(crate) fn should_release_tunnel(unhealthy: u8, failing_for: Duration) -> bool {
+    unhealthy >= 3 && failing_for >= RELEASE_AFTER
 }
 use crate::app::state::AppState;
 use crate::domain::errors::BackendError;
@@ -45,11 +51,10 @@ pub fn monitor(state: Arc<AppState>, app: tauri::AppHandle) {
         let watcher = crate::platform::network_watch::NetworkWatch::new();
         #[cfg(any(windows, target_os = "macos"))]
         let mut revision = watcher.revision();
-        #[cfg(any(windows, target_os = "macos"))]
-        let mut physical = crate::platform::network_watch::physical_fingerprint();
-        let mut physical_changed = false;
         let mut network_dirty = false;
         let mut unhealthy = 0u8;
+        // When the current run of failed checks started.
+        let mut failing_since: Option<Instant> = None;
         // The VPN server stopped answering while the tunnel itself still works.
         let mut degraded = false;
         // `Instant::now() - 120s` panics on Windows during the first two minutes
@@ -88,8 +93,7 @@ pub fn monitor(state: Arc<AppState>, app: tauri::AppHandle) {
                     }
                     if let Some((proxy_port,active_generation,is_tun))=active{
                         if generation != active_generation {
-                            generation = active_generation; unhealthy = 0; degraded = false; network_dirty = false; physical_changed = false; last_health = Instant::now();
-                            #[cfg(any(windows, target_os = "macos"))] { physical = crate::platform::network_watch::physical_fingerprint(); }
+                            generation = active_generation; unhealthy = 0; failing_since = None; degraded = false; network_dirty = false; last_health = Instant::now();
                         }
                         // Recheck sooner after a failure; one failed probe right after a
                         // network event or resume is not an outage.
@@ -102,21 +106,16 @@ pub fn monitor(state: Arc<AppState>, app: tauri::AppHandle) {
                                     (repo.settings.clone(), repo.routing_mode == "rules")
                                 };
                                 #[cfg(any(windows, target_os = "macos"))]
-                                let offline = {
-                                    let now=crate::platform::network_watch::physical_fingerprint();
-                                    physical_changed |= physical.is_some() && now.is_some() && physical != now;
-                                    if now.is_some() { physical=now; }
-                                    now.is_none()
-                                };
+                                let offline = crate::platform::network_watch::physical_fingerprint().is_none();
                                 #[cfg(not(any(windows, target_os = "macos")))]
                                 let offline = false;
                                 #[allow(unused_mut)]
                                 let mut probe = super::health::probe(proxy_port, is_tun).await;
                                 // An Xray restart or another program can leave LumenTun without the
                                 // route Windows selects. Reinstall it in place instead of counting
-                                // down to a disconnect.
+                                // down to a disconnect; twice within the release window.
                                 #[cfg(windows)]
-                                if is_tun && probe.routes.is_err() && last_reassert.is_none_or(|at| at.elapsed() >= Duration::from_secs(60)) {
+                                if is_tun && probe.routes.is_err() && last_reassert.is_none_or(|at| at.elapsed() >= Duration::from_secs(30)) {
                                     last_reassert = Some(Instant::now());
                                     if reassert_routes(&state, active_generation).await {
                                         probe = super::health::probe(proxy_port, is_tun).await;
@@ -131,23 +130,31 @@ pub fn monitor(state: Arc<AppState>, app: tauri::AppHandle) {
                                 match verdict {
                                     super::health::Verdict::Healthy => {
                                         if degraded { log::info!("VPN server answers again"); }
+                                        if failing_since.is_some() { log::info!("Connection checks pass again; the tunnel stayed up"); }
                                         unhealthy = 0;
+                                        failing_since = None;
                                         degraded = false;
                                     }
                                     super::health::Verdict::Upstream => {
                                         if !degraded { log::warn!("VPN server is not answering; the tunnel and direct traffic stay up"); }
                                         unhealthy = 0;
+                                        failing_since = None;
                                         degraded = true;
                                     }
                                     super::health::Verdict::Routes | super::health::Verdict::Broken => {
+                                        if failing_since.is_none() {
+                                            log::warn!("Connection check failed; keeping the tunnel while the server recovers");
+                                        }
                                         unhealthy = unhealthy.saturating_add(1);
+                                        failing_since.get_or_insert_with(Instant::now);
                                     }
                                 }
                                 // With no physical network there is nothing to fall back to:
                                 // keep the tunnel and let it resume when the network returns.
                                 // Failures while offline do not count once the network is back.
-                                if offline { unhealthy = 0; }
-                                let failed = !offline && should_release_tunnel(unhealthy, physical_changed);
+                                if offline { unhealthy = 0; failing_since = None; }
+                                let failing_for = failing_since.map_or(Duration::ZERO, |at| at.elapsed());
+                                let failed = !offline && should_release_tunnel(unhealthy, failing_for);
                                 network_dirty = false;
                                 if failed {
                                     let Ok(operation) = state.connection_operation.try_acquire() else { continue };
@@ -170,7 +177,7 @@ pub fn monitor(state: Arc<AppState>, app: tauri::AppHandle) {
                                             drop(operation);
                                             if settings.auto_reconnect { if let Some(id) = id { schedule_recovery(state.clone(), app.clone(), id); } }
                                             unhealthy = 0;
-                                            physical_changed = false;
+                                            failing_since = None;
                                             continue;
                                         }
                                         log::warn!("Tunnel release failed; leaving the forwarding process in place");
@@ -189,13 +196,17 @@ pub fn monitor(state: Arc<AppState>, app: tauri::AppHandle) {
 #[cfg(test)]
 mod tests {
     use super::should_release_tunnel;
+    use std::time::Duration;
 
     #[test]
-    fn physical_change_does_not_release_and_three_failures_do() {
-        assert!(!should_release_tunnel(0, true));
-        assert!(!should_release_tunnel(2, true));
-        assert!(!should_release_tunnel(2, false));
-        assert!(should_release_tunnel(3, false));
-        assert!(should_release_tunnel(4, true));
+    fn short_server_stalls_keep_the_tunnel() {
+        let secs = Duration::from_secs;
+        // Three quick failures used to release the tunnel about 10 s in.
+        assert!(!should_release_tunnel(3, secs(10)));
+        assert!(!should_release_tunnel(8, secs(44)));
+        // Time alone is not enough: the checks themselves must keep failing.
+        assert!(!should_release_tunnel(2, secs(120)));
+        assert!(should_release_tunnel(3, secs(45)));
+        assert!(should_release_tunnel(9, secs(90)));
     }
 }

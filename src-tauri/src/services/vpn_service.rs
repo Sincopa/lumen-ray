@@ -45,24 +45,40 @@ pub async fn publish(state: &AppState, app: &tauri::AppHandle, snapshot: Snapsho
 }
 /// A user connection waits for a short catalog or settings transaction (a rule
 /// toggle, a subscription being applied) instead of failing with BUSY.
-async fn maintenance(state: &AppState) -> Result<tokio::sync::MutexGuard<'_, ()>> {
-    tokio::time::timeout(Duration::from_secs(20), state.updates.lock())
-        .await
-        .map_err(|_| BackendError::new("BUSY", "Maintenance is in progress"))
+///
+/// The ticket is taken before waiting: a connection still in progress holds this
+/// transaction until it gives up, and it only stops early once it sees that a
+/// newer request superseded it. A request that is itself superseded while it
+/// waits (the user picked yet another server) leaves the queue at once.
+async fn maintenance(state: &AppState, ticket: u64) -> Result<tokio::sync::MutexGuard<'_, ()>> {
+    let superseded = async {
+        while state.connection_generation.load(Ordering::Acquire) == ticket {
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+    };
+    tokio::select! {
+        guard = state.updates.lock() => Ok(guard),
+        _ = superseded => Err(cancelled()),
+        _ = tokio::time::sleep(Duration::from_secs(90)) => {
+            Err(BackendError::new("BUSY", "Maintenance is in progress"))
+        }
+    }
 }
 pub async fn connect(state: &Arc<AppState>, app: &tauri::AppHandle, id: String) -> Result<()> {
-    let _transaction = maintenance(state).await?;
+    let ticket = begin_generation(&state.connection_generation, None)?;
+    let _transaction = maintenance(state, ticket).await?;
     state.recovery_attempts.lock().await.clear();
-    connect_with_selection(state, app, id, true, None, true).await
+    connect_with_selection(state, app, id, true, Some(ticket), true).await
 }
 pub async fn connect_exact(
     state: &Arc<AppState>,
     app: &tauri::AppHandle,
     id: String,
 ) -> Result<()> {
-    let _transaction = maintenance(state).await?;
+    let ticket = begin_generation(&state.connection_generation, None)?;
+    let _transaction = maintenance(state, ticket).await?;
     state.recovery_attempts.lock().await.clear();
-    connect_with_selection(state, app, id, false, None, true).await
+    connect_with_selection(state, app, id, false, Some(ticket), true).await
 }
 
 pub async fn connect_if_current(
@@ -193,8 +209,20 @@ async fn connect_with_selection(
                 error.code == "TUN_ADAPTER_TIMEOUT" || error.code == "CORE_START_FAILED"
             })
         {
-            log::warn!("Windows TUN startup failed; retrying once");
+            if state.connection_generation.load(Ordering::Acquire) != generation {
+                result = Err(cancelled());
+                break;
+            }
+            log::warn!(
+                "Windows TUN startup failed ({}); retrying once",
+                result.as_ref().err().map_or("", |error| error.message.as_str())
+            );
             result = connect_session(state, app, candidate.clone(), &mut session, generation).await;
+        }
+        // The local adapter failed, not the server: every other candidate would
+        // wait for the same adapter again.
+        if result.as_ref().err().is_some_and(local_tunnel_failure) {
+            break;
         }
         if result.is_ok() {
             let mut desired = state.desired_server.write().await;
@@ -527,6 +555,14 @@ fn tun_helper_alive(session: &Session) -> bool {
             .as_ref()
             .is_some_and(|helper| !helper.exited() && helper.is_standby())
 }
+/// A failure of the Windows tunnel adapter itself. It says nothing about the
+/// server, so trying the next candidate would only repeat it.
+fn local_tunnel_failure(error: &BackendError) -> bool {
+    matches!(error.code, "TUN_ADAPTER_TIMEOUT" | "TUN_FAILED" | "ROUTING_CONFLICT")
+        || (error.code == "CORE_START_FAILED"
+            && (error.message.starts_with("Wintun")
+                || error.message.starts_with("Windows tunnel")))
+}
 fn keeps_prepared_core(code: &str) -> bool {
     matches!(code, "CANCELLED" | "SERVER_UNREACHABLE" | "IP_UNAVAILABLE")
 }
@@ -768,6 +804,30 @@ mod generation_tests {
             connection_candidates(&state, &selected.id).await[0],
             faster.id
         );
+    }
+
+    #[test]
+    fn local_adapter_failures_stop_candidate_rotation() {
+        let local = |code, message| local_tunnel_failure(&BackendError::new(code, message));
+        assert!(local("CORE_START_FAILED", "Wintun adapter startup failed"));
+        assert!(local("CORE_START_FAILED", "Windows tunnel route setup failed"));
+        assert!(local("TUN_ADAPTER_TIMEOUT", "Windows did not make the tunnel adapter ready"));
+        // A server the core rejects is worth replacing with the next candidate.
+        assert!(!local("CORE_START_FAILED", "Xray exited before the tunnel was ready"));
+        assert!(!local("SERVER_UNREACHABLE", "Server did not answer"));
+    }
+
+    #[test]
+    fn a_newer_request_supersedes_a_ticket_taken_before_waiting() {
+        let generation = std::sync::atomic::AtomicU64::new(0);
+        let first = begin_generation(&generation, None).unwrap();
+        let second = begin_generation(&generation, None).unwrap();
+        // The first pick was still queued behind the attempt in progress.
+        assert_eq!(
+            begin_generation(&generation, Some(first)).unwrap_err().code,
+            "CANCELLED"
+        );
+        assert_eq!(begin_generation(&generation, Some(second)).unwrap(), second + 1);
     }
 
     #[test]

@@ -10,6 +10,7 @@
 	import { t } from '../../lib/i18n';
 	import { serverDisplayName } from '../../lib/utils/serverDisplayName';
 	import { tooltip } from '../../lib/actions/tooltip';
+	import { canCancel } from '../../lib/services/connection';
 	import type {
 		VpnConnectionState,
 		VpnConnectionInfo,
@@ -51,6 +52,15 @@
 
 	let isConnected = $derived(connectionState === 'connected');
 	let isConnecting = $derived(connectionState === 'connecting');
+	// While a connection is on its way up, the button cancels it.
+	let cancellable = $derived(canCancel(connectionState));
+	let actionLabel = $derived(
+		cancellable
+			? t('home.clickToCancel')
+			: isConnected
+				? t('home.clickToDisconnect')
+				: t('home.clickToConnect'),
+	);
 	let statusKey = $derived(
 		isConnecting || connectionState === 'disconnecting'
 			? connectionState
@@ -70,9 +80,12 @@
 	let visible = $state(true);
 	let hovered = $state(false);
 	let pressed = $state(false);
-	// A button that turns busy swallows its own pointerup, so never stay "pressed" through it.
+	let disabled = $derived(
+		cancellable ? false : busy || (!server && !isConnected),
+	);
+	// A button that turns disabled swallows its own pointerup, so never stay "pressed" through it.
 	$effect(() => {
-		if (busy) pressed = false;
+		if (disabled) pressed = false;
 	});
 	onMount(() => {
 		const updateVisibility = () => {
@@ -129,14 +142,10 @@
 				hovered = false;
 				pressed = false;
 			}}
-			disabled={busy || (!server && !isConnected)}
+			{disabled}
 			aria-busy={busy}
-			aria-label={isConnected
-				? t('home.clickToDisconnect')
-				: t('home.clickToConnect')}
-			use:tooltip={isConnected
-				? t('home.clickToDisconnect')
-				: t('home.clickToConnect')}
+			aria-label={actionLabel}
+			use:tooltip={actionLabel}
 		>
 			<LumenFace status={connectionState} {hovered} {pressed} error={!!error} />
 		</button>

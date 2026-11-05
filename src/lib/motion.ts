@@ -204,6 +204,12 @@ export function leaveInPlace(
  * leaves, for example when a header appears above it. The screen stays where
  * it was until it is gone. `top` is the container's offsetTop before the
  * change; offsets stay in CSS pixels under the UI zoom.
+ *
+ * A screen can come back before it is gone (Home, Servers, Home in quick
+ * succession). Svelte then keeps the same element, un-inerts it and ends the
+ * leave with tick(1) while the header is still in the layout, which used to
+ * pin the screen one header height too high. A screen that is not leaving
+ * keeps no inline offset.
  */
 export function leaveScreen(
 	node: Element,
@@ -214,6 +220,11 @@ export function leaveScreen(
 	return {
 		duration,
 		tick: (t) => {
+			if (!element.inert) {
+				element.style.removeProperty('opacity');
+				element.style.removeProperty('transform');
+				return;
+			}
 			element.style.opacity = String(t);
 			if (top === undefined || !parent) return;
 			const shift = top - parent.offsetTop;

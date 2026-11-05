@@ -33,10 +33,12 @@
 	let info = $derived($connectionStore.info);
 	let hasSubscriptions = $derived($catalogStore.subscriptions.length > 0);
 	let routingMode = $derived($catalogStore.routingMode);
+	// A pending connection shows the server it is heading to, not the last one.
+	let shownServerId = $derived(
+		$connectionStore.target ?? info?.serverId ?? $catalogStore.selectedServerId,
+	);
 	let selectedServer = $derived(
-		$catalogStore.servers.find(
-			(s) => s.id === (info?.serverId ?? $catalogStore.selectedServerId),
-		),
+		$catalogStore.servers.find((s) => s.id === shownServerId),
 	);
 	let selectedCountry = $derived(selectedServer?.countryCode ?? 'fi');
 	let selectedSubscription = $derived(
@@ -186,8 +188,8 @@
 							<SubscriptionsView />
 						{:else if shell.currentTab === 'servers'}
 							<ServersView
-								selectedId={$catalogStore.selectedServerId ?? ''}
-								disabled={$connectionStore.busy}
+								selectedId={shownServerId ?? ''}
+								disabled={connectionState === 'initializing'}
 								onSelect={shell.chooseServer}
 								onManageSubscription={() => shell.goToTab('subscriptions')}
 							/>

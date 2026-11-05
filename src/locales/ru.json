@@ -32,6 +32,7 @@
 		"disconnected": "Отключен",
 		"clickToConnect": "Нажмите для подключения",
 		"clickToDisconnect": "Нажмите для отключения",
+		"clickToCancel": "Нажмите, чтобы отменить подключение",
 		"hoursUnit": "ч",
 		"minutesUnit": "м",
 		"secondsUnit": "с",
