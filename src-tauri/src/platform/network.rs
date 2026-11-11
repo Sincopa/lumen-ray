@@ -277,6 +277,53 @@ pub fn physical_ipv6_available() -> bool {
         found
     }
 }
+/// Name of the adapter that carries the best IPv4 default route outside LumenTun:
+/// where traffic leaves the PC while the tunnel is up. `None` when there is no
+/// such route or the table cannot be read.
+pub fn physical_interface() -> Option<String> {
+    use windows_sys::Win32::NetworkManagement::IpHelper::{
+        ConvertInterfaceLuidToAlias, GetIpInterfaceEntry, InitializeIpInterfaceEntry,
+        MIB_IPINTERFACE_ROW,
+    };
+    let tunnel = tunnel_luid().map(|luid| unsafe { luid.Value });
+    unsafe {
+        let mut table = std::ptr::null_mut();
+        if GetIpForwardTable2(AF_INET, &mut table) != 0 || table.is_null() {
+            return None;
+        }
+        let entries =
+            std::slice::from_raw_parts((*table).Table.as_ptr(), (*table).NumEntries as usize);
+        // Windows ranks a route by its own metric plus the metric of its interface.
+        let best = entries
+            .iter()
+            .filter(|route| {
+                route.DestinationPrefix.PrefixLength == 0
+                    && Some(route.InterfaceLuid.Value) != tunnel
+            })
+            .min_by_key(|route| {
+                let mut interface = MIB_IPINTERFACE_ROW::default();
+                InitializeIpInterfaceEntry(&mut interface);
+                interface.Family = AF_INET;
+                interface.InterfaceLuid = route.InterfaceLuid;
+                let interface_metric = if GetIpInterfaceEntry(&mut interface) == 0 {
+                    interface.Metric
+                } else {
+                    0
+                };
+                u64::from(route.Metric) + u64::from(interface_metric)
+            })
+            .map(|route| route.InterfaceLuid);
+        FreeMibTable(table as _);
+        let luid = best?;
+        // IF_MAX_STRING_SIZE characters and the terminator.
+        let mut alias = [0u16; 257];
+        if ConvertInterfaceLuidToAlias(&luid, alias.as_mut_ptr(), alias.len()) != 0 {
+            return None;
+        }
+        let length = alias.iter().position(|&c| c == 0).unwrap_or(alias.len());
+        Some(String::from_utf16_lossy(&alias[..length]))
+    }
+}
 /// Default route owned by the tunnel adapter. Other prefixes and other
 /// interfaces stay untouched.
 pub(crate) fn is_lumen_default_route(

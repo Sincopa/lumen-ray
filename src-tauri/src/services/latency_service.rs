@@ -143,6 +143,17 @@ pub(crate) async fn isolated_core(state: &AppState, id: &str) -> Option<Isolated
     let startup = PROBE_STARTUP.lock().await;
     let (proxy, metrics) = crate::engine::xray::ports().ok()?;
     let config = crate::xray::config::build(&repo, id, proxy, metrics, false).ok()?;
+    // With the tunnel up, the probe must not travel through it: see bind_outbounds.
+    #[cfg(windows)]
+    let config = {
+        let mut config = serde_json::to_value(config).ok()?;
+        if crate::platform::network::tunnel_ready() {
+            if let Some(interface) = crate::platform::network::physical_interface() {
+                crate::xray::config::bind_outbounds(&mut config, &interface);
+            }
+        }
+        config
+    };
     let bytes = serde_json::to_vec(&config).ok()?;
     let core = state.core.read().await.clone();
     let mut child = crate::platform::process::CoreProcess::spawn(&core, &bytes)

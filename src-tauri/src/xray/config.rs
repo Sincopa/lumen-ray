@@ -204,6 +204,35 @@ pub fn outbound(node: &VpnNode, tag: &str) -> Result<Value> {
     }
     Ok(json!({"tag":tag,"protocol":protocol,"settings":settings,"streamSettings":stream}))
 }
+/// Binds every server outbound to a network interface (`sockopt.interface`).
+///
+/// A per-server probe is a separate Xray process. With the tunnel up its
+/// connections entered LumenTun, where sniffing replaces the destination with
+/// the TLS server name. A REALITY server that borrows a foreign name (for
+/// example `www.apple.com`) was then dialled at that site instead of the
+/// server, and the probe reported a timeout. Bound to the physical adapter, a
+/// probe leaves the PC directly, like Lumen's own sockets on Android.
+#[cfg(any(windows, test))]
+pub fn bind_outbounds(config: &mut Value, interface: &str) {
+    let Some(outbounds) = config.get_mut("outbounds").and_then(Value::as_array_mut) else {
+        return;
+    };
+    for outbound in outbounds {
+        if !matches!(
+            outbound["protocol"].as_str(),
+            Some("vless" | "vmess" | "trojan" | "shadowsocks" | "hysteria" | "socks" | "http")
+        ) {
+            continue;
+        }
+        if !outbound["streamSettings"].is_object() {
+            outbound["streamSettings"] = json!({});
+        }
+        if !outbound["streamSettings"]["sockopt"].is_object() {
+            outbound["streamSettings"]["sockopt"] = json!({});
+        }
+        outbound["streamSettings"]["sockopt"]["interface"] = json!(interface);
+    }
+}
 /// Public resolvers that also answer DNS-over-TLS on port 853.
 const DOT_RESOLVERS: &[&str] = &[
     "1.1.1.1",

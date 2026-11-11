@@ -109,6 +109,35 @@ fn yaml_json_and_config_routing() {
     assert_eq!(generated["metrics"]["listen"], "127.0.0.1:1081");
 }
 #[test]
+fn probe_outbounds_bind_to_the_physical_interface() {
+    let node = uri::parse(VLESS, "sub").unwrap();
+    let repo = Repository {
+        nodes: vec![node.clone()],
+        ..Default::default()
+    };
+    let mut generated =
+        serde_json::to_value(config::build(&repo, &node.id, 10808, 10809, false).unwrap()).unwrap();
+    config::bind_outbounds(&mut generated, "Ethernet");
+    let outbounds = generated["outbounds"].as_array().unwrap();
+    let by_tag = |tag: &str| outbounds.iter().find(|o| o["tag"] == tag).unwrap();
+    let stream = &by_tag("proxy")["streamSettings"];
+    assert_eq!(stream["sockopt"]["interface"], "Ethernet");
+    // The server's own transport settings survive.
+    assert_eq!(stream["network"], "ws");
+    assert_eq!(stream["wsSettings"]["path"], "/vpn");
+    // Built-in outbounds are not server connections.
+    for tag in ["direct", "block", "dns"] {
+        assert!(by_tag(tag)["streamSettings"].is_null());
+    }
+}
+#[cfg(windows)]
+#[test]
+fn physical_interface_is_never_the_tunnel() {
+    let name = crate::platform::network::physical_interface();
+    eprintln!("Physical interface: {name:?}");
+    assert!(name.is_none_or(|name| !name.is_empty() && !name.eq_ignore_ascii_case("LumenTun")));
+}
+#[test]
 fn discord_uses_the_vpn_and_other_traffic_stays_direct() {
     use crate::services::catalog_service::generate_preset_rules;
     let node = uri::parse(VLESS, "sub").unwrap();
