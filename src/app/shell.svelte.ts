@@ -83,6 +83,20 @@ class Shell {
 				}
 			} else {
 				await catalog.selectServer(server.id);
+				// The pick waited for a background connection (start-up or recovery)
+				// that came up on the old server meanwhile. The user's choice wins.
+				const after = get(connection.state);
+				const heading =
+					after.status === 'connected'
+						? after.info?.serverId
+						: (after.target ?? undefined);
+				if (
+					isActive(after.status) &&
+					canSwitch(after.status) &&
+					heading !== server.id
+				) {
+					await connection.switchServer(server.id);
+				}
 			}
 		} catch (e) {
 			this.actionError = t('errors.' + errorCode(e));

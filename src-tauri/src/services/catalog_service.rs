@@ -132,33 +132,28 @@ fn clean_name(name: &str) -> String {
     }
     String::new()
 }
-fn country(name: &str) -> String {
-    // Last regional-indicator pair. A white flag or a second flag can sit in front.
-    let mut last_pair: Option<(char, char)> = None;
-    let mut prev: Option<char> = None;
+/// The first flag in a server name: "🇩🇪 → 🇷🇺 Berlin" is a German server.
+/// Regional indicators pair up from the start of each run, so in "🇩🇪🇷🇺" the
+/// flags are DE and RU, never the "ER" that straddles them. A white flag or other
+/// symbols in front are skipped.
+pub(crate) fn country(name: &str) -> String {
+    let letter = |c: char| char::from_u32(c as u32 - 0x1f1e6 + 'a' as u32);
+    let mut pending: Option<char> = None;
     for c in name.chars() {
-        if ('\u{1f1e6}'..='\u{1f1ff}').contains(&c) {
-            if let Some(p) = prev {
-                if let (Some(a), Some(b)) = (
-                    char::from_u32(p as u32 - 0x1f1e6 + 'a' as u32),
-                    char::from_u32(c as u32 - 0x1f1e6 + 'a' as u32),
-                ) {
-                    last_pair = Some((a, b));
+        if !('\u{1f1e6}'..='\u{1f1ff}').contains(&c) {
+            pending = None;
+            continue;
+        }
+        match pending.take() {
+            None => pending = Some(c),
+            Some(first) => {
+                if let (Some(a), Some(b)) = (letter(first), letter(c)) {
+                    return [a, b].iter().collect();
                 }
             }
-            prev = Some(c);
-        } else {
-            prev = None;
         }
     }
-    if let Some((a, b)) = last_pair {
-        let mut result = String::with_capacity(2);
-        result.push(a);
-        result.push(b);
-        result
-    } else {
-        String::new()
-    }
+    String::new()
 }
 #[derive(Deserialize)]
 #[serde(
@@ -343,10 +338,46 @@ pub async fn set_discord_voice_route(
     *state.repository.write().await = next.clone();
     Ok(Some((before, next)))
 }
+/// Record the member auto server `server_id` starts on (see
+/// `Repository::balancer_leads`). Nothing is saved for an unknown server, a
+/// plain server or a tag the balancer does not have.
+pub async fn set_balancer_lead(state: &AppState, server_id: &str, lead: &str) -> Result<()> {
+    let _guard = state.mutations.lock().await;
+    let before = state.repository.read().await;
+    if before.balancer_leads.get(server_id).map(String::as_str) == Some(lead)
+        || !before
+            .nodes
+            .iter()
+            .any(|node| node.id == server_id && has_member(node, lead))
+    {
+        return Ok(());
+    }
+    let mut next = before.clone();
+    drop(before);
+    next.balancer_leads
+        .insert(server_id.to_owned(), lead.to_owned());
+    state.store.save(&next)?;
+    *state.repository.write().await = next;
+    Ok(())
+}
+fn has_member(node: &crate::domain::node::VpnNode, tag: &str) -> bool {
+    node.balancer.as_ref().is_some_and(|balancer| {
+        balancer
+            .outbounds
+            .iter()
+            .any(|outbound| outbound["tag"] == tag)
+    })
+}
 fn reconcile(repo: &mut Repository) {
     let node_ids: std::collections::HashSet<_> = repo.nodes.iter().map(|n| n.id.clone()).collect();
     repo.discord_voice_routes.retain(|id, route| {
         node_ids.contains(id) && (route == "direct" || node_ids.contains(route))
+    });
+    let nodes = &repo.nodes;
+    repo.balancer_leads.retain(|id, lead| {
+        nodes
+            .iter()
+            .any(|node| node.id == *id && has_member(node, lead))
     });
     let sub_ids: std::collections::HashSet<_> =
         repo.subscriptions.iter().map(|s| s.id.clone()).collect();

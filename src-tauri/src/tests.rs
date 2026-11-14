@@ -974,6 +974,235 @@ fn balanced_xray_subscription_and_clean_names() {
     assert_eq!(servers[1]["countryCode"], "fi");
 }
 
+/// One provider config with a balancer over `members` (tags `proxy-<n>`); the
+/// first member carries `first_extra` in its stream settings.
+fn balancer_root(
+    remarks: &str,
+    members: &[u8],
+    first_extra: serde_json::Value,
+) -> serde_json::Value {
+    let outbounds: Vec<_> = members
+        .iter()
+        .enumerate()
+        .map(|(i, n)| {
+            let mut stream = serde_json::json!({"network": "tcp", "security": "tls", "tlsSettings": {"serverName": "example.com"}});
+            if i == 0 {
+                for (key, value) in first_extra.as_object().unwrap() {
+                    stream[key] = value.clone();
+                }
+            }
+            serde_json::json!({
+                "tag": format!("proxy-{n}"),
+                "protocol": "vless",
+                "settings": {"vnext": [{"address": format!("203.0.113.{n}"), "port": 443, "users": [{"id": "00000000-0000-4000-8000-000000000001", "encryption": "none"}]}]},
+                "streamSettings": stream
+            })
+        })
+        .chain([serde_json::json!({"tag": "direct", "protocol": "freedom"})])
+        .collect();
+    serde_json::json!({
+        "remarks": remarks,
+        "outbounds": outbounds,
+        "routing": {"balancers": [{"tag": "auto", "selector": ["proxy"], "strategy": {"type": "leastPing"}}]}
+    })
+}
+#[test]
+fn auto_server_survives_a_first_member_lumen_cannot_read() {
+    // sockopt on the first member used to reject the whole auto server.
+    let sub = serde_json::json!([
+        balancer_root(
+            "🇩🇪 Авто",
+            &[1, 2],
+            serde_json::json!({"sockopt": {"tcpNoDelay": true}})
+        ),
+        balancer_root("🇳🇱 Авто", &[3, 4], serde_json::json!({})),
+    ]);
+    let parsed = parser::parse(&sub.to_string(), "sub").unwrap();
+    assert!(parsed.diagnostics.is_empty());
+    let names: Vec<_> = parsed.nodes.iter().map(|node| node.name.as_str()).collect();
+    assert_eq!(names, ["🇩🇪 Авто", "🇳🇱 Авто"]);
+    let first = &parsed.nodes[0];
+    // Shown as the member Lumen can read; the core still gets every member as sent.
+    assert_eq!(first.address, "203.0.113.2");
+    let balancer = first.balancer.as_ref().unwrap();
+    assert_eq!(balancer.outbounds.len(), 2);
+    assert_eq!(
+        balancer.outbounds[0]["streamSettings"]["sockopt"]["tcpNoDelay"],
+        true
+    );
+    // An auto server that parsed before keeps its id: the first member still wins.
+    let plain = parser::parse(
+        &serde_json::json!([balancer_root("🇳🇱 Авто", &[3, 4], serde_json::json!({}))]).to_string(),
+        "sub",
+    )
+    .unwrap();
+    assert_eq!(plain.nodes[0].id, parsed.nodes[1].id);
+    assert_eq!(plain.nodes[0].address, "203.0.113.3");
+    // No readable member at all is still reported, not silently dropped.
+    let unreadable = serde_json::json!([
+        balancer_root("🇫🇮 Авто", &[5], serde_json::json!({"sockopt": {"mark": 1}})),
+        balancer_root("🇳🇱 Авто", &[3, 4], serde_json::json!({})),
+    ]);
+    let parsed = parser::parse(&unreadable.to_string(), "sub").unwrap();
+    assert_eq!(parsed.nodes.len(), 1);
+    assert_eq!(parsed.diagnostics.len(), 1);
+    assert_eq!(parsed.diagnostics[0].code, "UNSUPPORTED_PROTOCOL");
+}
+#[test]
+fn auto_servers_that_differ_only_by_name_are_all_listed() {
+    let sub = serde_json::json!([
+        balancer_root("🇩🇪 Авто | Все сайты", &[1, 2], serde_json::json!({})),
+        balancer_root(
+            "🇩🇪 Авто | Только блокировки",
+            &[1, 2],
+            serde_json::json!({})
+        ),
+        // An exact repeat is still one server.
+        balancer_root("🇩🇪 Авто | Все сайты", &[1, 2], serde_json::json!({})),
+    ]);
+    let parsed = parser::parse(&sub.to_string(), "sub").unwrap();
+    let names: Vec<_> = parsed.nodes.iter().map(|node| node.name.as_str()).collect();
+    assert_eq!(
+        names,
+        ["🇩🇪 Авто | Все сайты", "🇩🇪 Авто | Только блокировки"]
+    );
+    assert_ne!(parsed.nodes[0].id, parsed.nodes[1].id);
+    // Ids stay the same on the next refresh.
+    let again = parser::parse(&sub.to_string(), "sub").unwrap();
+    assert_eq!(again.nodes[1].id, parsed.nodes[1].id);
+    // Plain links follow the same rule.
+    let links = format!("{VLESS}\n{}\n{VLESS}", VLESS.replace("#Example", "#Second"));
+    let parsed = parser::parse(&links, "sub").unwrap();
+    assert_eq!(parsed.nodes.len(), 2);
+    assert_ne!(parsed.nodes[0].id, parsed.nodes[1].id);
+}
+#[test]
+fn auto_server_ping_times_every_member() {
+    let sub = serde_json::json!([balancer_root("🇩🇪 Авто", &[1, 2, 3], serde_json::json!({}))]);
+    let mut node = parser::parse(&sub.to_string(), "sub")
+        .unwrap()
+        .nodes
+        .remove(0);
+    let balancer = node.balancer.as_mut().unwrap();
+    // A member the selector does not pick is not timed.
+    balancer
+        .outbounds
+        .push(serde_json::json!({"tag": "backup", "protocol": "vless"}));
+    let members = config::balancer_members(balancer);
+    assert_eq!(members, ["proxy-1", "proxy-2", "proxy-3"]);
+    let repo = Repository {
+        nodes: vec![node.clone()],
+        ..Default::default()
+    };
+    let mut generated =
+        serde_json::to_value(config::build(&repo, &node.id, 10808, 10809, false).unwrap()).unwrap();
+    let paired: Vec<_> = members
+        .iter()
+        .cloned()
+        .zip([20001u16, 20002, 20003])
+        .collect();
+    config::add_member_probes(&mut generated, &paired);
+    let inbounds = generated["inbounds"].as_array().unwrap();
+    let rules = generated["routing"]["rules"].as_array().unwrap();
+    for (index, (member, port)) in paired.iter().enumerate() {
+        let tag = format!("probe-member-{index}");
+        let inbound = inbounds
+            .iter()
+            .find(|inbound| inbound["tag"] == tag)
+            .unwrap();
+        assert_eq!(inbound["port"], *port);
+        assert_eq!(inbound["listen"], "127.0.0.1");
+        // Each member port goes straight to its outbound, ahead of every other rule.
+        assert_eq!(rules[index]["inboundTag"][0], tag);
+        assert_eq!(rules[index]["outboundTag"], member.as_str());
+    }
+    // The balancer's own probe inbound still goes through the balancer.
+    assert!(rules
+        .iter()
+        .any(|rule| rule["inboundTag"][0] == "probe" && rule["balancerTag"] == "auto"));
+
+    // A selector that matches nothing leaves the core on its first outbound.
+    let balancer = node.balancer.as_mut().unwrap();
+    balancer.selector = vec!["missing".into()];
+    assert_eq!(config::balancer_members(balancer), ["proxy-1"]);
+    // Large auto servers are capped.
+    balancer.selector = vec!["".into()];
+    balancer.outbounds = (0..40)
+        .map(|i| serde_json::json!({"tag": format!("p{i}"), "protocol": "vless"}))
+        .collect();
+    assert_eq!(
+        config::balancer_members(balancer).len(),
+        config::MAX_PROBED_MEMBERS
+    );
+}
+#[test]
+fn auto_server_starts_on_the_member_that_answered_last() {
+    let sub = serde_json::json!([balancer_root("🇩🇪 Авто", &[1, 2, 3], serde_json::json!({}))]);
+    let node = parser::parse(&sub.to_string(), "sub")
+        .unwrap()
+        .nodes
+        .remove(0);
+    let tags = |config: &serde_json::Value| -> Vec<String> {
+        config["outbounds"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|o| o["tag"].as_str().unwrap().to_owned())
+            .collect()
+    };
+    let mut repo = Repository {
+        nodes: vec![node.clone()],
+        ..Default::default()
+    };
+    let plain =
+        serde_json::to_value(config::build(&repo, &node.id, 10808, 10809, true).unwrap()).unwrap();
+    // Without a lead the subscription's order decides, so Xray's fallback is proxy-1.
+    assert_eq!(tags(&plain)[..3], ["proxy-1", "proxy-2", "proxy-3"]);
+    repo.balancer_leads
+        .insert(node.id.clone(), "proxy-3".into());
+    let led =
+        serde_json::to_value(config::build(&repo, &node.id, 10808, 10809, true).unwrap()).unwrap();
+    assert_eq!(tags(&led)[..3], ["proxy-3", "proxy-1", "proxy-2"]);
+    // Only the order changes: the balancer still selects every member.
+    assert_eq!(led["routing"]["balancers"], plain["routing"]["balancers"]);
+    // A lead the balancer no longer has changes nothing.
+    repo.balancer_leads.insert(node.id.clone(), "gone".into());
+    let stale =
+        serde_json::to_value(config::build(&repo, &node.id, 10808, 10809, true).unwrap()).unwrap();
+    assert_eq!(tags(&stale), tags(&plain));
+}
+#[test]
+fn lead_member_changes_only_when_it_stops_answering() {
+    let timed = |values: &[(&str, Option<u64>)]| -> Vec<(String, Option<u64>)> {
+        values
+            .iter()
+            .map(|(tag, ms)| ((*tag).to_owned(), *ms))
+            .collect()
+    };
+    let all = timed(&[("a", Some(300)), ("b", Some(80)), ("c", None)]);
+    assert_eq!(config::next_lead(None, &all).as_deref(), Some("b"));
+    // A slower lead that still answers stays: no needless config churn.
+    assert_eq!(config::next_lead(Some("a"), &all).as_deref(), Some("a"));
+    // A lead that went down is replaced by the fastest member that answered.
+    assert_eq!(config::next_lead(Some("c"), &all).as_deref(), Some("b"));
+    // Nothing answered (no network): keep what we had.
+    let none = timed(&[("a", None), ("b", None)]);
+    assert_eq!(config::next_lead(Some("a"), &none).as_deref(), Some("a"));
+    assert_eq!(config::next_lead(None, &none), None);
+}
+#[test]
+fn flag_comes_from_the_first_country_in_the_name() {
+    use crate::services::catalog_service::country;
+    assert_eq!(country("🇩🇪 Germany → 🇷🇺 Russia"), "de");
+    assert_eq!(country("🇩🇪🇷🇺 DE-RU"), "de");
+    assert_eq!(country("🇷🇺🇩🇪 RU-DE"), "ru");
+    assert_eq!(country("🏳️ 🇳🇱 Нидерланды"), "nl");
+    assert_eq!(country("🇫🇲🏳️ БС | АВТО"), "fm");
+    assert_eq!(country("Белые Списки / 🇫🇮 Финляндия 🇷🇺"), "fi");
+    assert_eq!(country("No flag"), "");
+    // A lone regional indicator is not a flag.
+    assert_eq!(country("\u{1f1e9} 🇳🇱"), "nl");
+}
 #[test]
 fn rule_model_backward_compatibility_migration() {
     use crate::storage::repository::{Rule, RuleMatcher};

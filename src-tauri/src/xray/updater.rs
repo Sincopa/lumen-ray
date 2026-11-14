@@ -20,6 +20,10 @@ struct Asset {
 struct Release {
     tag_name: String,
     assets: Vec<Asset>,
+    #[serde(default)]
+    draft: bool,
+    #[serde(default)]
+    prerelease: bool,
 }
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -117,16 +121,30 @@ pub async fn check(current: &str) -> Result<Option<CoreUpdate>> {
         .json()
         .await
         .map_err(|_| error())?;
+    match newest_release(&releases, current)? {
+        Some(version) => Ok(Some(metadata(version).await?)),
+        None => Ok(None),
+    }
+}
+/// The newest published release above `current`. Drafts and pre-releases are
+/// test builds and never offered, since the check also runs on every launch.
+fn newest_release<'a>(releases: &'a [Release], current: &str) -> Result<Option<&'a str>> {
     let current = version_parts(current)?;
-    let newest = releases
+    Ok(releases
         .iter()
+        .filter(|r| !r.draft && !r.prerelease)
         .filter_map(|r| r.tag_name.strip_prefix('v'))
         .filter_map(|v| version_parts(v).ok().map(|p| (p, v)))
         .filter(|(p, _)| p > &current)
-        .max_by(|a, b| a.0.cmp(&b.0));
-    match newest {
-        Some((_, v)) => Ok(Some(metadata(v).await?)),
-        None => Ok(None),
+        .max_by(|a, b| a.0.cmp(&b.0))
+        .map(|(_, v)| v))
+}
+/// Whether `candidate` is a later Xray version than `than`. Unreadable
+/// versions are never later.
+pub fn newer(candidate: &str, than: &str) -> bool {
+    match (version_parts(candidate), version_parts(than)) {
+        (Ok(candidate), Ok(than)) => candidate > than,
+        _ => false,
     }
 }
 /// Metadata is fetched from the fixed official HTTPS origin on every activation.
@@ -335,6 +353,41 @@ mod tests {
         ] {
             assert!(version_parts(value).is_err());
         }
+    }
+    #[test]
+    fn compares_versions_numerically() {
+        assert!(newer("26.10.1", "26.9.9"));
+        assert!(newer("27.0.0", "26.12.31"));
+        assert!(!newer("26.9.9", "26.9.9"));
+        assert!(!newer("26.1.1", "26.9.9"));
+        assert!(!newer("garbage", "26.9.9"));
+        assert!(!newer("26.10.1", "garbage"));
+    }
+    #[test]
+    fn offers_only_published_releases_above_current() {
+        let release = |tag: &str, prerelease: bool, draft: bool| Release {
+            tag_name: tag.into(),
+            assets: Vec::new(),
+            draft,
+            prerelease,
+        };
+        let releases = [
+            release("v26.12.1", true, false),
+            release("v26.11.0", false, true),
+            release("v26.10.2", false, false),
+            release("v26.10.10", false, false),
+            release("nightly", false, false),
+            release("v26.9.9", false, false),
+        ];
+        assert_eq!(
+            newest_release(&releases, "26.9.9").unwrap(),
+            Some("26.10.10")
+        );
+        assert_eq!(newest_release(&releases, "26.10.10").unwrap(), None);
+        assert!(newest_release(&releases, "bad").is_err());
+        // GitHub's JSON without the flags still parses.
+        let parsed: Release = serde_json::from_str(r#"{"tag_name":"v1.2.3","assets":[]}"#).unwrap();
+        assert!(!parsed.prerelease && !parsed.draft);
     }
     #[test]
     fn prevents_archive_traversal() {

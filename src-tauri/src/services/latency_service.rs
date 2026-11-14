@@ -5,7 +5,15 @@ static PROBES: tokio::sync::Semaphore = tokio::sync::Semaphore::const_new(4);
 static PROBE_STARTUP: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
 pub async fn ping(state: &AppState, id: String) -> Result<serde_json::Value> {
-    let value = ping_inner(state, &id).await?;
+    let (value, lead) = ping_inner(state, &id).await?;
+    if let Some(lead) = lead {
+        if let Err(error) = super::catalog_service::set_balancer_lead(state, &id, &lead).await {
+            log::warn!(
+                "Could not save the auto server's lead member: {}",
+                error.code
+            );
+        }
+    }
     state
         .latencies
         .write()
@@ -29,24 +37,51 @@ pub async fn ping(state: &AppState, id: String) -> Result<serde_json::Value> {
     }
     Ok(value)
 }
-async fn ping_inner(state: &AppState, id: &str) -> Result<serde_json::Value> {
+/// The latency of `id` and, for an auto server whose lead member should
+/// change, the new lead.
+async fn ping_inner(state: &AppState, id: &str) -> Result<(serde_json::Value, Option<String>)> {
     #[cfg(any(windows, target_os = "macos", target_os = "android"))]
     {
-        let Some(core) = isolated_core(state, id).await else {
-            return Ok(serde_json::json!("timeout"));
+        let Some(core) = isolated_core(state, id, true).await else {
+            return Ok((serde_json::json!("timeout"), None));
         };
         let ping_url = state.repository.read().await.settings.ping_url.clone();
-        let result = probe_target(core.proxy_port, ping_url.trim()).await;
+        let members = core.members.clone();
+        let ports: Vec<u16> = if members.is_empty() {
+            vec![core.proxy_port]
+        } else {
+            members.iter().map(|(_, port)| *port).collect()
+        };
+        let elapsed = timings(&ports, ping_url.trim()).await;
         core.stop().await;
-        Ok(match result {
+        let lead = if members.is_empty() {
+            None
+        } else {
+            let current = state
+                .repository
+                .read()
+                .await
+                .balancer_leads
+                .get(id)
+                .cloned();
+            let timed: Vec<(String, Option<u64>)> = members
+                .into_iter()
+                .map(|(tag, _)| tag)
+                .zip(elapsed.iter().copied())
+                .collect();
+            crate::xray::config::next_lead(current.as_deref(), &timed)
+                .filter(|lead| current.as_ref() != Some(lead))
+        };
+        let value = match elapsed.into_iter().flatten().min() {
             Some(elapsed) => serde_json::json!(elapsed),
             None => serde_json::json!("timeout"),
-        })
+        };
+        Ok((value, lead))
     }
     #[cfg(not(any(windows, target_os = "macos", target_os = "android")))]
     {
         let _ = (state, id);
-        Ok(serde_json::json!("timeout"))
+        Ok((serde_json::json!("timeout"), None))
     }
 }
 
@@ -55,6 +90,9 @@ async fn ping_inner(state: &AppState, id: &str) -> Result<serde_json::Value> {
 #[cfg(any(windows, target_os = "macos"))]
 pub(crate) struct IsolatedCore {
     pub proxy_port: u16,
+    /// Each auto-server member with the port routed straight to it; empty for
+    /// a plain server or when members were not requested.
+    pub members: Vec<(String, u16)>,
     child: crate::platform::process::CoreProcess,
     _permit: tokio::sync::SemaphorePermit<'static>,
 }
@@ -71,6 +109,7 @@ impl IsolatedCore {
 #[cfg(target_os = "android")]
 pub(crate) struct IsolatedCore {
     pub proxy_port: u16,
+    pub members: Vec<(String, u16)>,
     probe: i64,
     _permit: tokio::sync::SemaphorePermit<'static>,
 }
@@ -85,7 +124,11 @@ impl IsolatedCore {
 /// Same reduced configuration as on desktop, with only the authenticated
 /// `probe` inbound: no HTTP proxy is opened on loopback.
 #[cfg(target_os = "android")]
-pub(crate) async fn isolated_core(state: &AppState, id: &str) -> Option<IsolatedCore> {
+pub(crate) async fn isolated_core(
+    state: &AppState,
+    id: &str,
+    members: bool,
+) -> Option<IsolatedCore> {
     let permit = PROBES.acquire().await.ok()?;
     let mut repo = state.repository.read().await.clone();
     repo.rules.clear();
@@ -98,8 +141,14 @@ pub(crate) async fn isolated_core(state: &AppState, id: &str) -> Option<Isolated
     let assets = crate::xray::geo::assets_for_core(&state.core.read().await);
     let _startup = PROBE_STARTUP.lock().await;
     // A port another app took between discovery and bind fails the start; new ports fix it.
+    let tags = if members {
+        member_tags(&repo, id)
+    } else {
+        Vec::new()
+    };
     for _ in 0..2 {
         let (proxy, metrics) = crate::engine::xray::ports().ok()?;
+        let member_ports = probe_ports(tags.len())?;
         let config = crate::xray::config::build(&repo, id, proxy, metrics, false).ok()?;
         let mut config = serde_json::to_value(config).ok()?;
         if let Some(inbounds) = config
@@ -108,6 +157,8 @@ pub(crate) async fn isolated_core(state: &AppState, id: &str) -> Option<Isolated
         {
             inbounds.retain(|inbound| inbound["tag"] == "probe");
         }
+        let members = paired(&tags, &member_ports);
+        crate::xray::config::add_member_probes(&mut config, &members);
         let bytes = serde_json::to_vec(&config).ok()?;
         // The embedded core has bound its inbound when start_probe returns.
         if let Some(probe) =
@@ -115,6 +166,7 @@ pub(crate) async fn isolated_core(state: &AppState, id: &str) -> Option<Isolated
         {
             return Some(IsolatedCore {
                 proxy_port: proxy,
+                members,
                 probe,
                 _permit: permit,
             });
@@ -124,7 +176,11 @@ pub(crate) async fn isolated_core(state: &AppState, id: &str) -> Option<Isolated
 }
 
 #[cfg(any(windows, target_os = "macos"))]
-pub(crate) async fn isolated_core(state: &AppState, id: &str) -> Option<IsolatedCore> {
+pub(crate) async fn isolated_core(
+    state: &AppState,
+    id: &str,
+    members: bool,
+) -> Option<IsolatedCore> {
     let permit = PROBES.acquire().await.ok()?;
     let mut repo = state.repository.read().await.clone();
     // A probe only needs its SOCKS inbound and the node's outbound. With routing
@@ -140,36 +196,52 @@ pub(crate) async fn isolated_core(state: &AppState, id: &str) -> Option<Isolated
     // Port discovery releases its temporary listeners before Xray binds them.
     // Serialize only that short startup window so concurrent probes cannot be
     // assigned the same just-released Windows ephemeral ports.
+    let tags = if members {
+        member_tags(&repo, id)
+    } else {
+        Vec::new()
+    };
     let startup = PROBE_STARTUP.lock().await;
     let (proxy, metrics) = crate::engine::xray::ports().ok()?;
+    let member_ports = probe_ports(tags.len())?;
     let config = crate::xray::config::build(&repo, id, proxy, metrics, false).ok()?;
+    let mut config = serde_json::to_value(config).ok()?;
+    let members = paired(&tags, &member_ports);
+    crate::xray::config::add_member_probes(&mut config, &members);
     // With the tunnel up, the probe must not travel through it: see bind_outbounds.
     #[cfg(windows)]
-    let config = {
-        let mut config = serde_json::to_value(config).ok()?;
+    {
         if crate::platform::network::tunnel_ready() {
             if let Some(interface) = crate::platform::network::physical_interface() {
                 crate::xray::config::bind_outbounds(&mut config, &interface);
             }
         }
-        config
-    };
+    }
     let bytes = serde_json::to_vec(&config).ok()?;
     let core = state.core.read().await.clone();
     let mut child = crate::platform::process::CoreProcess::spawn(&core, &bytes)
         .await
         .ok()?;
 
-    // Wait for the local SOCKS proxy port to accept connections
+    // Wait for the local SOCKS ports to accept connections
     let mut ready = false;
+    let mut waiting: Vec<u16> = std::iter::once(proxy)
+        .chain(member_ports.iter().copied())
+        .collect();
     for _ in 0..20 {
         if child.try_wait().map(|w| w.is_some()).unwrap_or(true) {
             break;
         }
-        if tokio::net::TcpStream::connect((std::net::Ipv4Addr::LOCALHOST, proxy))
-            .await
-            .is_ok()
-        {
+        while let Some(&port) = waiting.first() {
+            if tokio::net::TcpStream::connect((std::net::Ipv4Addr::LOCALHOST, port))
+                .await
+                .is_err()
+            {
+                break;
+            }
+            waiting.remove(0);
+        }
+        if waiting.is_empty() {
             ready = true;
             break;
         }
@@ -182,9 +254,58 @@ pub(crate) async fn isolated_core(state: &AppState, id: &str) -> Option<Isolated
     }
     Some(IsolatedCore {
         proxy_port: proxy,
+        members,
         child,
         _permit: permit,
     })
+}
+
+/// The members of `id` to time one by one, or none for a plain server.
+#[cfg(any(windows, target_os = "macos", target_os = "android"))]
+fn member_tags(repo: &crate::storage::repository::Repository, id: &str) -> Vec<String> {
+    repo.nodes
+        .iter()
+        .find(|node| node.id == id)
+        .and_then(|node| node.balancer.as_ref())
+        .map(crate::xray::config::balancer_members)
+        .unwrap_or_default()
+}
+
+#[cfg(any(windows, target_os = "macos", target_os = "android"))]
+fn paired(tags: &[String], ports: &[u16]) -> Vec<(String, u16)> {
+    tags.iter().cloned().zip(ports.iter().copied()).collect()
+}
+
+/// `count` distinct free loopback ports. The listeners are held together and
+/// released at once, so Windows cannot hand the same ephemeral port out twice.
+#[cfg(any(windows, target_os = "macos", target_os = "android"))]
+fn probe_ports(count: usize) -> Option<Vec<u16>> {
+    let listeners = (0..count)
+        .map(|_| std::net::TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, 0)))
+        .collect::<std::io::Result<Vec<_>>>()
+        .ok()?;
+    listeners
+        .iter()
+        .map(|listener| listener.local_addr().ok().map(|addr| addr.port()))
+        .collect()
+}
+
+/// Times every port at once, in the order given. An auto server is as fast as
+/// its best member, which a leastPing balancer picks once it has data.
+#[cfg(any(windows, target_os = "macos", target_os = "android"))]
+async fn timings(ports: &[u16], custom_url: &str) -> Vec<Option<u64>> {
+    let mut probes = tokio::task::JoinSet::new();
+    for (index, &port) in ports.iter().enumerate() {
+        let url = custom_url.to_owned();
+        probes.spawn(async move { (index, probe_target(port, &url).await) });
+    }
+    let mut elapsed = vec![None; ports.len()];
+    while let Some(result) = probes.join_next().await {
+        if let Ok((index, value)) = result {
+            elapsed[index] = value;
+        }
+    }
+    elapsed
 }
 
 /// Whole-probe budget, including the cold first request through the tunnel.

@@ -38,6 +38,7 @@ impl Default for Snapshot {
 }
 pub async fn publish(state: &AppState, app: &tauri::AppHandle, snapshot: Snapshot) {
     *state.snapshot.write().await = snapshot.clone();
+    crate::app::tray::show_connection(app, snapshot.status == "connected");
     if app.emit("vpn://state", snapshot).is_err() {
         log::warn!("Unable to deliver connection state event");
     }
@@ -215,7 +216,10 @@ async fn connect_with_selection(
             }
             log::warn!(
                 "Windows TUN startup failed ({}); retrying once",
-                result.as_ref().err().map_or("", |error| error.message.as_str())
+                result
+                    .as_ref()
+                    .err()
+                    .map_or("", |error| error.message.as_str())
             );
             result = connect_session(state, app, candidate.clone(), &mut session, generation).await;
         }
@@ -558,10 +562,11 @@ fn tun_helper_alive(session: &Session) -> bool {
 /// A failure of the Windows tunnel adapter itself. It says nothing about the
 /// server, so trying the next candidate would only repeat it.
 fn local_tunnel_failure(error: &BackendError) -> bool {
-    matches!(error.code, "TUN_ADAPTER_TIMEOUT" | "TUN_FAILED" | "ROUTING_CONFLICT")
-        || (error.code == "CORE_START_FAILED"
-            && (error.message.starts_with("Wintun")
-                || error.message.starts_with("Windows tunnel")))
+    matches!(
+        error.code,
+        "TUN_ADAPTER_TIMEOUT" | "TUN_FAILED" | "ROUTING_CONFLICT"
+    ) || (error.code == "CORE_START_FAILED"
+        && (error.message.starts_with("Wintun") || error.message.starts_with("Windows tunnel")))
 }
 fn keeps_prepared_core(code: &str) -> bool {
     matches!(code, "CANCELLED" | "SERVER_UNREACHABLE" | "IP_UNAVAILABLE")
@@ -669,6 +674,13 @@ pub async fn auto_connect(state: &Arc<AppState>, app: &tauri::AppHandle, id: Str
     }
     let mut delay = 3u64;
     for attempt in 1..=6 {
+        // A pick made while disconnected changes no connection generation, so it
+        // is checked here: the retry used to reconnect the server chosen before
+        // and saved it as the selection again, over the user's new choice.
+        if picked_elsewhere(state, &id).await {
+            log::info!("Automatic connection stopped: another server was selected");
+            return;
+        }
         let error = match connect(state, app, id.clone()).await {
             Ok(()) => return,
             Err(error) => error,
@@ -695,6 +707,12 @@ pub async fn auto_connect(state: &Arc<AppState>, app: &tauri::AppHandle, id: Str
         }
         delay = (delay * 2).min(30);
     }
+}
+/// Whether the saved selection is no longer `id`. Retries in the background
+/// (start-up connection, recovery) serve the server the user chose; a server
+/// picked since then must not be overwritten by a retry of the old one.
+async fn picked_elsewhere(state: &AppState, id: &str) -> bool {
+    state.repository.read().await.selected_server_id.as_deref() != Some(id)
 }
 pub(super) fn schedule_recovery(state: Arc<AppState>, app: tauri::AppHandle, server_id: String) {
     if state.recovery_running.swap(true, Ordering::AcqRel) {
@@ -730,6 +748,12 @@ pub(super) fn schedule_recovery(state: Arc<AppState>, app: tauri::AppHandle, ser
                 break;
             }
             if state.snapshot.read().await.status == "connected" {
+                break;
+            }
+            // Same as in auto_connect: the user picked another server after the
+            // tunnel dropped. Recovering the old one would make it the selection.
+            if picked_elsewhere(&state, &server_id).await {
+                log::info!("Automatic recovery stopped: another server was selected");
                 break;
             }
             let Ok(_transaction) = state.updates.try_lock() else {
@@ -806,14 +830,91 @@ mod generation_tests {
         );
     }
 
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn a_pick_made_while_disconnected_stops_background_retries() {
+        let directory = tempfile::tempdir().unwrap();
+        let runtime = crate::runtime::RuntimePaths::new(
+            std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("runtime"),
+        );
+        let state = AppState::open(directory.path().into(), runtime).unwrap();
+        let old = crate::subscription::uri::parse("socks5://a.example:1080", "first").unwrap();
+        let new = crate::subscription::uri::parse("socks5://b.example:1080", "second").unwrap();
+        {
+            let mut repo = state.repository.write().await;
+            repo.nodes = vec![old.clone(), new.clone()];
+            repo.selected_server_id = Some(old.id.clone());
+        }
+        // The start-up connection or a recovery still serves the selected server.
+        assert!(!picked_elsewhere(&state, &old.id).await);
+        // The user picks a server from another subscription between two retries:
+        // no connection generation changes, only the saved selection.
+        let generation = state.connection_generation.load(Ordering::Acquire);
+        super::super::catalog_service::mutate(
+            &state,
+            super::super::catalog_service::Mutation::SelectServer { id: new.id.clone() },
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            state.connection_generation.load(Ordering::Acquire),
+            generation
+        );
+        assert!(picked_elsewhere(&state, &old.id).await);
+        assert!(!picked_elsewhere(&state, &new.id).await);
+    }
+
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn lead_members_are_saved_and_dropped_with_their_auto_server() {
+        let directory = tempfile::tempdir().unwrap();
+        let runtime = crate::runtime::RuntimePaths::new(
+            std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("runtime"),
+        );
+        let state = AppState::open(directory.path().into(), runtime).unwrap();
+        let mut auto = crate::subscription::uri::parse("socks5://a.example:1080", "sub").unwrap();
+        auto.balancer = Some(crate::domain::node::BalancerOptions {
+            tag: "auto".into(),
+            selector: vec!["proxy".into()],
+            strategy: serde_json::json!({"type": "leastPing"}),
+            observatory: None,
+            burst_observatory: None,
+            outbounds: vec![
+                serde_json::json!({"tag": "proxy-1", "protocol": "socks"}),
+                serde_json::json!({"tag": "proxy-2", "protocol": "socks"}),
+            ],
+        });
+        let plain = crate::subscription::uri::parse("socks5://b.example:1080", "sub").unwrap();
+        state.repository.write().await.nodes = vec![auto.clone(), plain.clone()];
+        let catalog = super::super::catalog_service::set_balancer_lead;
+        catalog(&state, &auto.id, "proxy-2").await.unwrap();
+        // Unknown members and plain servers are ignored.
+        catalog(&state, &auto.id, "missing").await.unwrap();
+        catalog(&state, &plain.id, "proxy-1").await.unwrap();
+        let leads = state.repository.read().await.balancer_leads.clone();
+        assert_eq!(leads.len(), 1);
+        assert_eq!(leads[&auto.id], "proxy-2");
+        // Saved with the rest of the repository.
+        assert_eq!(state.store.load().unwrap().balancer_leads, leads);
+    }
+
     #[test]
     fn local_adapter_failures_stop_candidate_rotation() {
         let local = |code, message| local_tunnel_failure(&BackendError::new(code, message));
         assert!(local("CORE_START_FAILED", "Wintun adapter startup failed"));
-        assert!(local("CORE_START_FAILED", "Windows tunnel route setup failed"));
-        assert!(local("TUN_ADAPTER_TIMEOUT", "Windows did not make the tunnel adapter ready"));
+        assert!(local(
+            "CORE_START_FAILED",
+            "Windows tunnel route setup failed"
+        ));
+        assert!(local(
+            "TUN_ADAPTER_TIMEOUT",
+            "Windows did not make the tunnel adapter ready"
+        ));
         // A server the core rejects is worth replacing with the next candidate.
-        assert!(!local("CORE_START_FAILED", "Xray exited before the tunnel was ready"));
+        assert!(!local(
+            "CORE_START_FAILED",
+            "Xray exited before the tunnel was ready"
+        ));
         assert!(!local("SERVER_UNREACHABLE", "Server did not answer"));
     }
 
@@ -827,7 +928,10 @@ mod generation_tests {
             begin_generation(&generation, Some(first)).unwrap_err().code,
             "CANCELLED"
         );
-        assert_eq!(begin_generation(&generation, Some(second)).unwrap(), second + 1);
+        assert_eq!(
+            begin_generation(&generation, Some(second)).unwrap(),
+            second + 1
+        );
     }
 
     #[test]

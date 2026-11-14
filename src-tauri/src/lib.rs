@@ -243,12 +243,15 @@ pub fn run() {
             #[cfg(target_os = "android")]
             platform::android::install(app.handle());
             // The Android core is compiled into the APK and never updated apart from it.
-            let active = crate::xray::updater::current(&state.data.join("core"));
-            if !cfg!(target_os = "android") && active != crate::xray::bundle::VERSION {
+            let core_directory = state.data.join("core");
+            let active = crate::xray::updater::current(&core_directory);
+            if !cfg!(target_os = "android")
+                && crate::xray::updater::newer(&active, crate::xray::bundle::VERSION)
+            {
                 let resolved = tauri::async_runtime::block_on(async {
                     tokio::time::timeout(
                         std::time::Duration::from_secs(15),
-                        crate::xray::updater::prepare(&active, &state.data.join("core")),
+                        crate::xray::updater::prepare(&active, &core_directory),
                     )
                     .await
                 });
@@ -258,6 +261,19 @@ pub fn run() {
                     });
                 } else {
                     log::warn!("Updated core unavailable; using verified bundled fallback");
+                }
+            } else if !cfg!(target_os = "android") && active != crate::xray::bundle::VERSION {
+                // An application update brought a core at least as new as the one
+                // downloaded earlier. The old choice used to win and kept Lumen on
+                // the older core for good.
+                log::info!(
+                    "Bundled Xray {} replaces downloaded {active}",
+                    crate::xray::bundle::VERSION
+                );
+                if crate::xray::updater::activate(&core_directory, crate::xray::bundle::VERSION)
+                    .is_err()
+                {
+                    log::warn!("Could not record the bundled Xray version");
                 }
             }
             #[cfg(all(windows, not(debug_assertions)))]
@@ -290,6 +306,26 @@ pub fn run() {
                         services::vpn_service::prewarm(&startup).await;
                     }
                 });
+                // New Xray releases are picked up on every launch, once the
+                // connection and the first subscription refresh have had their turn.
+                #[cfg(not(target_os = "android"))]
+                {
+                    let updates = state.clone();
+                    let handle = app.handle().clone();
+                    tauri::async_runtime::spawn(async move {
+                        tokio::time::sleep(std::time::Duration::from_secs(20)).await;
+                        match commands::updates::update_core_in_background(&updates).await {
+                            Ok(Some(version)) => {
+                                log::info!("Xray updated to {version} in the background");
+                                let _ = tauri::Emitter::emit(&handle, "core://updated", version);
+                            }
+                            Ok(None) => {}
+                            Err(error) => {
+                                log::warn!("Background Xray update failed: {}", error.code);
+                            }
+                        }
+                    });
+                }
             }
             app::tray::install(app, &state)?;
 

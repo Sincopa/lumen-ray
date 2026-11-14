@@ -4,7 +4,7 @@ use crate::domain::{
     node::VpnNode,
 };
 use serde::Serialize;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 pub const MAX_BYTES: usize = 4 * 1024 * 1024;
 pub const MAX_NODES: usize = 4096;
@@ -78,43 +78,43 @@ pub fn parse(input: &str, subscription: &str) -> Result<ParsedSubscription> {
 
                 if has_balancers || proxy_outbounds.len() > 1 {
                     // Auto / Balanced node representing a cluster of servers
-                    let mut first_entry = (*proxy_outbounds[0]).clone();
-                    if let (Some(rem), Some(obj)) = (remarks, first_entry.as_object_mut()) {
-                        obj.insert("remarks".to_string(), serde_json::json!(rem));
-                    }
-                    let parsed = super::xray_json::parse(&first_entry, subscription);
+                    let (b_tag, selector, strategy) = if let Some(b) = root
+                        .get("routing")
+                        .and_then(|r| r.get("balancers"))
+                        .and_then(|b| b.as_array())
+                        .and_then(|a| a.first())
+                    {
+                        (
+                            b["tag"].as_str().unwrap_or("auto").to_string(),
+                            b["selector"]
+                                .as_array()
+                                .map(|arr| {
+                                    arr.iter()
+                                        .filter_map(|s| s.as_str().map(String::from))
+                                        .collect()
+                                })
+                                .unwrap_or_else(|| vec!["proxy".to_string()]),
+                            b.get("strategy")
+                                .cloned()
+                                .unwrap_or_else(|| serde_json::json!({"type": "leastPing"})),
+                        )
+                    } else {
+                        (
+                            "auto".to_string(),
+                            vec!["proxy".to_string()],
+                            serde_json::json!({"type": "leastPing"}),
+                        )
+                    };
+                    // The core runs the raw outbounds; the node only needs one member
+                    // Lumen can read for its address and protocol. The first outbound
+                    // alone used to decide, and one with settings Lumen does not model
+                    // (sockopt, mux) dropped the whole auto server from the list.
+                    let parsed = representative(&proxy_outbounds, remarks, subscription);
                     match parsed {
                         Ok(mut node) => {
                             if let Some(rem) = remarks {
                                 node.name = rem.to_string();
                             }
-                            let (b_tag, selector, strategy) = if let Some(b) = root
-                                .get("routing")
-                                .and_then(|r| r.get("balancers"))
-                                .and_then(|b| b.as_array())
-                                .and_then(|a| a.first())
-                            {
-                                (
-                                    b["tag"].as_str().unwrap_or("auto").to_string(),
-                                    b["selector"]
-                                        .as_array()
-                                        .map(|arr| {
-                                            arr.iter()
-                                                .filter_map(|s| s.as_str().map(String::from))
-                                                .collect()
-                                        })
-                                        .unwrap_or_else(|| vec!["proxy".to_string()]),
-                                    b.get("strategy").cloned().unwrap_or_else(
-                                        || serde_json::json!({"type": "leastPing"}),
-                                    ),
-                                )
-                            } else {
-                                (
-                                    "auto".to_string(),
-                                    vec!["proxy".to_string()],
-                                    serde_json::json!({"type": "leastPing"}),
-                                )
-                            };
                             let observatory = root.get("observatory").cloned();
                             let mut burst_observatory = root.get("burstObservatory").cloned();
                             // Without health checks Xray keeps balancing onto dead servers,
@@ -204,13 +204,23 @@ pub fn parse(input: &str, subscription: &str) -> Result<ParsedSubscription> {
         rules: vec![],
         routing_off,
     };
-    let mut seen = HashSet::new();
+    // An id is the node's configuration without its name. Two entries that differ
+    // only in their name (an auto server for every region over the same members,
+    // say) are both listed: the later one gets an id derived from its name. Only
+    // an exact repeat is dropped.
+    let mut seen: HashMap<String, HashSet<String>> = HashMap::new();
     for (index, entry) in entries.into_iter().enumerate() {
         match entry {
-            Ok(node) => {
-                if seen.insert(node.id.clone()) {
-                    result.nodes.push(node);
+            Ok(mut node) => {
+                let names = seen.entry(node.id.clone()).or_default();
+                if names.contains(&node.name) {
+                    continue;
                 }
+                if !names.is_empty() {
+                    node.id = named_id(&node.id, &node.name);
+                }
+                names.insert(node.name.clone());
+                result.nodes.push(node);
             }
             Err(error) => result.diagnostics.push(ImportDiagnostic {
                 index,
@@ -237,6 +247,41 @@ pub fn parse(input: &str, subscription: &str) -> Result<ParsedSubscription> {
         }
     }
     Ok(result)
+}
+
+/// The member an auto server is shown as: the first outbound Lumen can read, in
+/// the subscription's order, so an auto server that parsed before keeps its id.
+/// Fails with the first error only when no member is readable.
+fn representative(
+    outbounds: &[&serde_json::Value],
+    remarks: Option<&str>,
+    subscription: &str,
+) -> Result<VpnNode> {
+    let mut first_error = None;
+    for outbound in outbounds {
+        let mut entry = (*outbound).clone();
+        if let (Some(rem), Some(obj)) = (remarks, entry.as_object_mut()) {
+            obj.insert("remarks".to_string(), serde_json::json!(rem));
+        }
+        match super::xray_json::parse(&entry, subscription) {
+            Ok(node) => return Ok(node),
+            Err(error) => {
+                first_error.get_or_insert(error);
+            }
+        }
+    }
+    Err(first_error.unwrap_or_else(BackendError::invalid))
+}
+
+/// A stable id for an entry whose configuration repeats an earlier one under
+/// another name.
+fn named_id(id: &str, name: &str) -> String {
+    use sha2::{Digest, Sha256};
+    let mut hasher = Sha256::new();
+    hasher.update(id.as_bytes());
+    hasher.update([0]);
+    hasher.update(name.as_bytes());
+    format!("{:x}", hasher.finalize())
 }
 
 /// An outbound whose only server is loopback or unspecified cannot carry traffic.

@@ -96,7 +96,7 @@ export class ConnectionController {
 		return { status, info, error: undefined };
 	}
 
-	private async reconcileAfterError(cause: unknown) {
+	private async reconcileAfterError(cause: unknown, target?: string) {
 		// An IPC timeout is an unknown outcome: reconcile before enabling another connect.
 		const error = cancelled(cause) ? null : errorCode(cause);
 		try {
@@ -105,11 +105,21 @@ export class ConnectionController {
 				snapshot.error != null ? errorCode(snapshot.error) : null;
 			// The native session wins once it has connected. A client timeout must
 			// not stay on screen after that, while a still-pending or failed
-			// session keeps the error that reconcile observed.
+			// session keeps the error that reconcile observed. A switch the
+			// backend undid (it went back to the previous server, often in another
+			// subscription) keeps its error: silently showing the old server
+			// looked as if Lumen had ignored the pick.
+			const returned =
+				target !== undefined &&
+				snapshot.status === 'connected' &&
+				snapshot.info?.serverId !== target;
 			this.update({
 				status: snapshot.status,
 				info: snapshot.info,
-				error: snapshot.status === 'connected' ? reported : (reported ?? error),
+				error:
+					snapshot.status === 'connected'
+						? (reported ?? (returned ? error : null))
+						: (reported ?? error),
 			});
 		} catch {
 			this.update({ status: 'error', info: null, error });
@@ -159,14 +169,18 @@ export class ConnectionController {
 	}
 
 	/** Runs one request; only the latest request settles the screen. */
-	private async settle(ticket: number, action: () => Promise<unknown>) {
+	private async settle(
+		ticket: number,
+		action: () => Promise<unknown>,
+		target?: string,
+	) {
 		try {
 			await withTimeout(action(), this.timeoutMs);
 			if (ticket !== this.request) return;
 			const { status, info } = await this.readConnection();
 			if (ticket === this.request) this.update({ status, info });
 		} catch (e) {
-			if (ticket === this.request) await this.reconcileAfterError(e);
+			if (ticket === this.request) await this.reconcileAfterError(e, target);
 		} finally {
 			if (ticket === this.request)
 				this.update({ busy: pending.includes(this.current.status) });
@@ -237,15 +251,19 @@ export class ConnectionController {
 			status: 'connecting',
 			target: serverId,
 		});
-		await this.settle(ticket, async () => {
-			if (wasActive && !this.vpn.getSnapshot) {
-				try {
-					await withTimeout(this.vpn.disconnect(), this.timeoutMs);
-				} catch {
-					// A failed disconnect during a server switch is ignored.
+		await this.settle(
+			ticket,
+			async () => {
+				if (wasActive && !this.vpn.getSnapshot) {
+					try {
+						await withTimeout(this.vpn.disconnect(), this.timeoutMs);
+					} catch {
+						// A failed disconnect during a server switch is ignored.
+					}
 				}
-			}
-			await (this.vpn.connectExact?.(serverId) ?? this.vpn.connect(serverId));
-		});
+				await (this.vpn.connectExact?.(serverId) ?? this.vpn.connect(serverId));
+			},
+			serverId,
+		);
 	}
 }

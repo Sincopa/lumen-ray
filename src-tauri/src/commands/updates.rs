@@ -163,6 +163,44 @@ pub async fn check_core_update(
     let current = version(&state.core.read().await);
     updater::check(&current).await
 }
+/// Checks GitHub for a newer Xray release after every launch, which includes
+/// the first launch after an application update, and installs it.
+///
+/// The download is verified like a manual update and must accept the selected
+/// server's configuration. A running tunnel keeps the core it started with; the
+/// new one serves the next connection, so a launch never drops the VPN.
+#[cfg(not(target_os = "android"))]
+pub async fn update_core_in_background(state: &AppState) -> Result<Option<String>> {
+    let _guard = state.updates.lock().await;
+    let current = state.core.read().await.clone();
+    let Some(update) = updater::check(&version(&current)).await? else {
+        return Ok(None);
+    };
+    let directory = state.data.join("core");
+    let candidate = updater::prepare(&update.version, &directory).await?;
+    let repo = state.repository.read().await.clone();
+    if let Some(id) = &repo.selected_server_id {
+        let config = crate::xray::config::build(
+            &repo,
+            id,
+            10808,
+            10809,
+            repo.settings.network_mode == "tun",
+        )?;
+        crate::engine::xray::validate(
+            &candidate,
+            &serde_json::to_vec(&config).map_err(|_| BackendError::invalid())?,
+        )
+        .await?;
+    }
+    // A manual update may have won the race while this one downloaded.
+    if !updater::newer(&update.version, &version(&state.core.read().await)) {
+        return Ok(None);
+    }
+    updater::activate(&directory, &update.version)?;
+    *state.core.write().await = candidate;
+    Ok(Some(update.version))
+}
 #[tauri::command]
 pub async fn install_core_update(
     state: tauri::State<'_, Arc<AppState>>,

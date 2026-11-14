@@ -233,6 +233,97 @@ pub fn bind_outbounds(config: &mut Value, interface: &str) {
         outbound["streamSettings"]["sockopt"]["interface"] = json!(interface);
     }
 }
+/// The most members of one auto server a latency probe measures.
+pub const MAX_PROBED_MEMBERS: usize = 16;
+
+/// Outbound tags an auto server can send traffic to, in subscription order.
+///
+/// Xray matches each selector as a tag prefix. When none matches, the balancer
+/// has no candidates and the core falls back to its first outbound, which is
+/// then the only member.
+pub fn balancer_members(balancer: &crate::domain::node::BalancerOptions) -> Vec<String> {
+    let tags = || {
+        balancer
+            .outbounds
+            .iter()
+            .filter_map(|outbound| outbound["tag"].as_str())
+            .filter(|tag| !tag.is_empty())
+    };
+    let mut members: Vec<String> = Vec::new();
+    for tag in tags().filter(|tag| {
+        balancer
+            .selector
+            .iter()
+            .any(|prefix| tag.starts_with(prefix.as_str()))
+    }) {
+        if !members.iter().any(|member| member == tag) {
+            members.push(tag.to_owned());
+        }
+    }
+    if members.is_empty() {
+        members.extend(tags().take(1).map(str::to_owned));
+    }
+    members.truncate(MAX_PROBED_MEMBERS);
+    members
+}
+
+/// Moves the outbound tagged `lead` to the front and keeps the others in order.
+///
+/// A balancer that has no health data yet (a core that just started, a burst
+/// observatory that spreads its first round over a minute) returns no outbound,
+/// and Xray falls back to the first one in the config. When that member was
+/// down, the connection check after a server switch failed and Lumen went back
+/// to the previous server, often one from another subscription.
+fn lead_first(outbounds: &mut [Value], lead: &str) {
+    if let Some(index) = outbounds
+        .iter()
+        .position(|outbound| outbound["tag"] == lead)
+    {
+        outbounds[..=index].rotate_right(1);
+    }
+}
+
+/// The member an auto server should start on, from one timing of each member:
+/// the current lead while it still answers, otherwise the fastest one that did.
+/// When nothing answered (no network), the current lead stays.
+pub fn next_lead(current: Option<&str>, timings: &[(String, Option<u64>)]) -> Option<String> {
+    let answered = |tag: &str| {
+        timings
+            .iter()
+            .any(|(member, elapsed)| member == tag && elapsed.is_some())
+    };
+    if let Some(current) = current.filter(|current| answered(current)) {
+        return Some(current.to_owned());
+    }
+    timings
+        .iter()
+        .filter_map(|(member, elapsed)| elapsed.map(|elapsed| (elapsed, member)))
+        .min_by_key(|(elapsed, _)| *elapsed)
+        .map(|(_, member)| member.clone())
+        .or_else(|| current.map(str::to_owned))
+}
+
+/// Adds one local SOCKS inbound per auto-server member, routed straight to that
+/// member, so a single probe core can time every member.
+///
+/// The `probe` inbound goes through the balancer, which has no health data in a
+/// core that has just started: Xray then uses the first outbound, whatever its
+/// state. An auto server whose first member was down showed no ping at all,
+/// although the balancer itself carried traffic over the others.
+pub fn add_member_probes(config: &mut Value, members: &[(String, u16)]) {
+    for (index, (member, port)) in members.iter().enumerate() {
+        let tag = format!("probe-member-{index}");
+        if let Some(inbounds) = config["inbounds"].as_array_mut() {
+            inbounds.push(json!({"tag":tag,"listen":"127.0.0.1","port":port,"protocol":"socks","settings":super::probe::inbound_settings()}));
+        }
+        if let Some(rules) = config["routing"]["rules"].as_array_mut() {
+            rules.insert(
+                index,
+                json!({"type":"field","inboundTag":[tag],"outboundTag":member}),
+            );
+        }
+    }
+}
 /// Public resolvers that also answer DNS-over-TLS on port 853.
 const DOT_RESOLVERS: &[&str] = &[
     "1.1.1.1",
@@ -274,6 +365,9 @@ pub fn build(
     let (mut outbounds, balancer_tag, observatory, burst_observatory) =
         if let Some(balancer) = &node.balancer {
             let mut obs = balancer.outbounds.clone();
+            if let Some(lead) = repo.balancer_leads.get(selected) {
+                lead_first(&mut obs, lead);
+            }
             obs.push(json!({"tag":"direct","protocol":"freedom"}));
             obs.push(json!({"tag":"block","protocol":"blackhole"}));
             (

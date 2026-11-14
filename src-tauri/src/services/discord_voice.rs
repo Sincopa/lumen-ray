@@ -179,7 +179,7 @@ async fn fallback(
         if !current() {
             return None;
         }
-        let Some(core) = super::latency_service::isolated_core(state, &id).await else {
+        let Some(core) = super::latency_service::isolated_core(state, &id, false).await else {
             continue;
         };
         let carries = check(core.proxy_port, endpoints).await;

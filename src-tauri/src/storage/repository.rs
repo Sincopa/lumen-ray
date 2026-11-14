@@ -253,6 +253,11 @@ pub struct Repository {
     /// another server that answered, or `direct`. The rest of Discord keeps the VPN.
     #[serde(default)]
     pub discord_voice_routes: BTreeMap<String, String>,
+    /// Auto servers mapped to the member that answered Lumen's last ping. It
+    /// goes first among the balancer's outbounds: until the balancer has health
+    /// data of its own, Xray sends every connection to the first outbound.
+    #[serde(default)]
+    pub balancer_leads: BTreeMap<String, String>,
 }
 impl Default for Repository {
     fn default() -> Self {
@@ -269,6 +274,7 @@ impl Default for Repository {
             routing_mode: "global".into(),
             settings: Settings::default(),
             discord_voice_routes: BTreeMap::new(),
+            balancer_leads: BTreeMap::new(),
         }
     }
 }
