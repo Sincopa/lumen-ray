@@ -1,12 +1,16 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- The Lumen face from the tray icon, as a status bar silhouette. -->
+<!-- The Lumen star from the app icon, as a status bar silhouette. The path is in
+     the icon's 250-unit artboard; the group centres it in a 200-unit square. -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="24dp"
     android:height="24dp"
-    android:viewportWidth="24"
-    android:viewportHeight="24">
-    <path
-        android:fillColor="#FFFFFFFF"
-        android:fillType="evenOdd"
-        android:pathData="M12,2a10,10 0,1 0,0.001 0z M8.6,9.2a1.5,1.5 0,1 0,0.001 0z M15.4,9.2a1.5,1.5 0,1 0,0.001 0z M7.6,13.6C9.9,16.9 14.1,16.9 16.4,13.6C14.2,15.2 9.8,15.2 7.6,13.6z" />
+    android:viewportWidth="200"
+    android:viewportHeight="200">
+    <group
+        android:translateX="-25"
+        android:translateY="-25">
+        <path
+            android:fillColor="#FFFFFFFF"
+            android:pathData="M123.815 63.3091C124.245 62.2303 125.755 62.2303 126.185 63.3091L143.018 105.494C143.244 106.06 143.829 106.389 144.423 106.284L213.497 94.0526C214.927 93.7994 215.601 95.7709 214.322 96.4658L163.906 123.861C163.009 124.349 163.009 125.651 163.906 126.139L214.322 153.534C215.601 154.229 214.927 156.201 213.497 155.947L144.423 143.716C143.829 143.611 143.244 143.94 143.018 144.506L126.185 186.691C125.755 187.77 124.245 187.77 123.815 186.691L106.982 144.506C106.756 143.94 106.171 143.611 105.577 143.716L36.5033 155.947C35.0734 156.201 34.3992 154.229 35.6781 153.534L86.0935 126.139C86.9914 125.651 86.9914 124.349 86.0935 123.861L35.6781 96.4658C34.3992 95.7709 35.0734 93.7994 36.5033 94.0526L105.577 106.284C106.171 106.389 106.756 106.06 106.982 105.494L123.815 63.3091Z" />
+    </group>
 </vector>
