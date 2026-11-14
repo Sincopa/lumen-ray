@@ -438,6 +438,7 @@
 					server={currentServer}
 					subscriptionName={activeSub?.name}
 					step={editorStep}
+					isNew={!$catalogStore.rules.some((rule) => rule.id === editing?.id)}
 					allowFinal={!manualCatchAllId || manualCatchAllId === editing.id}
 					onStepChange={(next) => (editorStep = next)}
 					onNameChange={(name) => {

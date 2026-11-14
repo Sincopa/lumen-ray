@@ -12,6 +12,7 @@
 	import crossIcon from '../../assets/close.svg';
 	import IconButton from '../../components/IconButton.svelte';
 	import MaterialIcon from '../../components/MaterialIcon.svelte';
+	import RoundCheckbox from '../../components/RoundCheckbox.svelte';
 	import { t } from '../../lib/i18n';
 
 	const searchTask = createDeferredTask();
@@ -137,6 +138,18 @@
 		),
 	);
 
+	// "Select all" covers the rows the search shows.
+	const allShownSelected = $derived(
+		filteredProcesses.length > 0 &&
+			filteredProcesses.every((p) => selectedNames.has(processKey(p))),
+	);
+	function toggleSelectAll() {
+		const shown = new Set(filteredProcesses.map(processKey));
+		selected = allShownSelected
+			? selected.filter((name) => !shown.has(name))
+			: [...selected, ...[...shown].filter((name) => !selectedNames.has(name))];
+	}
+
 	function toggleSelect(name: string) {
 		if (selectedNames.has(name)) {
 			selected = selected.filter((n) => n !== name);
@@ -191,6 +204,20 @@
 	class="process-picker-view"
 	aria-label={t('rules.selectProcess') || 'Выбор процесса'}
 >
+	{#if filteredProcesses.length > 1}
+		<div class="select-all-row">
+			<button
+				type="button"
+				class="select-all-btn"
+				aria-pressed={allShownSelected}
+				onclick={toggleSelectAll}
+			>
+				<span>{t('rules.selectAll')}</span>
+				<RoundCheckbox asSpan checked={allShownSelected} />
+			</button>
+		</div>
+	{/if}
+
 	<!-- Processes List -->
 	<div class="process-list" role="list">
 		{#if isAndroid}
@@ -307,6 +334,29 @@
 		box-sizing: border-box;
 		padding-top: 0;
 		position: relative;
+	}
+
+	/* Figma: a 28px row at y=72, its knob 20px from the right, 16px above the list. */
+	.select-all-row {
+		display: flex;
+		justify-content: flex-end;
+		flex-shrink: 0;
+		height: 28px;
+		margin-bottom: 16px;
+		padding-right: 16px;
+	}
+	.select-all-btn {
+		display: flex;
+		align-items: center;
+		gap: 16px;
+		padding: 0;
+		border: 0;
+		background: transparent;
+		color: #fff;
+		font-family: 'Satoshi', var(--font-family-base);
+		font-size: 12px;
+		font-weight: 500;
+		line-height: 16.2px;
 	}
 
 	.process-list {

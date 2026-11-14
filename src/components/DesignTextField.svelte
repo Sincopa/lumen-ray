@@ -29,102 +29,140 @@
 	}: Props = $props();
 
 	let input = $state<HTMLInputElement>();
+	const filled = $derived(!!value);
+
+	// The prefix and the paddings around the input focus it too.
+	function focusInput(event: PointerEvent) {
+		const target = event.target as HTMLElement;
+		if (target === input || target.closest('button')) return;
+		event.preventDefault();
+		input?.focus();
+	}
 </script>
 
-<!-- Labelled input pill. -->
-<div class="design-field">
-	<label class="field-label" for={id}>{label}</label>
-	<div class="input-pill" class:filled={!!value} class:invalid>
-		{#if prefix}<span class="input-prefix">{prefix}</span>{/if}
-		<input
-			bind:this={input}
-			{id}
-			class="text-input"
-			type="text"
-			bind:value
-			{oninput}
-			{onpaste}
-			{placeholder}
-			{maxlength}
-			{spellcheck}
-			autocomplete="off"
-			aria-invalid={invalid}
-		/>
-		{#if value}
-			<button
-				type="button"
-				class="clear-btn"
-				aria-label={t('rules.clear')}
-				onclick={() => {
-					value = '';
-					oninput?.();
-					input?.focus();
-				}}
-			>
-				<img src={clearIcon} alt="" width="32" height="32" />
-			</button>
-		{/if}
+<!-- Figma Component 58: the label sits inside the pill, above the value. -->
+<div
+	class="design-field"
+	class:filled
+	class:invalid
+	role="presentation"
+	onpointerdown={focusInput}
+>
+	<div class="field-body">
+		<label class="field-label" for={id}>{label}</label>
+		<div class="value-row">
+			{#if prefix}<span class="input-prefix">{prefix}</span>{/if}
+			<input
+				bind:this={input}
+				{id}
+				class="text-input"
+				type="text"
+				bind:value
+				{oninput}
+				{onpaste}
+				{placeholder}
+				{maxlength}
+				{spellcheck}
+				autocomplete="off"
+				aria-invalid={invalid}
+			/>
+		</div>
 	</div>
+	<!-- Stays in the layout and fades with the value, like Smart Animate. -->
+	<button
+		type="button"
+		class="clear-btn"
+		aria-label={t('rules.clear')}
+		tabindex={filled ? 0 : -1}
+		aria-hidden={!filled}
+		onclick={() => {
+			value = '';
+			oninput?.();
+			input?.focus();
+		}}
+	>
+		<img src={clearIcon} alt="" width="32" height="32" />
+	</button>
 </div>
 
 <style>
 	.design-field {
 		display: flex;
-		flex-direction: column;
-		gap: 12px;
-		width: 100%;
-	}
-	.field-label {
-		padding: 0 8px;
-		color: #fff;
-		font-size: 14px;
-		font-weight: 500;
-		line-height: 18.2px;
-		letter-spacing: -0.28px;
-		/* Figma measures the 12px gap from the cap height. */
-		text-box-trim: trim-both;
-		text-box-edge: cap alphabetic;
-	}
-	.input-pill {
-		display: flex;
 		align-items: center;
 		gap: 6px;
 		width: 100%;
 		height: 60px;
-		padding: 0 18px 0 24px;
+		padding: 0 14px 0 24px;
 		border-radius: 24px;
-		background: var(--design-panel);
+		/* 2% white empty. */
+		background-color: var(--design-panel);
 		-webkit-backdrop-filter: blur(25px);
 		backdrop-filter: blur(25px);
 		box-sizing: border-box;
+		cursor: text;
 		transition:
-			background-color 180ms ease,
+			background-color var(--field-duration) var(--ease-field),
 			box-shadow 180ms ease;
 	}
-	/* A filled field lifts to 5% white over a 20% black base. */
-	.input-pill.filled {
-		background: linear-gradient(#ffffff0d, #ffffff0d), #00000033;
+	/* Figma stacks 5% white over 20% black; one color keeps it animatable. */
+	.design-field.filled {
+		background-color: rgba(53, 53, 53, 0.24);
 	}
-	.input-pill:focus-within {
+	/* The same black base under a 12% red tint. */
+	.design-field.invalid {
+		background-color: rgba(104, 44, 42, 0.3);
+	}
+	.design-field:focus-within {
 		box-shadow: inset 0 0 0 1px #ffffff1f;
 	}
-	/* An invalid value tints the whole pill red. */
-	.input-pill.invalid {
-		background: linear-gradient(#ff6c671f, #ff6c671f), #00000033;
+
+	/* Geist centers its caps in a 1.3em line, so a line box centered on the
+	   Figma cap box lands on it: label caps at y 18-27, value caps at 33-43. */
+	.field-body {
+		position: relative;
+		flex: 1;
+		min-width: 0;
+		height: 100%;
 	}
-	.input-prefix {
-		flex-shrink: 0;
-		color: #ffffff40;
+	.field-label {
+		position: absolute;
+		top: 14.7px;
+		left: 0;
+		right: 0;
+		overflow: hidden;
+		color: #fff;
 		font-size: 12px;
 		line-height: 15.6px;
 		letter-spacing: -0.24px;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+		pointer-events: none;
+		transition: color var(--field-duration) var(--ease-field);
+	}
+	.filled .field-label {
+		color: #ffffff40;
+	}
+	.value-row {
+		display: flex;
+		align-items: flex-start;
+		gap: 2px;
+		height: 100%;
+	}
+	.input-prefix {
+		flex-shrink: 0;
+		padding-top: 28.9px;
+		color: #ffffff40;
+		font-size: 14px;
+		line-height: 18.2px;
+		letter-spacing: -0.28px;
 		user-select: none;
 	}
+	/* Full height, so a click anywhere below the label lands in the input. */
 	.text-input {
 		flex: 1;
 		min-width: 0;
 		height: 100%;
-		padding: 0 !important;
+		padding: 28.9px 0 12.9px !important;
 		border: 0 !important;
 		border-radius: 0 !important;
 		background: transparent !important;
@@ -135,11 +173,13 @@
 		font-size: 14px;
 		line-height: 18.2px;
 		letter-spacing: -0.28px;
+		box-sizing: border-box;
 		appearance: none;
 	}
 	.text-input::placeholder {
-		color: #ffffff4d;
+		color: #ffffff40;
 	}
+
 	.clear-btn {
 		display: grid;
 		place-items: center;
@@ -151,7 +191,21 @@
 		border: 0;
 		border-radius: 12px;
 		background: #ffffff1a;
-		transition: background-color 160ms ease;
+		cursor: pointer;
+		opacity: 0;
+		visibility: hidden;
+		transition:
+			opacity var(--field-duration) var(--ease-field),
+			visibility 0s var(--field-duration),
+			background-color 160ms ease;
+	}
+	.filled .clear-btn {
+		opacity: 1;
+		visibility: visible;
+		transition:
+			opacity var(--field-duration) var(--ease-field),
+			visibility 0s,
+			background-color 160ms ease;
 	}
 	.clear-btn:hover {
 		background: #ffffff2e;

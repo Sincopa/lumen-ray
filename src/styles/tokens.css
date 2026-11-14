@@ -69,6 +69,9 @@
 		1
 	);
 	--morph-duration: 600ms;
+	/* Figma Smart Animate "Ease out", 300 ms: the fields' empty/filled states. */
+	--ease-field: cubic-bezier(0, 0, 0.58, 1);
+	--field-duration: 300ms;
 
 	/* Z-index */
 	--z-modal: 100;

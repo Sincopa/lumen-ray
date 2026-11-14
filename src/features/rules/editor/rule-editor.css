@@ -171,22 +171,22 @@
 	overflow-y: auto;
 	box-sizing: border-box;
 }
-.rule-editor-view .field-group {
-	display: flex;
-	flex-direction: column;
-	gap: 12px;
-	width: 100%;
-}
-.rule-editor-view .field-label {
+/* "Добавление домена": 24px Medium, the verb at 50%, the type on its own line. */
+.rule-editor-view .editor-title {
+	/* Two 26.4px lines from y=88, then the 24px gap: the first field at y=164. */
+	margin: 0 0 -1px;
 	padding: 0 8px;
 	color: #fff;
-	font-size: 14px;
+	font-size: 24px;
 	font-weight: 500;
-	line-height: 18.2px;
-	letter-spacing: -0.28px;
-	/* Figma measures the 12px gap from the cap height. */
-	text-box-trim: trim-both;
-	text-box-edge: cap alphabetic;
+	line-height: 26.4px;
+	letter-spacing: -0.48px;
+}
+.rule-editor-view .editor-title span {
+	display: block;
+}
+.rule-editor-view .editor-title .title-verb {
+	color: #ffffff80;
 }
 .rule-editor-view .field-hint {
 	margin: 0;
@@ -196,110 +196,16 @@
 	line-height: 1.4;
 }
 
-.rule-editor-view .selector-pill {
-	display: flex;
-	align-items: center;
-	gap: 6px;
-	width: 100%;
-	height: 60px;
-	border: 0;
-	border-radius: 24px;
-	background: var(--design-panel);
-	color: #fff;
-	-webkit-backdrop-filter: blur(25px);
-	backdrop-filter: blur(25px);
-	box-sizing: border-box;
-	transition: background-color 180ms ease;
-	justify-content: space-between;
-	padding: 0 18px 0 14px;
-	text-align: left;
-}
-/* A made choice lifts the pill to 5%. */
-.rule-editor-view .selector-pill.chosen {
-	background: var(--design-panel-open);
-}
-.rule-editor-view .selector-pill:hover {
-	background: #ffffff14;
-}
-
-.rule-editor-view .server-info {
-	display: flex;
-	align-items: center;
-	gap: 10px;
-	min-width: 0;
-}
-.rule-editor-view .server-badge {
-	display: grid;
-	place-items: center;
-	flex: 0 0 32px;
-	width: 32px;
-	height: 32px;
-	border-radius: 50%;
-	background: #ffffff1a;
-}
-.rule-editor-view .selector-value {
-	overflow: hidden;
-	color: #fff;
-	font-size: 14px;
-	line-height: 18.2px;
-	text-overflow: ellipsis;
-	white-space: nowrap;
-}
-.rule-editor-view .selector-value.small,
-.rule-editor-view .selector-value.placeholder-val {
-	padding-left: 2px;
-	font-size: 12px;
-	line-height: 15.6px;
-	letter-spacing: -0.2px;
-}
-.rule-editor-view .selector-value strong {
-	margin-right: 4px;
+/* Inside the process picker field. */
+.rule-editor-view .process-count {
 	font-weight: 600;
+}
+.rule-editor-view .process-name {
+	overflow: hidden;
+	text-overflow: ellipsis;
 }
 .rule-editor-view .muted {
 	color: #ffffff80;
-}
-.rule-editor-view .chevron-right {
-	width: 24px;
-	height: 24px;
-	transform: rotate(-90deg);
-	filter: brightness(0) invert(1);
-}
-
-.rule-editor-view .geo-examples {
-	display: flex;
-	flex-direction: column;
-	gap: 16px;
-}
-.rule-editor-view .example-label {
-	padding: 0 8px;
-	color: #ffffff80;
-	font-size: 14px;
-	line-height: 18.2px;
-	letter-spacing: -0.3px;
-}
-.rule-editor-view .example-chips {
-	display: flex;
-	flex-wrap: wrap;
-	gap: 10px;
-}
-.rule-editor-view .example-tag {
-	height: 42px;
-	padding: 0 18px;
-	border: 0;
-	border-radius: 123px;
-	background: #ffffff08;
-	color: #ffffff80;
-	font-size: 14px;
-	line-height: 18.2px;
-	transition:
-		background-color 160ms ease,
-		color 160ms ease;
-}
-.rule-editor-view .example-tag:hover,
-.rule-editor-view .example-tag.active {
-	background: #ffffff1a;
-	color: #fff;
 }
 
 .rule-editor-view .error-msg {

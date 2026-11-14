@@ -4,9 +4,9 @@
 	import { t } from '../../lib/i18n';
 	import { screen, morphIn, morphOut } from '../../lib/motion';
 	import DesignTextField from '../../components/DesignTextField.svelte';
+	import DesignPickerField from '../../components/DesignPickerField.svelte';
 	import IconButton from '../../components/IconButton.svelte';
 	import backIcon from '../../assets/back.svg';
-	import chevronIcon from '../../assets/chevron-down.svg';
 	import checkIcon from '../../assets/check.svg';
 	import './editor/rule-editor.css';
 	import RuleTypeStep from './editor/RuleTypeStep.svelte';
@@ -39,6 +39,9 @@
 		onNameChange?: (name: string) => void;
 		/** Offers the catch-all type. There is at most one. */
 		allowFinal?: boolean;
+		/** Not saved yet. The editor remounts after the pickers, so the step it
+		    opened on cannot tell. */
+		isNew?: boolean;
 	}
 
 	let {
@@ -54,6 +57,7 @@
 		onStepChange,
 		onNameChange,
 		allowFinal = true,
+		isNew = step === 'type',
 	}: Props = $props();
 
 	const ruleTypes: RuleTypeOption[] = [
@@ -101,7 +105,24 @@
 	// Back from the form returns to the type list only for a new rule. An
 	// existing rule opens on the form, so back leaves the editor.
 	// svelte-ignore state_referenced_locally
-	const startedOnType = step === 'type';
+	const startedOnType = isNew;
+
+	// "Добавление домена": the first word is dimmed, the type wraps under it.
+	const titleNoun: Record<RuleMatcher, string> = {
+		domain: 'rules.titleDomain',
+		application: 'rules.titleApplication',
+		geosite: 'GeoSite',
+		geoip: 'GeoIP',
+		final: 'rules.titleFinal',
+	};
+	const titleVerb = $derived(
+		t(startedOnType ? 'rules.titleAdd' : 'rules.titleEdit'),
+	);
+	const titleType = $derived(
+		titleNoun[matcher].startsWith('rules.')
+			? t(titleNoun[matcher])
+			: titleNoun[matcher],
+	);
 
 	function goBack() {
 		if (step === 'form' && startedOnType && onStepChange) {
@@ -199,6 +220,10 @@
 				/>
 			{:else}
 				<div class="form-container">
+					<h2 class="editor-title">
+						<span class="title-verb">{titleVerb}</span>
+						<span>{titleType}</span>
+					</h2>
 					{#if matcher === 'final'}
 						<p class="field-hint">{t('rules.finalHint')}</p>
 						<ServerField
@@ -212,7 +237,6 @@
 							id="domain-input"
 							label={t('rules.domainLink')}
 							prefix="https://"
-							placeholder="example.com"
 							bind:value={name}
 							invalid={!!error}
 							oninput={() => (error = '')}
@@ -225,29 +249,19 @@
 							onSelect={onSelectServer}
 						/>
 					{:else if matcher === 'application'}
-						<div class="field-group">
-							<span class="field-label">{t('rules.applicationField')}</span>
-							<button
-								type="button"
-								class="selector-pill"
-								class:chosen={processes.length > 0}
-								onclick={onSelectProcess}
-								aria-label={t('rules.selectProcess')}
-							>
-								<span
-									class="selector-value small"
-									class:placeholder-val={!processes.length}
-								>
-									{#if processes.length > 1}
-										<strong>{processes.length}</strong>
-										<span class="muted">{t('rules.selectedCount')}</span>
-									{:else}
-										{processes[0] ?? t('rules.selectProcess')}
-									{/if}
-								</span>
-								<img src={chevronIcon} alt="" class="chevron-right" />
-							</button>
-						</div>
+						<DesignPickerField
+							label={t('rules.selectProcess')}
+							chosen={processes.length > 0}
+							ariaLabel={t('rules.selectProcess')}
+							onclick={onSelectProcess}
+						>
+							{#if processes.length > 1}
+								<strong class="process-count">{processes.length}</strong>
+								<span class="muted">{t('rules.selectedCount')}</span>
+							{:else}
+								<span class="process-name">{processes[0]}</span>
+							{/if}
+						</DesignPickerField>
 						{#if isAndroid}
 							<p class="field-hint">{t('rules.androidAppHint')}</p>
 						{:else}

@@ -83,7 +83,7 @@
 		<DesignTextField
 			id="profile-name"
 			label={t('common.name')}
-			placeholder={t('common.name')}
+			placeholder={t('subscriptions.namePlaceholder')}
 			bind:value={name}
 			maxlength={80}
 			spellcheck
@@ -92,7 +92,6 @@
 			id="profile-domain-link"
 			label={t('subscriptions.profileLink')}
 			prefix="https://"
-			placeholder={t('subscriptions.domainLinkPlaceholder')}
 			bind:value={source}
 			invalid={!!error}
 			oninput={() => {

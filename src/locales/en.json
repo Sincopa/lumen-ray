@@ -50,7 +50,6 @@
 		"title": "My Subscriptions",
 		"addProfile": "Add profile",
 		"domainLink": "Domain link",
-		"domainLinkPlaceholder": "Add subscription link",
 		"pasteLink": "Paste link",
 		"addLink": "Add a link",
 		"importLink": "Import subscription",
@@ -65,7 +64,8 @@
 		"shareHint": "Copy the link to import this subscription on another device.",
 		"sourceUnavailable": "The link is unavailable in this demo session.",
 		"copyFailed": "Automatic copying failed. Select the link manually.",
-		"profileLink": "Profile link"
+		"profileLink": "Profile link",
+		"namePlaceholder": "Enter a name"
 	},
 	"servers": {
 		"title": "Servers",
@@ -280,10 +280,13 @@
 		"empty": "No rules yet.",
 		"editTitle": "Rule settings",
 		"kind": "Rule type",
-		"applicationField": "Application",
+		"titleAdd": "Add",
+		"titleEdit": "Edit",
+		"titleDomain": "domain",
+		"titleApplication": "application",
+		"titleFinal": "rule for everything else",
 		"selectProcess": "Select process",
 		"selectServer": "Select server",
-		"server": "Server",
 		"chooseProcessError": "Select a process",
 		"deleteSelected": "Delete selected",
 		"deleteConfirm": "Delete selected rules ({count})?",
@@ -303,7 +306,6 @@
 		"typeGeoipDesc": "Location by IP address: country, region, city, coordinates, provider, ASN.",
 		"domainLink": "Domain link",
 		"geoCategory": "{type} category",
-		"examplesLabel": "For example:",
 		"selectedCount": "selected",
 		"clear": "Clear",
 		"androidAppHint": "Selected apps bypass the VPN and use the regular network. Android cannot send a single app through another server."
