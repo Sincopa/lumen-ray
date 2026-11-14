@@ -116,5 +116,11 @@ jobs:
     env:
       GH_TOKEN: ${{ github.token }}
     steps:
+      - name: Checkout release notes script
+        uses: actions/checkout@v6
+
       - name: Publish verified release
-        run: gh release edit "$RELEASE_TAG" --draft=false --latest
+        run: |
+          set -eu
+          node src-tauri/build/release-notes.mjs "$RELEASE_TAG" --apply
+          gh release edit "$RELEASE_TAG" --draft=false --latest

@@ -143,10 +143,10 @@ jobs:
         with:
           tagName: v__VERSION__
           releaseName: Lumen v__VERSION__
-          releaseBody: Download the Windows installer or portable archive, the macOS disk image, or an Android APK below. Updater metadata and a version-bound signature are included.
+          # The publish job replaces this with the download table (src-tauri/build/release-notes.mjs).
+          releaseBody: Building release assets.
           releaseDraft: true
           prerelease: false
-          generateReleaseNotes: true
           uploadUpdaterJson: true
           updaterJsonPreferNsis: true
           args: --config src-tauri/tauri.release.conf.json --bundles nsis
@@ -285,4 +285,5 @@ jobs:
           set -eu
           version=$(jq -r .version src-tauri/tauri.conf.json)
           if [ "$GITHUB_REF_TYPE" = tag ]; then tag=$GITHUB_REF_NAME; else tag=v$version; fi
+          node src-tauri/build/release-notes.mjs "$tag" --apply
           gh release edit "$tag" --draft=false
