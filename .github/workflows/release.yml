@@ -10,6 +10,45 @@ permissions:
   contents: write
 
 jobs:
+  # The draft comes first, so a release problem fails in seconds rather than
+  # after the builds, and every platform uploads to it at the same time.
+  draft:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Check release version
+        if: github.ref_type == 'tag'
+        run: |
+          version=$(jq -r .version src-tauri/tauri.conf.json)
+          if [ "$GITHUB_REF_NAME" != "v$version" ]; then
+            echo "::error::Tag $GITHUB_REF_NAME does not match application version v$version"
+            exit 1
+          fi
+
+      - name: Create the draft release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -eu
+          version=$(jq -r .version src-tauri/tauri.conf.json)
+          if [ "$GITHUB_REF_TYPE" = tag ]; then tag=$GITHUB_REF_NAME; else tag=v$version; fi
+          if gh release view "$tag" >/dev/null 2>&1; then
+            echo "Release $tag already exists"
+            exit 0
+          fi
+          # Creating a release can fail for a moment on GitHub's side; retry briefly.
+          for attempt in 1 2 3; do
+            if gh release create "$tag" --draft --title "Lumen v$version" \
+              --notes "Building release assets." --target "$GITHUB_SHA"; then
+              exit 0
+            fi
+            sleep $((attempt * 10))
+          done
+          exit 1
+
   verify-frontend:
     runs-on: ubuntu-24.04
     permissions:
@@ -36,8 +75,10 @@ jobs:
       - name: Build frontend for browser checks
         run: npm run build
 
+  # Tests and clippy run in the verify jobs at the same time as the builds;
+  # publish waits for all of them.
   release-windows:
-    needs: verify-frontend
+    needs: draft
     runs-on: windows-latest
     env:
       LUMEN_SIGNING_THUMBPRINT: ${{ vars.WINDOWS_CERTIFICATE_THUMBPRINT }}
@@ -88,15 +129,6 @@ jobs:
             throw "plugins.updater.pubkey does not contain a minisign public key"
           }
 
-      - name: Check release version
-        if: github.ref_type == 'tag'
-        shell: pwsh
-        run: |
-          $version = (Get-Content -Raw src-tauri/tauri.conf.json | ConvertFrom-Json).version
-          if ($env:GITHUB_REF_NAME -ne "v$version") {
-            throw "Tag $env:GITHUB_REF_NAME does not match application version v$version"
-          }
-
       - name: Install dependencies
         run: npm ci
 
@@ -123,17 +155,8 @@ jobs:
           powershell -NoProfile -ExecutionPolicy Bypass -File src-tauri/build/sign-windows.ps1 -Mode Runtime
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
-      - name: Build frontend for native checks
+      - name: Build frontend
         run: npm run build
-
-      - name: Verify Rust backend
-        run: |
-          cargo test --locked --manifest-path src-tauri/Cargo.toml
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          cargo clippy --locked --manifest-path src-tauri/Cargo.toml --all-targets --all-features -- -D warnings
-
-      - name: Verify native local traffic
-        run: cargo test --locked --manifest-path src-tauri/Cargo.toml native_local_proxy_smoke -- --test-threads=1
 
       - name: Build and publish signed release
         uses: tauri-apps/tauri-action@v1
@@ -147,8 +170,8 @@ jobs:
           releaseBody: Building release assets.
           releaseDraft: true
           prerelease: false
-          uploadUpdaterJson: true
-          updaterJsonPreferNsis: true
+          # Publish writes latest.json once both desktop builds are on the draft.
+          uploadUpdaterJson: false
           args: --config src-tauri/tauri.release.conf.json --bundles nsis
 
       - name: Prepare and upload final release artifacts (Setup.exe and Portable.zip)
@@ -192,9 +215,9 @@ jobs:
         shell: pwsh
         run: powershell -NoProfile -ExecutionPolicy Bypass -File src-tauri/build/ci-windows-signing.ps1 -Mode Cleanup
 
-  # Runs after Windows: tauri-action re-uploads latest.json on the draft, so parallel jobs would race.
+  # Runs next to Windows: neither build writes latest.json, publish does.
   release-macos:
-    needs: release-windows
+    needs: draft
     runs-on: macos-latest
     env:
       RUST_TEST_THREADS: '1'
@@ -235,13 +258,8 @@ jobs:
       - name: Prepare verified Xray core
         run: sh src-tauri/build/prepare-core-macos.sh
 
-      - name: Build frontend for native checks
+      - name: Build frontend
         run: npm run build
-
-      - name: Verify Rust backend
-        run: |
-          cargo test --locked --manifest-path src-tauri/Cargo.toml
-          cargo clippy --locked --manifest-path src-tauri/Cargo.toml --all-targets --all-features -- -D warnings
 
       - name: Build and upload ad-hoc signed universal app to the draft
         uses: tauri-apps/tauri-action@v1
@@ -253,7 +271,7 @@ jobs:
           releaseName: Lumen v__VERSION__
           releaseDraft: true
           prerelease: false
-          uploadUpdaterJson: true
+          uploadUpdaterJson: false
           args: --target universal-apple-darwin --config src-tauri/tauri.release.conf.json --bundles app,dmg
 
       - name: Verify ad-hoc signed bundle
@@ -264,15 +282,130 @@ jobs:
           sh src-tauri/build/verify-macos-bundle.sh "$app"
           ls "$bundle"/dmg/*.dmg
 
+  # The APKs are built locally and uploaded to the draft before the tag is pushed.
   release-android:
-    needs: release-windows
+    needs: draft
     uses: ./.github/workflows/android.yml
     with:
       prebuilt: true
 
-  # Publish only after every platform's artifacts passed signature verification.
+  verify-windows:
+    runs-on: windows-latest
+    env:
+      LUMEN_SIGNING_THUMBPRINT: ${{ vars.WINDOWS_CERTIFICATE_THUMBPRINT }}
+      LUMEN_SIGNING_TRUST_SCOPE: LocalMachine
+      RUST_TEST_THREADS: '1'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: '1.92.0'
+          components: clippy
+
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: './src-tauri -> target'
+          cache-on-failure: true
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Import persistent Windows Code Signing certificate
+        timeout-minutes: 3
+        shell: pwsh
+        env:
+          WINDOWS_CERTIFICATE_PFX_BASE64: ${{ secrets.WINDOWS_CERTIFICATE_PFX_BASE64 }}
+          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File src-tauri/build/ci-windows-signing.ps1 -Mode Import
+
+      - name: Prepare verified Xray core
+        shell: pwsh
+        run: |
+          powershell -NoProfile -File src-tauri/build/prepare-core.ps1
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          powershell -NoProfile -ExecutionPolicy Bypass -File src-tauri/build/sign-windows.ps1 -Mode Runtime
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Build frontend for native checks
+        run: npm run build
+
+      - name: Verify Rust backend
+        run: |
+          cargo test --locked --manifest-path src-tauri/Cargo.toml
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          cargo clippy --locked --manifest-path src-tauri/Cargo.toml --all-targets --all-features -- -D warnings
+
+      - name: Verify native local traffic
+        run: cargo test --locked --manifest-path src-tauri/Cargo.toml native_local_proxy_smoke -- --test-threads=1
+
+      - name: Remove imported Windows signing key
+        if: always()
+        shell: pwsh
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File src-tauri/build/ci-windows-signing.ps1 -Mode Cleanup
+
+  verify-macos:
+    runs-on: macos-latest
+    env:
+      RUST_TEST_THREADS: '1'
+      APPLE_SIGNING_IDENTITY: '-'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: '1.92.0'
+          components: clippy
+
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: './src-tauri -> target'
+          cache-on-failure: true
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Prepare verified Xray core
+        run: sh src-tauri/build/prepare-core-macos.sh
+
+      - name: Build frontend for native checks
+        run: npm run build
+
+      - name: Verify Rust backend
+        run: |
+          cargo test --locked --manifest-path src-tauri/Cargo.toml
+          cargo clippy --locked --manifest-path src-tauri/Cargo.toml --all-targets --all-features -- -D warnings
+
+  # Publish only after every platform's artifacts passed signature verification
+  # and every check passed.
   publish:
-    needs: [release-windows, release-macos, release-android]
+    needs:
+      [
+        verify-frontend,
+        verify-windows,
+        verify-macos,
+        release-windows,
+        release-macos,
+        release-android,
+      ]
     runs-on: ubuntu-24.04
     steps:
       - name: Checkout
@@ -285,5 +418,6 @@ jobs:
           set -eu
           version=$(jq -r .version src-tauri/tauri.conf.json)
           if [ "$GITHUB_REF_TYPE" = tag ]; then tag=$GITHUB_REF_NAME; else tag=v$version; fi
+          node src-tauri/build/updater-manifest.mjs "$tag" --apply
           node src-tauri/build/release-notes.mjs "$tag" --apply
           gh release edit "$tag" --draft=false
