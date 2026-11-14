@@ -15,8 +15,15 @@
 	import ProcessPickerView from './ProcessPickerView.svelte';
 	import PresetsView from './PresetsView.svelte';
 	import RuleIdentity from './parts/RuleIdentity.svelte';
+	import RuleGroupIdentity from './parts/RuleGroupIdentity.svelte';
 	import RuleServerControls from './parts/RuleServerControls.svelte';
 	import ServerPickerPanel from './parts/ServerPickerPanel.svelte';
+	import {
+		groupEnabled,
+		groupRules,
+		type RuleGroup,
+		type RuleListItem,
+	} from './ruleGroups';
 	import {
 		findRuleIcon,
 		registerRuleIcons,
@@ -54,6 +61,10 @@
 	let selected = $state<string[]>([]);
 	let error = $state('');
 	let showPresets = $state(false);
+	/** Keys of the rule groups the user opened. */
+	let expanded = $state<string[]>([]);
+	/** Set while the server picker edits a whole group. */
+	let selectingGroup = $state<RuleGroup | null>(null);
 	let confirmSwitchToRules = $state(false);
 	let switchReason = $state<'preset' | 'catchAll'>('preset');
 
@@ -86,6 +97,13 @@
 				)
 			: $catalogStore.rules,
 	);
+	// A search shows every matching rule on its own row.
+	const listItems: RuleListItem[] = $derived(
+		normalizedQuery
+			? filtered.map((rule) => ({ type: 'rule', rule }))
+			: groupRules($catalogStore.rules),
+	);
+	const expandedKeys = $derived(new Set(expanded));
 
 	const appliedPresetIds = $derived(
 		new Set(
@@ -251,13 +269,72 @@
 		if (!selectingRule) return;
 		pendingServerId = server.id;
 		try {
-			await catalog.saveRule({ ...selectingRule, serverId: server.id });
+			if (selectingGroup) {
+				await catalog.saveRules(
+					selectingGroup.rules.map((rule) => ({
+						...rule,
+						serverId: server.id,
+					})),
+				);
+			} else {
+				await catalog.saveRule({ ...selectingRule, serverId: server.id });
+			}
 			selectingRule = null;
+			selectingGroup = null;
 			pendingServerId = '';
 			error = '';
 		} catch (e) {
 			error = t('errors.' + errorCode(e));
 		}
+	}
+
+	function groupLabel(group: RuleGroup): string {
+		return t(
+			group.kind === 'addresses' ? 'rules.groupAddresses' : 'rules.groupSites',
+			{ count: group.rules.length },
+		);
+	}
+
+	/** One rule that stands for the whole group in the shared row controls. */
+	function groupRow(group: RuleGroup): Rule {
+		return {
+			...group.rules[0],
+			name: groupLabel(group),
+			enabled: groupEnabled(group),
+		};
+	}
+
+	function toggleExpanded(key: string) {
+		expanded = expandedKeys.has(key)
+			? expanded.filter((k) => k !== key)
+			: [...expanded, key];
+	}
+
+	async function toggleGroup(group: RuleGroup) {
+		const enabled = !groupEnabled(group);
+		try {
+			await catalog.saveRules(
+				group.rules.map((rule) => ({ ...rule, enabled })),
+			);
+		} catch (e) {
+			error = t('errors.' + errorCode(e));
+		}
+	}
+
+	function groupSelected(group: RuleGroup): boolean {
+		return group.rules.every((rule) => selectedNames.has(rule.id));
+	}
+
+	function toggleGroupSelected(group: RuleGroup) {
+		const ids = new Set(group.rules.map((rule) => rule.id));
+		const rest = selected.filter((id) => !ids.has(id));
+		selected = groupSelected(group) ? rest : [...rest, ...ids];
+	}
+
+	function openGroupServerPicker(group: RuleGroup) {
+		selectingGroup = group;
+		selectingRule = groupRow(group);
+		pendingServerId = group.serverId;
 	}
 
 	function confirmServer() {
@@ -286,6 +363,7 @@
 	}
 
 	function openServerPicker(rule: Rule) {
+		selectingGroup = null;
 		selectingRule = rule;
 		pendingServerId = rule.serverId;
 	}
@@ -384,6 +462,37 @@
 	>
 		<MaterialIcon name="tune" size={18} />
 	</IconButton>
+{/snippet}
+
+{#snippet ruleRow(rule: Rule, nested: boolean)}
+	{@const server = serversById.get(rule.serverId)}
+	{@const ruleSubscription = subscriptionsById.get(rule.serverId)}
+	{@const matcher = ruleMatcherOf(rule)}
+	<article
+		class="rule-row"
+		class:nested
+		class:application-rule={matcher === 'application'}
+	>
+		<RuleIdentity
+			{rule}
+			{matcher}
+			serverName={serverLabel(rule, server, ruleSubscription?.name)}
+			ruleIcon={getRuleIcon(rule)}
+			onEdit={() => openRule(rule)}
+		/>
+		<RuleServerControls
+			{rule}
+			{matcher}
+			{server}
+			serverName={serverLabel(rule, server, ruleSubscription?.name)}
+			isSub={isSubscriptionRule(rule)}
+			{selectMode}
+			checked={selectedNames.has(rule.id)}
+			onPickServer={() => openServerPicker(rule)}
+			onToggle={() => toggle(rule)}
+			onSelect={() => toggleSelected(rule.id)}
+		/>
+	</article>
 {/snippet}
 
 {#snippet headerAdd()}
@@ -503,36 +612,56 @@
 				{/if}
 				{#if error}<p role="alert" transition:rise>{error}</p>{/if}
 				<div class="rules-list">
-					{#each filtered as rule (rule.id)}
-						{@const server = serversById.get(rule.serverId)}
-						{@const ruleSubscription = subscriptionsById.get(rule.serverId)}
-						{@const matcher = ruleMatcherOf(rule)}
-						<article
-							class="rule-row"
-							class:application-rule={matcher === 'application'}
+					{#each listItems as item (item.type === 'rule' ? item.rule.id : item.group.key)}
+						<div
+							class="rule-item"
 							animate:flip={{ duration: 260, easing: easeOut }}
 							out:pop={{ start: 0.96, duration: 160 }}
 						>
-							<RuleIdentity
-								{rule}
-								{matcher}
-								serverName={serverLabel(rule, server, ruleSubscription?.name)}
-								ruleIcon={getRuleIcon(rule)}
-								onEdit={() => openRule(rule)}
-							/>
-							<RuleServerControls
-								{rule}
-								{matcher}
-								{server}
-								serverName={serverLabel(rule, server, ruleSubscription?.name)}
-								isSub={isSubscriptionRule(rule)}
-								{selectMode}
-								checked={selectedNames.has(rule.id)}
-								onPickServer={() => openServerPicker(rule)}
-								onToggle={() => toggle(rule)}
-								onSelect={() => toggleSelected(rule.id)}
-							/>
-						</article>
+							{#if item.type === 'rule'}
+								{@render ruleRow(item.rule, false)}
+							{:else}
+								{@const group = item.group}
+								{@const open = expandedKeys.has(group.key)}
+								{@const row = groupRow(group)}
+								{@const groupServer = serversById.get(group.serverId)}
+								{@const groupServerName = serverLabel(
+									row,
+									groupServer,
+									subscriptionsById.get(group.serverId)?.name,
+								)}
+								<article class="rule-row">
+									<RuleGroupIdentity
+										{group}
+										label={row.name}
+										subscriptionName={subscriptionsById.get(
+											group.subscriptionId,
+										)?.name}
+										{open}
+										onToggleOpen={() => toggleExpanded(group.key)}
+									/>
+									<RuleServerControls
+										rule={row}
+										matcher="domain"
+										server={groupServer}
+										serverName={groupServerName}
+										isSub={isSubscriptionRule(row)}
+										{selectMode}
+										checked={groupSelected(group)}
+										onPickServer={() => openGroupServerPicker(group)}
+										onToggle={() => toggleGroup(group)}
+										onSelect={() => toggleGroupSelected(group)}
+									/>
+								</article>
+								{#if open}
+									<div class="group-rules" transition:rise={{ y: -8 }}>
+										{#each group.rules as rule (rule.id)}
+											{@render ruleRow(rule, true)}
+										{/each}
+									</div>
+								{/if}
+							{/if}
+						</div>
 					{:else}
 						<div class="empty-rules-container">
 							<p class="rules-empty">{t('rules.empty')}</p>
@@ -646,6 +775,17 @@
 	}
 	.rule-row:hover {
 		background: #ffffff0a;
+	}
+	.rule-item,
+	.group-rules {
+		display: flex;
+		flex-direction: column;
+		gap: 4px;
+		flex-shrink: 0;
+	}
+	/* Rules of an opened group sit under it, shifted right. */
+	.rule-row.nested {
+		padding-left: 28px;
 	}
 	.select-all-row {
 		display: flex;
