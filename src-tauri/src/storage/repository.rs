@@ -24,6 +24,13 @@ pub struct Subscription {
     pub total: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub expire: Option<u64>,
+    /// Servers of the last refresh that Lumen cannot run (they turn certificate
+    /// checks off, say). The card shows the count: none disappears silently.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub skipped: u32,
+}
+fn is_zero(count: &u32) -> bool {
+    *count == 0
 }
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]

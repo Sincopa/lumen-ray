@@ -35,6 +35,13 @@ pub struct VpnNode {
     pub wireguard: Option<WireguardOptions>,
     #[serde(default)]
     pub balancer: Option<BalancerOptions>,
+    /// The provider's own Xray outbound, run as is when it carries settings the
+    /// fields above do not model (finalmask, sockopt, xhttp `extra`, VLESS
+    /// encryption and whatever Xray adds next). The fields still describe the
+    /// server for the list, pings and rules. Absent for servers the fields model
+    /// fully, so their ids stay what they were.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub outbound: Option<serde_json::Value>,
 }
 
 /// Temporary lookup for compiling many rules. Keep the same first-match and
@@ -181,7 +188,8 @@ impl VpnNode {
             return Err(BackendError::invalid());
         }
         if !self.flow.is_empty()
-            && (self.protocol != Protocol::Vless || self.flow != "xtls-rprx-vision")
+            && (self.protocol != Protocol::Vless
+                || !["xtls-rprx-vision", "xtls-rprx-vision-udp443"].contains(&self.flow.as_str()))
         {
             return Err(BackendError::unsupported());
         }

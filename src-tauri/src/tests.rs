@@ -463,15 +463,25 @@ async fn core_readiness_does_not_wait_for_external_ip() {
 }
 
 #[test]
-fn rejects_lossy_translations_and_oversized_inputs() {
+fn keeps_untranslated_settings_and_rejects_oversized_inputs() {
     let node = uri::parse(VLESS, "sub").unwrap();
     let mut value = config::outbound(&node, "proxy").unwrap();
     value["streamSettings"]["wsSettings"]["headers"]["Authorization"] =
         serde_json::json!("private");
-    assert!(parser::parse(&value.to_string(), "sub").is_err());
+    // Nothing is translated away: the core gets the header as the provider sent it.
+    let kept = parser::parse(&value.to_string(), "sub")
+        .unwrap()
+        .nodes
+        .remove(0);
+    assert_eq!(
+        config::outbound(&kept, "proxy").unwrap()["streamSettings"]["wsSettings"]["headers"]
+            ["Authorization"],
+        "private"
+    );
     assert!(parser::parse(&"a".repeat(parser::MAX_BYTES + 1), "sub").is_err());
     assert!(parser::parse(&format!("{VLESS}\n").repeat(parser::MAX_NODES + 1), "sub").is_err());
-    assert!(parser::parse("proxies:\n - type: trojan\n   password: secret\n   server: example.com\n   port: 443\n   ws-opts: {max-early-data: 2048}","sub").is_err());
+    // A mihomo tuning key does not hide the proxy.
+    assert!(parser::parse("proxies:\n - type: trojan\n   password: secret\n   server: example.com\n   port: 443\n   ws-opts: {max-early-data: 2048}","sub").is_ok());
 }
 
 #[test]
@@ -1038,9 +1048,22 @@ fn auto_server_survives_a_first_member_lumen_cannot_read() {
     .unwrap();
     assert_eq!(plain.nodes[0].id, parsed.nodes[1].id);
     assert_eq!(plain.nodes[0].address, "203.0.113.3");
-    // No readable member at all is still reported, not silently dropped.
+    // Members whose settings Lumen does not model still make a listed server.
+    let provider = serde_json::json!([balancer_root(
+        "🇫🇮 Авто",
+        &[5],
+        serde_json::json!({"sockopt": {"mark": 1}})
+    )]);
+    let parsed = parser::parse(&provider.to_string(), "sub").unwrap();
+    assert!(parsed.diagnostics.is_empty());
+    assert_eq!(parsed.nodes[0].address, "203.0.113.5");
+    // No member the core can run alone is still reported, not silently dropped.
     let unreadable = serde_json::json!([
-        balancer_root("🇫🇮 Авто", &[5], serde_json::json!({"sockopt": {"mark": 1}})),
+        balancer_root(
+            "🇫🇮 Авто",
+            &[5],
+            serde_json::json!({"sockopt": {"dialerProxy": "elsewhere"}})
+        ),
         balancer_root("🇳🇱 Авто", &[3, 4], serde_json::json!({})),
     ]);
     let parsed = parser::parse(&unreadable.to_string(), "sub").unwrap();
@@ -2360,6 +2383,7 @@ mod hwid_tests {
 
         // Sub 1: expire == Some(0) (lifetime subscription standard)
         repo.subscriptions.push(Subscription {
+            skipped: 0,
             id: "sub-1".into(),
             name: "Infinite Days 0".into(),
             updated_at: now,
@@ -2371,6 +2395,7 @@ mod hwid_tests {
 
         // Sub 2: expire == None but has user info (traffic)
         repo.subscriptions.push(Subscription {
+            skipped: 0,
             id: "sub-2".into(),
             name: "Infinite Days None".into(),
             updated_at: now,
@@ -2382,6 +2407,7 @@ mod hwid_tests {
 
         // Sub 3: expire in 20 years
         repo.subscriptions.push(Subscription {
+            skipped: 0,
             id: "sub-3".into(),
             name: "Far Future".into(),
             updated_at: now,
@@ -2393,6 +2419,7 @@ mod hwid_tests {
 
         // Sub 4: normal active subscription expiring in 5 days
         repo.subscriptions.push(Subscription {
+            skipped: 0,
             id: "sub-4".into(),
             name: "Normal 5 Days".into(),
             updated_at: now,
@@ -2426,3 +2453,4 @@ mod hwid_tests {
 
 mod native;
 mod reliability;
+mod subscription_compat;

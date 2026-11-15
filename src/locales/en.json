@@ -59,6 +59,8 @@
 		"source": "HTTPS URL, key or Base64",
 		"empty": "Add your first subscription.",
 		"refreshFailed": "Refresh failed",
+		"skippedServers": "Skipped servers: {count}",
+		"skippedServersHint": "These servers turn certificate checks off or need something Xray lacks",
 		"deleteConfirm": "Do you want to delete “{name}”, its servers and associated rules?",
 		"shareTitle": "Share link",
 		"shareHint": "Copy the link to import this subscription on another device.",

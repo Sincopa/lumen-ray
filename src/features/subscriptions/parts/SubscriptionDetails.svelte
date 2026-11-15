@@ -48,7 +48,14 @@
 			<span class="metric-val">{sub.traffic ?? '—'}</span>
 		</div>
 	</div>
-	<div class="updated-time">{formatUpdatedAgo(sub)}</div>
+	<div class="updated-time">
+		{formatUpdatedAgo(sub)}
+		{#if sub.skipped}
+			<span class="skipped" title={t('subscriptions.skippedServersHint')}>
+				{t('subscriptions.skippedServers', { count: sub.skipped })}
+			</span>
+		{/if}
+	</div>
 	{#if $subscriptionRefreshStatus[sub.id]?.state === 'error'}
 		<div class="refresh-error" role="status">
 			{t('subscriptions.refreshFailed')}: {t(
@@ -96,6 +103,11 @@
 		color: #ffffff40;
 		max-width: 50%;
 		text-align: right;
+	}
+	.skipped {
+		display: block;
+		margin-top: 4px;
+		color: #ffb4aa99;
 	}
 	.refresh-error {
 		font-size: 11px;

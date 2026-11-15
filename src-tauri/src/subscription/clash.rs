@@ -17,61 +17,51 @@ pub fn parse(v: &Value, subscription: &str) -> Result<VpnNode> {
         "hysteria2" => Protocol::Hysteria,
         _ => return Err(BackendError::unsupported()),
     };
-    let allowed = [
-        "name",
-        "type",
-        "server",
-        "port",
-        "uuid",
-        "password",
-        "username",
-        "cipher",
-        "alterId",
-        "tls",
-        "servername",
-        "sni",
-        "client-fingerprint",
-        "reality-opts",
-        "network",
-        "ws-opts",
-        "grpc-opts",
-        "flow",
-        "udp",
-        "skip-cert-verify",
-        "alpn",
-    ];
-    if v.as_object()
-        .ok_or_else(BackendError::invalid)?
-        .keys()
-        .any(|k| !allowed.contains(&k.as_str()))
+    // Skipped are only proxies that turn certificate checks off or that need
+    // something Xray cannot run (plugins, chains, sing-box mux, legacy VMess).
+    // Every other key Lumen does not model only tunes mihomo (tfo, ip-version,
+    // early data, extra headers, ...) and is ignored, as other clients do.
+    let object = v.as_object().ok_or_else(BackendError::invalid)?;
+    let encryption = s_ref("encryption");
+    if ["plugin", "plugin-opts", "dialer-proxy"]
+        .iter()
+        .any(|key| object.contains_key(*key))
         || v["skip-cert-verify"] == true
         || v["alterId"].as_u64().is_some_and(|n| n != 0)
+        || v["smux"]["enabled"] == true
+        || (protocol == Protocol::Hysteria && !["", "salamander"].contains(&s_ref("obfs")))
+        || (protocol != Protocol::Vless && !["", "none"].contains(&encryption))
     {
         return Err(BackendError::unsupported());
     }
-    super::xray_json::keys(&v["ws-opts"], &["path", "headers"])?;
-    super::xray_json::keys(&v["ws-opts"]["headers"], &["Host"])?;
-    super::xray_json::keys(&v["grpc-opts"], &["grpc-service-name"])?;
-    super::xray_json::keys(&v["reality-opts"], &["public-key", "short-id"])?;
     let net_raw = s_ref("network");
-    let network: String = if net_raw.is_empty() {
-        if protocol == Protocol::Hysteria {
-            "hysteria"
-        } else {
-            "raw"
-        }
-        .into()
-    } else {
-        net_raw.into()
-    };
-    if !["raw", "tcp", "ws", "grpc", "hysteria"].contains(&network.as_str()) {
+    let network: String = match net_raw {
+        "" if protocol == Protocol::Hysteria => "hysteria",
+        "" => "raw",
+        "ws" if v["ws-opts"]["v2ray-http-upgrade"] == true => "httpupgrade",
+        other => other,
+    }
+    .into();
+    if ![
+        "raw",
+        "tcp",
+        "ws",
+        "httpupgrade",
+        "grpc",
+        "xhttp",
+        "hysteria",
+    ]
+    .contains(&network.as_str())
+    {
         return Err(BackendError::unsupported());
     }
+    let xhttp = &v["xhttp-opts"];
     let reality = v.get("reality-opts");
     let servername = s_ref("servername");
     let mut node = VpnNode {
         wireguard: None,
         balancer: None,
+        outbound: None,
         id: String::new(),
         subscription_id: subscription.into(),
         name: s("name"),
@@ -94,16 +84,21 @@ pub fn parse(v: &Value, subscription: &str) -> Result<VpnNode> {
         flow: s("flow"),
         transport: Transport {
             network,
-            path: v["ws-opts"]["path"].as_str().unwrap_or_default().into(),
+            path: v["ws-opts"]["path"]
+                .as_str()
+                .or_else(|| xhttp["path"].as_str())
+                .unwrap_or_default()
+                .into(),
             host: v["ws-opts"]["headers"]["Host"]
                 .as_str()
+                .or_else(|| xhttp["host"].as_str())
                 .unwrap_or_default()
                 .into(),
             service_name: v["grpc-opts"]["grpc-service-name"]
                 .as_str()
                 .unwrap_or_default()
                 .into(),
-            mode: String::new(),
+            mode: xhttp["mode"].as_str().unwrap_or_default().into(),
             ..Transport::default()
         },
         security: Security {
@@ -141,6 +136,30 @@ pub fn parse(v: &Value, subscription: &str) -> Result<VpnNode> {
                 .unwrap_or_default(),
         },
     };
+    let obfs_password = v["obfs-password"]
+        .as_str()
+        .filter(|_| !s_ref("obfs").is_empty());
+    let encryption = Some(encryption).filter(|value| !["", "none"].contains(value));
+    // Headers besides Host (a token, say) may be what lets the server in.
+    let ws_headers = v["ws-opts"]["headers"]
+        .as_object()
+        .filter(|headers| node.transport.network == "ws" && headers.keys().any(|k| k != "Host"))
+        .cloned();
+    if obfs_password.is_some() || encryption.is_some() || ws_headers.is_some() {
+        super::xray_json::extend(&mut node, |outbound| {
+            if let Some(encryption) = encryption {
+                outbound["settings"]["vnext"][0]["users"][0]["encryption"] = encryption.into();
+            }
+            if let Some(headers) = ws_headers {
+                outbound["streamSettings"]["wsSettings"]["headers"] = Value::Object(headers);
+            }
+            if let Some(password) = obfs_password {
+                outbound["streamSettings"]["finalmask"] = serde_json::json!(
+                    {"udp": [{"type": "salamander", "settings": {"password": password}}]}
+                );
+            }
+        })?;
+    }
     node.identify()?;
     Ok(node)
 }

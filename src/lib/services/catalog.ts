@@ -19,6 +19,8 @@ export interface Subscription {
 	daysRemaining?: number | string;
 	traffic?: string;
 	updatedMinutesAgo?: number;
+	/** Servers of the last refresh Lumen cannot run. */
+	skipped?: number;
 }
 
 export type RuleMatcher =

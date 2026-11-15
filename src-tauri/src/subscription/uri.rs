@@ -7,6 +7,7 @@ use base64::{
     Engine,
 };
 use percent_encoding::percent_decode_str;
+use serde_json::json;
 use std::collections::BTreeMap;
 use url::Url;
 
@@ -64,37 +65,33 @@ pub fn parse(input: &str, subscription: &str) -> Result<VpnNode> {
         .collect();
     let q_str = |key: &str| query.get(key).map(String::as_str).unwrap_or_default();
     let q = |key: &str| query.get(key).cloned().unwrap_or_default();
-    // Unknown knobs must not silently weaken security or change the requested transport.
-    const KEYS: &[&str] = &[
-        "type",
-        "security",
-        "sni",
-        "peer",
-        "fp",
-        "pbk",
-        "sid",
-        "alpn",
-        "flow",
-        "encryption",
-        "path",
-        "host",
-        "serviceName",
-        "mode",
-        "headerType",
-        "allowInsecure",
-        "insecure",
-        "seed",
-    ];
-    if query.keys().any(|k| !KEYS.contains(&k.as_str()))
-        || ["allowInsecure", "insecure"]
-            .iter()
-            .any(|k| ["1", "true"].contains(&q_str(k)))
-        || (!matches!(q_str("type"), "kcp" | "mkcp")
-            && !["", "none"].contains(&q_str("headerType")))
-        || !["", "none"].contains(&q_str("encryption"))
+    // A link is never skipped for a key Lumen does not know: like every client,
+    // Lumen ignores hints meant for others, and Lumen's own defaults are the
+    // strict ones (certificates are checked). The keys Xray needs and the
+    // fields do not model go into the server's provider outbound below. Skipped
+    // are only links that turn certificate checks off and settings Xray cannot run.
+    let encryption = q_str("encryption");
+    let header_type = q_str("headerType");
+    let kcp = matches!(q_str("type"), "kcp" | "mkcp");
+    let http_header = header_type == "http" && matches!(q_str("type"), "" | "raw" | "tcp") && !kcp;
+    if ["allowInsecure", "insecure"]
+        .iter()
+        .any(|k| ["1", "true"].contains(&q_str(k)))
+        || (!kcp && !http_header && !["", "none"].contains(&header_type))
+        || (protocol != Protocol::Vless && !["", "none"].contains(&encryption))
+        || (protocol == Protocol::Hysteria && !["", "salamander"].contains(&q_str("obfs")))
     {
         return Err(BackendError::unsupported());
     }
+    let extra = match q_str("extra") {
+        "" => None,
+        raw => Some(
+            serde_json::from_str::<serde_json::Value>(raw)
+                .ok()
+                .filter(serde_json::Value::is_object)
+                .ok_or_else(BackendError::invalid)?,
+        ),
+    };
     let mut credential = unescape(url.username())?;
     let mut method = String::new();
     if protocol == Protocol::Shadowsocks {
@@ -122,6 +119,7 @@ pub fn parse(input: &str, subscription: &str) -> Result<VpnNode> {
     let mut node = VpnNode {
         wireguard: None,
         balancer: None,
+        outbound: None,
         id: String::new(),
         subscription_id: subscription.into(),
         name: unescape(url.fragment().unwrap_or("Server"))?,
@@ -152,7 +150,7 @@ pub fn parse(input: &str, subscription: &str) -> Result<VpnNode> {
             header_type: q("headerType"),
         },
         security: Security {
-            spider_x: String::new(),
+            spider_x: q("spx"),
             kind: query
                 .get("security")
                 .cloned()
@@ -172,6 +170,50 @@ pub fn parse(input: &str, subscription: &str) -> Result<VpnNode> {
                 .collect(),
         },
     };
+    let set = |key: &str| Some(q_str(key)).filter(|value| !value.is_empty());
+    let (pqv, ech, authority) = (set("pqv"), set("ech"), set("authority"));
+    let obfs_password = set("obfs-password").filter(|_| set("obfs").is_some());
+    let encryption = Some(encryption).filter(|value| !["", "none"].contains(value));
+    if http_header
+        || extra.is_some()
+        || encryption.is_some()
+        || obfs_password.is_some()
+        || pqv.is_some()
+        || ech.is_some()
+        || authority.is_some()
+    {
+        let (path, host) = (node.transport.path.clone(), node.transport.host.clone());
+        super::xray_json::extend(&mut node, |outbound| {
+            if let Some(encryption) = encryption {
+                outbound["settings"]["vnext"][0]["users"][0]["encryption"] = json!(encryption);
+            }
+            let stream = &mut outbound["streamSettings"];
+            if http_header {
+                let path = if path.is_empty() { "/".into() } else { path };
+                let hosts: Vec<&str> = host.split(',').filter(|h| !h.is_empty()).collect();
+                stream["rawSettings"] = json!({"header": {"type": "http", "request": {
+                    "path": [path],
+                    "headers": if hosts.is_empty() { json!({}) } else { json!({"Host": hosts}) },
+                }}});
+            }
+            if let Some(extra) = extra.filter(|_| stream["network"] == "xhttp") {
+                stream["xhttpSettings"]["extra"] = extra;
+            }
+            if let Some(password) = obfs_password {
+                stream["finalmask"] =
+                    json!({"udp": [{"type": "salamander", "settings": {"password": password}}]});
+            }
+            if let Some(pqv) = pqv.filter(|_| stream["security"] == "reality") {
+                stream["realitySettings"]["mldsa65Verify"] = json!(pqv);
+            }
+            if let Some(ech) = ech.filter(|_| stream["security"] == "tls") {
+                stream["tlsSettings"]["echConfigList"] = json!(ech);
+            }
+            if let Some(authority) = authority.filter(|_| stream["network"] == "grpc") {
+                stream["grpcSettings"]["authority"] = json!(authority);
+            }
+        })?;
+    }
     node.identify()?;
     Ok(node)
 }
@@ -198,6 +240,7 @@ fn vmess(input: &str, subscription: &str) -> Result<VpnNode> {
     let mut node = VpnNode {
         wireguard: None,
         balancer: None,
+        outbound: None,
         id: String::new(),
         subscription_id: subscription.into(),
         name: s("ps"),

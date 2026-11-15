@@ -62,6 +62,7 @@ pub fn snapshot(repo: &Repository, latencies: &std::collections::HashMap<String,
                 "status": status,
                 "daysRemaining": days_remaining,
                 "traffic": traffic,
+                "skipped": subscription.skipped,
             })
         }).collect::<Vec<_>>(),
         "servers": repo.nodes.iter().map(|n| {
@@ -558,8 +559,10 @@ pub async fn apply_import(state: &AppState, prepared: PreparedImport) -> Result<
     next.subscription_changes.drain(..overflow);
     next.nodes.retain(|n| n.subscription_id != id);
     next.nodes.extend(parsed.nodes);
+    let skipped = u32::try_from(parsed.diagnostics.len()).unwrap_or(u32::MAX);
     if let Some(sub) = next.subscriptions.iter_mut().find(|s| s.id == id) {
         sub.updated_at = now();
+        sub.skipped = skipped;
         if let Some(info) = user_info {
             sub.upload = info.upload;
             sub.download = info.download;
@@ -576,6 +579,7 @@ pub async fn apply_import(state: &AppState, prepared: PreparedImport) -> Result<
             download: info.download,
             total: info.total,
             expire: info.expire,
+            skipped,
         });
     }
     next.sources.insert(id.clone(), input);

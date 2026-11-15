@@ -128,6 +128,14 @@ pub fn live_routing_patch(
 }
 pub fn outbound(node: &VpnNode, tag: &str) -> Result<Value> {
     node.validate()?;
+    if let Some(provider) = &node.outbound {
+        let mut outbound = provider.clone();
+        outbound
+            .as_object_mut()
+            .ok_or_else(BackendError::invalid)?
+            .insert("tag".into(), json!(tag));
+        return Ok(outbound);
+    }
     let protocol = match node.protocol {
         Protocol::Socks => "socks",
         Protocol::Http => "http",

@@ -249,8 +249,9 @@ pub fn parse(input: &str, subscription: &str) -> Result<ParsedSubscription> {
     Ok(result)
 }
 
-/// The member an auto server is shown as: the first outbound Lumen can read, in
-/// the subscription's order, so an auto server that parsed before keeps its id.
+/// The member an auto server is shown as: the first outbound Lumen models
+/// fully, in the subscription's order, so an auto server that parsed before
+/// keeps its id. Without one, the first member kept as the provider wrote it.
 /// Fails with the first error only when no member is readable.
 fn representative(
     outbounds: &[&serde_json::Value],
@@ -258,19 +259,23 @@ fn representative(
     subscription: &str,
 ) -> Result<VpnNode> {
     let mut first_error = None;
+    let mut first_provider = None;
     for outbound in outbounds {
         let mut entry = (*outbound).clone();
         if let (Some(rem), Some(obj)) = (remarks, entry.as_object_mut()) {
             obj.insert("remarks".to_string(), serde_json::json!(rem));
         }
         match super::xray_json::parse(&entry, subscription) {
-            Ok(node) => return Ok(node),
+            Ok(node) if node.outbound.is_none() => return Ok(node),
+            Ok(node) => {
+                first_provider.get_or_insert(node);
+            }
             Err(error) => {
                 first_error.get_or_insert(error);
             }
         }
     }
-    Err(first_error.unwrap_or_else(BackendError::invalid))
+    first_provider.ok_or_else(|| first_error.unwrap_or_else(BackendError::invalid))
 }
 
 /// A stable id for an entry whose configuration repeats an earlier one under
