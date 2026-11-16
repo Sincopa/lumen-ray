@@ -2454,3 +2454,4 @@ mod hwid_tests {
 mod native;
 mod reliability;
 mod subscription_compat;
+mod auto_probe;

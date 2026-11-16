@@ -148,7 +148,7 @@ pub(crate) async fn isolated_core(
     };
     for _ in 0..2 {
         let (proxy, metrics) = crate::engine::xray::ports().ok()?;
-        let member_ports = probe_ports(tags.len())?;
+        let member_ports = probe_ports(tags.len(), &core_ports(proxy, metrics))?;
         let config = crate::xray::config::build(&repo, id, proxy, metrics, false).ok()?;
         let mut config = serde_json::to_value(config).ok()?;
         if let Some(inbounds) = config
@@ -203,9 +203,17 @@ pub(crate) async fn isolated_core(
     };
     let startup = PROBE_STARTUP.lock().await;
     let (proxy, metrics) = crate::engine::xray::ports().ok()?;
-    let member_ports = probe_ports(tags.len())?;
+    let member_ports = probe_ports(tags.len(), &core_ports(proxy, metrics))?;
     let config = crate::xray::config::build(&repo, id, proxy, metrics, false).ok()?;
     let mut config = serde_json::to_value(config).ok()?;
+    // Only the `probe` inbound, as on Android. The system-proxy inbound opened an
+    // HTTP proxy on loopback for every probe, on metrics + 1.
+    if let Some(inbounds) = config
+        .get_mut("inbounds")
+        .and_then(serde_json::Value::as_array_mut)
+    {
+        inbounds.retain(|inbound| inbound["tag"] == "probe");
+    }
     let members = paired(&tags, &member_ports);
     crate::xray::config::add_member_probes(&mut config, &members);
     // With the tunnel up, the probe must not travel through it: see bind_outbounds.
@@ -276,18 +284,40 @@ fn paired(tags: &[String], ports: &[u16]) -> Vec<(String, u16)> {
     tags.iter().cloned().zip(ports.iter().copied()).collect()
 }
 
-/// `count` distinct free loopback ports. The listeners are held together and
-/// released at once, so Windows cannot hand the same ephemeral port out twice.
+/// The ports a probe core takes besides its member ports: the SOCKS port, the
+/// metrics port and the two after it that `ports()` keeps free (HTTP and API).
 #[cfg(any(windows, target_os = "macos", target_os = "android"))]
-fn probe_ports(count: usize) -> Option<Vec<u16>> {
-    let listeners = (0..count)
-        .map(|_| std::net::TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, 0)))
-        .collect::<std::io::Result<Vec<_>>>()
-        .ok()?;
-    listeners
-        .iter()
-        .map(|listener| listener.local_addr().ok().map(|addr| addr.port()))
-        .collect()
+fn core_ports(proxy: u16, metrics: u16) -> [u16; 4] {
+    [
+        proxy,
+        metrics,
+        metrics.saturating_add(1),
+        metrics.saturating_add(2),
+    ]
+}
+
+/// `count` distinct free loopback ports, none of them in `taken`. The listeners
+/// are held together and released at once, so Windows cannot hand the same
+/// ephemeral port out twice. `ports()` has just released the ports in `taken`,
+/// and Windows hands ports out in order: the first member port used to be
+/// metrics + 1, Xray failed with «local port already in use», and every auto
+/// server showed no ping on Windows.
+#[cfg(any(windows, target_os = "macos", target_os = "android"))]
+pub(crate) fn probe_ports(count: usize, taken: &[u16]) -> Option<Vec<u16>> {
+    let mut held = Vec::with_capacity(count + taken.len());
+    let mut ports = Vec::with_capacity(count);
+    while ports.len() < count {
+        if held.len() >= count + taken.len() + 16 {
+            return None;
+        }
+        let listener = std::net::TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, 0)).ok()?;
+        let port = listener.local_addr().ok()?.port();
+        if !taken.contains(&port) {
+            ports.push(port);
+        }
+        held.push(listener);
+    }
+    Some(ports)
 }
 
 /// Times every port at once, in the order given. An auto server is as fast as
