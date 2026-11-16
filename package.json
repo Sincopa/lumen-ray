@@ -1,7 +1,7 @@
 {
 	"name": "lumen",
 	"private": true,
-	"version": "0.2.17",
+	"version": "0.2.18",
 	"description": "VPN and proxy client for Windows, macOS and Android, built with Svelte 5 and Tauri 2",
 	"license": "SEE LICENSE IN LICENSE",
 	"type": "module",
