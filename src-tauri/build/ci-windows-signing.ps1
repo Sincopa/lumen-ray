@@ -77,7 +77,7 @@ if ($Mode -eq 'Import') {
 }
 
 $version = (Get-Content -LiteralPath (Join-Path $root 'src-tauri/tauri.conf.json') -Raw | ConvertFrom-Json).version
-$setup = Join-Path $root "release/Lumen-Ray-$version-Setup.exe"
+$setup = Join-Path $root "release/Lumen-Ray-Setup.exe"
 $bundledSetup = Join-Path $root "src-tauri/target/release/bundle/nsis/Lumen_${version}_x64-setup.exe"
 if ((Get-FileHash -LiteralPath $setup -Algorithm SHA256).Hash -ne (Get-FileHash -LiteralPath $bundledSetup -Algorithm SHA256).Hash) {
     throw 'The published Setup differs from the installer used for the updater signature.'
@@ -85,7 +85,7 @@ if ((Get-FileHash -LiteralPath $setup -Algorithm SHA256).Hash -ne (Get-FileHash 
 $scratch = Join-Path $runnerDirectory ('lumen-ci-package-check-' + [guid]::NewGuid().ToString('N'))
 try {
     Add-Type -AssemblyName System.IO.Compression.FileSystem
-    [IO.Compression.ZipFile]::ExtractToDirectory((Join-Path $root "release/Lumen-Ray-$version-Portable.zip"), $scratch)
+    [IO.Compression.ZipFile]::ExtractToDirectory((Join-Path $root "release/Lumen-Ray-Portable.zip"), $scratch)
     $portableRoot = Join-Path $scratch 'Lumen'
     foreach ($required in @('Lumen.exe', 'runtime/xray/xray.exe')) {
         if (-not (Test-Path -LiteralPath (Join-Path $portableRoot $required))) { throw "Portable package is missing $required" }

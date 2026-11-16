@@ -1,20 +1,10 @@
+/** Checks a link from a `lumen://` link; the backend already took it out of the wrapper. */
 export function importPreview(raw: string): {
 	input: string;
 	description: string;
 } {
-	let input = raw.trim();
+	const input = raw.trim();
 	if (!input || input.length > 65536) throw new Error('INVALID_IMPORT');
-	if (input.startsWith('lumen://')) {
-		const link = new URL(input);
-		if (
-			link.hostname !== 'import' ||
-			(link.pathname && link.pathname !== '/') ||
-			link.username ||
-			link.password
-		)
-			throw new Error('INVALID_IMPORT');
-		input = link.searchParams.get('url') ?? '';
-	}
 	const url = new URL(input);
 	if (
 		![

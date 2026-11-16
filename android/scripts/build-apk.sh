@@ -21,14 +21,15 @@ if [ "$mode" = "debug" ]; then
 else
 	CI=true npx tauri android build --apk --split-per-abi --target aarch64 armv7 x86_64
 	CI=true npx tauri android build --apk --target aarch64 armv7 x86_64
-	version="$(node -p "require('./package.json').version")"
 	rm -f "$out"/Lumen-*.apk
 	find src-tauri/gen/android/app/build/outputs/apk -name '*-release*.apk' | while read -r apk; do
 		flavor="$(basename "$(dirname "$(dirname "$apk")")")"
-		# Android refuses unsigned APKs ("App not installed"); never ship one by mistake.
+		# No version in the name, so releases/latest/download/Lumen-arm64.apk
+		# always serves the newest build. Android refuses unsigned APKs ("App
+		# not installed"); never ship one by mistake.
 		case "$apk" in
-		*-unsigned.apk) name="Lumen-$version-$flavor-unsigned.apk" ;;
-		*) name="Lumen-$version-$flavor.apk" ;;
+		*-unsigned.apk) name="Lumen-$flavor-unsigned.apk" ;;
+		*) name="Lumen-$flavor.apk" ;;
 		esac
 		cp "$apk" "$out/$name"
 	done

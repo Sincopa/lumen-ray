@@ -32,17 +32,19 @@ const { assets } = JSON.parse(gh('release', 'view', tag, '--repo', repo, '--json
 const byName = new Map(assets.map((asset) => [asset.name, asset]));
 
 // The updater downloads through the API URL, which also works while the
-// release is a draft; the signature is the .sig file's text.
-function entry(file) {
+// release is a draft; the signature is the .sig file's text. Releases up to
+// v0.2.18 had the version in the file name.
+function entry(name, legacy) {
+	const file = byName.has(name) ? name : legacy;
 	const asset = byName.get(file);
-	if (!asset) throw new Error(`${tag} has no ${file}`);
+	if (!asset) throw new Error(`${tag} has no ${name}`);
 	if (!byName.has(`${file}.sig`)) throw new Error(`${tag} has no ${file}.sig`);
 	const signature = gh('release', 'download', tag, '--repo', repo, '--pattern', `${file}.sig`, '--output', '-');
 	return { signature: signature.trim(), url: asset.apiUrl };
 }
 
-const windows = entry(`Lumen_${version}_x64-setup.exe`);
-const mac = entry(`Lumen_${version}_universal.app.tar.gz`);
+const windows = entry('Lumen_x64-setup.exe', `Lumen_${version}_x64-setup.exe`);
+const mac = entry('Lumen_universal.app.tar.gz', `Lumen_${version}_universal.app.tar.gz`);
 const manifest = {
 	version,
 	notes: '',

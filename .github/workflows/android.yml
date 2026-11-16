@@ -140,11 +140,12 @@ jobs:
         run: |
           set -eu
           version=$(node -p "require('./package.json').version")
-          gh release download "v$version" --pattern "Lumen-$version-*.apk" --pattern SHA256SUMS.txt --dir release/android
+          # The names carry no version; the next step checks versionName inside each APK.
+          gh release download "v$version" --pattern 'Lumen-*.apk' --pattern SHA256SUMS.txt --dir release/android
           cd release/android
           sha256sum --check SHA256SUMS.txt
           for abi in arm arm64 x86_64 universal; do
-            test -s "Lumen-$version-$abi.apk"
+            test -s "Lumen-$abi.apk"
           done
 
       - name: Set up Java

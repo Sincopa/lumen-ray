@@ -46,6 +46,10 @@ const download = (file) =>
 	`https://github.com/${repo}/releases/download/${tag}/${encodeURIComponent(file)}`;
 const mb = (bytes) => `${(bytes / 1024 / 1024).toFixed(1)} MB`;
 
+// No version in the file names, so releases/latest/download/<name> links stay
+// valid; releases up to v0.2.18 still have it.
+const asset = (name, legacy) => (sizes.has(legacy) && !sizes.has(name) ? legacy : name);
+
 const obtainium =
 	'https://apps.obtainium.imranr.dev/redirect?r=obtainium://add/' +
 	`https://github.com/${repo}`;
@@ -57,14 +61,14 @@ const groups = [
 			{
 				os: 'Windows',
 				items: [
-					{ file: `Lumen-Ray-${version}-Setup.exe`, label: 'Setup', message: 'x64', color: '0078D4', logo: windowsLogo },
-					{ file: `Lumen-Ray-${version}-Portable.zip`, label: 'Portable', message: 'x64', color: '5EA9E6', logo: windowsLogo }
+					{ file: asset('Lumen-Ray-Setup.exe', `Lumen-Ray-${version}-Setup.exe`), label: 'Setup', message: 'x64', color: '0078D4', logo: windowsLogo },
+					{ file: asset('Lumen-Ray-Portable.zip', `Lumen-Ray-${version}-Portable.zip`), label: 'Portable', message: 'x64', color: '5EA9E6', logo: windowsLogo }
 				]
 			},
 			{
 				os: 'macOS',
 				items: [
-					{ file: `Lumen_${version}_universal.dmg`, label: 'DMG', message: 'Apple Silicon + Intel', color: '111111', logo: 'apple' }
+					{ file: asset('Lumen_universal.dmg', `Lumen_${version}_universal.dmg`), label: 'DMG', message: 'Apple Silicon + Intel', color: '111111', logo: 'apple' }
 				]
 			}
 		]
@@ -76,10 +80,10 @@ const groups = [
 				os: 'Android',
 				items: [
 					{ href: obtainium, needsApk: true, label: 'Get it on', message: 'Obtainium', color: 'EF7100', logo: 'android', title: 'Install and get updates through Obtainium' },
-					{ file: `Lumen-${version}-universal.apk`, label: 'APK', message: 'universal', color: '3DDC84', logo: 'android' },
-					{ file: `Lumen-${version}-arm64.apk`, label: 'APK', message: 'arm64-v8a', color: '168039', logo: 'android' },
-					{ file: `Lumen-${version}-arm.apk`, label: 'APK', message: 'armeabi-v7a', color: '45BF55', logo: 'android' },
-					{ file: `Lumen-${version}-x86_64.apk`, label: 'APK', message: 'x86_64', color: '45BF55', logo: 'android' }
+					{ file: asset('Lumen-universal.apk', `Lumen-${version}-universal.apk`), label: 'APK', message: 'universal', color: '3DDC84', logo: 'android' },
+					{ file: asset('Lumen-arm64.apk', `Lumen-${version}-arm64.apk`), label: 'APK', message: 'arm64-v8a', color: '168039', logo: 'android' },
+					{ file: asset('Lumen-arm.apk', `Lumen-${version}-arm.apk`), label: 'APK', message: 'armeabi-v7a', color: '45BF55', logo: 'android' },
+					{ file: asset('Lumen-x86_64.apk', `Lumen-${version}-x86_64.apk`), label: 'APK', message: 'x86_64', color: '45BF55', logo: 'android' }
 				]
 			}
 		]

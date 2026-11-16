@@ -10,7 +10,7 @@
 	interface Props {
 		onClose: () => void;
 		onSuccess?: () => void;
-		/** Link handed over by a `lumen://import` deep link. */
+		/** Link handed over by a `lumen://` deep link. */
 		initialSource?: string;
 	}
 

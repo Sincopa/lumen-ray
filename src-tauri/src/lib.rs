@@ -346,17 +346,25 @@ pub fn run() {
 
             app.manage(state);
             use tauri_plugin_deep_link::DeepLinkExt;
-            if let Ok(Some(urls)) = app.deep_link().get_current() {
+            // A link shows the add-profile form even when Lumen starts in the tray.
+            let open_link = |handle: &tauri::AppHandle, urls: Vec<tauri::Url>| {
+                let mut queued = false;
                 for url in urls {
-                    commands::deep_link::queue_import_link(app.handle(), url.as_str());
+                    queued |= commands::deep_link::queue_import_link(handle, url.as_str());
                 }
+                #[cfg(not(target_os = "android"))]
+                if queued {
+                    app::window::reveal(handle);
+                }
+                #[cfg(target_os = "android")]
+                let _ = queued;
+            };
+            if let Ok(Some(urls)) = app.deep_link().get_current() {
+                open_link(app.handle(), urls);
             }
             let handle = app.handle().clone();
-            app.deep_link().on_open_url(move |event| {
-                for url in event.urls() {
-                    commands::deep_link::queue_import_link(&handle, url.as_str());
-                }
-            });
+            app.deep_link()
+                .on_open_url(move |event| open_link(&handle, event.urls()));
             Ok(())
         })
         .on_window_event(|window, event| {

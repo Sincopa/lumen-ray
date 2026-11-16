@@ -172,6 +172,9 @@ jobs:
           prerelease: false
           # Publish writes latest.json once both desktop builds are on the draft.
           uploadUpdaterJson: false
+          # No version in asset names, so releases/latest/download/<name> links
+          # always serve the newest build: Lumen_x64-setup.exe(.sig).
+          releaseAssetNamePattern: '[name]_[arch][setup][ext]'
           args: --config src-tauri/tauri.release.conf.json --bundles nsis
 
       - name: Prepare and upload final release artifacts (Setup.exe and Portable.zip)
@@ -190,14 +193,14 @@ jobs:
           $releaseDir = "release"
           $nsisCandidate = "src-tauri/target/release/bundle/nsis/Lumen_${version}_x64-setup.exe"
           if (-not (Test-Path -LiteralPath $nsisCandidate)) { throw "Missing signed NSIS installer: $nsisCandidate" }
-          Copy-Item -LiteralPath $nsisCandidate -Destination "$releaseDir/Lumen-Ray-$version-Setup.exe" -Force
+          Copy-Item -LiteralPath $nsisCandidate -Destination "$releaseDir/Lumen-Ray-Setup.exe" -Force
 
           powershell -NoProfile -ExecutionPolicy Bypass -File src-tauri/build/ci-windows-signing.ps1 -Mode Verify
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
           # Upload primary release assets (Setup installer + Portable zip)
           # Stays a draft until the publish job, after macOS is verified too.
-          gh release upload $tag "$releaseDir/Lumen-Ray-$version-Setup.exe" "$releaseDir/Lumen-Ray-$version-Portable.zip" --clobber
+          gh release upload $tag "$releaseDir/Lumen-Ray-Setup.exe" "$releaseDir/Lumen-Ray-Portable.zip" --clobber
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Upload signature verification reports
@@ -272,6 +275,8 @@ jobs:
           releaseDraft: true
           prerelease: false
           uploadUpdaterJson: false
+          # Lumen_universal.dmg and Lumen_universal.app.tar.gz(.sig), see release-windows.
+          releaseAssetNamePattern: '[name]_[arch][setup][ext]'
           args: --target universal-apple-darwin --config src-tauri/tauri.release.conf.json --bundles app,dmg
 
       - name: Verify ad-hoc signed bundle

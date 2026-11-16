@@ -80,7 +80,7 @@ if ($Mode -eq 'All' -or $Mode -eq 'Installer') {
         throw "Expected installer for the current version was not produced: $setupSource"
     }
 
-    $setupTarget = Join-Path $releaseDir "Lumen-Ray-$version-Setup.exe"
+    $setupTarget = Join-Path $releaseDir "Lumen-Ray-Setup.exe"
     Copy-Item -LiteralPath $setupSource -Destination $setupTarget -Force
     Write-Host "  -> Created Setup: $setupTarget ($( [math]::Round((Get-Item $setupTarget).Length / 1MB, 2) ) MB)" -ForegroundColor Cyan
 }
@@ -122,7 +122,7 @@ if ($Mode -eq 'All' -or $Mode -eq 'Portable') {
         }
 
         # Create zip archive
-        $zipTarget = Join-Path $releaseDir "Lumen-Ray-$version-Portable.zip"
+        $zipTarget = Join-Path $releaseDir "Lumen-Ray-Portable.zip"
         if (Test-Path -LiteralPath $zipTarget) {
             Remove-Item -LiteralPath $zipTarget -Force
         }

@@ -48,7 +48,7 @@ Only **System proxy** works on macOS for now. It covers browsers and other progr
 
 ### Android
 
-1. Download **Lumen-…-arm64.apk** from [Releases](https://github.com/Sincopa/lumen-ray/releases/latest) (`universal` works on any phone, `arm` is for old 32-bit ones). Android 8 or newer.
+1. Download **Lumen-arm64.apk** from [Releases](https://github.com/Sincopa/lumen-ray/releases/latest) (`universal` works on any phone, `arm` is for old 32-bit ones). Android 8 or newer.
 2. Open the file and allow installing apps from that source when Android asks.
 3. Add a profile, choose a server and tap the Lumen mark. Android asks once whether Lumen may set up a VPN.
 

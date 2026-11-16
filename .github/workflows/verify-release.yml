@@ -64,7 +64,7 @@ jobs:
           version = tag[1:]
           config = json.loads(subprocess.check_output(['git', 'show', f'{tag}:src-tauri/tauri.conf.json']))
           assert config['version'] == version
-          for name in [f'Lumen-Ray-{version}-Setup.exe', f'Lumen-Ray-{version}-Portable.zip', f'Lumen_{version}_universal.dmg']:
+          for name in ['Lumen-Ray-Setup.exe', 'Lumen-Ray-Portable.zip', 'Lumen_universal.dmg']:
               assert assets[name]['size'] > 0, f'Missing release package: {name}'
           packages = root / 'packages'
           metadata = json.loads((packages / 'latest.json').read_text())
@@ -86,14 +86,13 @@ jobs:
       - name: Verify updater archive and disk image
         run: |
           set -eu
-          version=${RELEASE_TAG#v}
           packages="$RUNNER_TEMP/packages"
           unpacked="$RUNNER_TEMP/unpacked"
           mount="$RUNNER_TEMP/dmg"
           mkdir -p "$unpacked" "$mount"
-          tar -xzf "$packages/Lumen_${version}_universal.app.tar.gz" -C "$unpacked"
+          tar -xzf "$packages/Lumen_universal.app.tar.gz" -C "$unpacked"
           sh src-tauri/build/verify-macos-bundle.sh "$unpacked/Lumen.app"
-          hdiutil attach "$packages/Lumen_${version}_universal.dmg" -readonly -nobrowse -mountpoint "$mount"
+          hdiutil attach "$packages/Lumen_universal.dmg" -readonly -nobrowse -mountpoint "$mount"
           trap 'hdiutil detach "$mount"' EXIT
           sh src-tauri/build/verify-macos-bundle.sh "$mount/Lumen.app"
           executable=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$unpacked/Lumen.app/Contents/Info.plist")
