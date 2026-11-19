@@ -1,6 +1,7 @@
 import { onMount } from 'svelte';
 import { get, type Readable } from 'svelte/store';
 import { getCurrentWindow } from '@tauri-apps/api/window';
+import { getCurrentWebview } from '@tauri-apps/api/webview';
 import { invoke } from '@tauri-apps/api/core';
 import { LogicalSize } from '@tauri-apps/api/dpi';
 import { listen } from '@tauri-apps/api/event';
@@ -35,12 +36,25 @@ function watchStore<T>(store: Readable<T>) {
 	};
 }
 
-/** Resize the native window to the UI scale. In the browser, zoom the viewport instead. */
+/**
+ * Resize the native window to the UI scale and zoom the content to fill it.
+ * In the browser only the content zooms.
+ *
+ * macOS zooms the WebView itself. WebKit there kept the CSS-zoomed viewport at
+ * its unzoomed `min(390px, 100vw)` size, so a larger scale grew the window
+ * around a UI that stayed 390×700 in its top corner.
+ */
 async function applyScale(scale: number) {
 	const w = Math.round(APP_WIDTH * scale);
 	const h = Math.round(APP_HEIGHT * scale);
+	const root = document.documentElement.style;
+	const cssZoom = (value: number) =>
+		root.setProperty('--ui-css-zoom', String(value));
 
-	document.documentElement.style.setProperty('--ui-zoom', String(scale));
+	// The header still places itself next to the native traffic lights by it.
+	root.setProperty('--ui-zoom', String(scale));
+	const nativeZoom = runtime.isTauri && isMac;
+	cssZoom(nativeZoom ? 1 : scale);
 
 	// The Android activity is the screen; only the content zooms.
 	if (runtime.isTauri && !isAndroid) {
@@ -48,6 +62,14 @@ async function applyScale(scale: number) {
 			await getCurrentWindow().setSize(new LogicalSize(w, h));
 		} catch (e) {
 			console.error('[scale] Failed to resize Tauri window:', e);
+		}
+	}
+	if (nativeZoom) {
+		try {
+			await getCurrentWebview().setZoom(scale);
+		} catch (e) {
+			console.error('[scale] Failed to zoom the WebView:', e);
+			cssZoom(scale);
 		}
 	}
 }

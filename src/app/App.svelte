@@ -255,8 +255,9 @@
 			var(--radius-window-bottom) var(--radius-window-bottom);
 		/* Scales the entire UI (text, spacing, icons) proportionally.
 		   --app-width/height stay at their base values; the native window is resized
-		   separately to accommodate the zoomed content. */
-		zoom: var(--ui-zoom, 1);
+		   separately to accommodate the zoomed content. macOS zooms the WebView
+		   natively instead and keeps this at 1 (see applyScale). */
+		zoom: var(--ui-css-zoom, 1);
 	}
 
 	.app-ui {
