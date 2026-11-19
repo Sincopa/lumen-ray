@@ -37,6 +37,11 @@ impl Default for Snapshot {
     }
 }
 pub async fn publish(state: &AppState, app: &tauri::AppHandle, snapshot: Snapshot) {
+    #[cfg(target_os = "macos")]
+    crate::platform::activity::keep_active(matches!(
+        snapshot.status.as_str(),
+        "connecting" | "connected"
+    ));
     *state.snapshot.write().await = snapshot.clone();
     crate::app::tray::show_connection(app, snapshot.status == "connected");
     if app.emit("vpn://state", snapshot).is_err() {
@@ -756,7 +761,20 @@ pub(super) fn schedule_recovery(state: Arc<AppState>, app: tauri::AppHandle, ser
                 log::info!("Automatic recovery stopped: another server was selected");
                 break;
             }
-            let Ok(_transaction) = state.updates.try_lock() else {
+            // A subscription refresh or a settings change holds this only briefly.
+            // Recovery used to give up for good when it met one, and the tunnel
+            // that had just dropped stayed down without a word.
+            let transaction = tokio::select! {
+                guard = state.updates.lock() => Some(guard),
+                _ = shutdown.changed() => None,
+                _ = async {
+                    while state.connection_generation.load(Ordering::Acquire) == generation {
+                        tokio::time::sleep(Duration::from_millis(100)).await;
+                    }
+                } => None,
+                _ = tokio::time::sleep(Duration::from_secs(90)) => None,
+            };
+            let Some(_transaction) = transaction else {
                 break;
             };
             {

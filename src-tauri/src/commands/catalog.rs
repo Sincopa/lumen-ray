@@ -69,13 +69,21 @@ pub async fn apply_mutation(
             | service::Mutation::ApplyPreset { .. }
             | service::Mutation::RemovePreset { .. }
     );
-    let previous = if reconnect {
+    // Removing a subscription while connected also drops its rules and the
+    // rules that pointed at its servers. The tunnel on another subscription
+    // takes them live; one on the removed subscription is disconnected below.
+    let removing = matches!(mutation, service::Mutation::RemoveSubscription { .. });
+    let previous = if reconnect || removing {
         Some(state.repository.read().await.clone())
     } else {
         None
     };
     let value = service::mutate(state, mutation).await?;
     disconnect_removed_server(state, app).await?;
+    if let (true, Some(before)) = (removing, previous.as_ref()) {
+        let after = state.repository.read().await.clone();
+        publish_routing_if_changed(state, before, &after).await;
+    }
     crate::app::tray::update_tray_menu(app, state);
     let id = if reconnect {
         state

@@ -103,6 +103,10 @@ impl Session {
     pub fn failed(&mut self) -> bool {
         xray::failed(&mut self.backend)
     }
+    /// How a stopped core process ended (exit code or signal), for the log.
+    pub fn exit_status(&self) -> Option<String> {
+        xray::exit_status(&self.backend)
+    }
 }
 
 /// The active backend is never inferred from mutable saved settings.

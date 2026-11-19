@@ -63,9 +63,18 @@
 	const otherSubs = $derived(
 		$catalogStore.subscriptions.filter((sub) => sub.id !== activeSub?.id),
 	);
-	const deleteBlocked = $derived(
-		$connectionStore.busy || $connectionStore.status === 'connected',
-	);
+	// A subscription can go while connected; only a connect or disconnect in
+	// flight waits, so the removal does not race the tunnel it may stop.
+	const deleteBlocked = $derived($connectionStore.busy);
+	/** The tunnel runs (or is heading) through a server of `sub`. */
+	function carriesTunnel(sub: Subscription) {
+		const snapshot = $connectionStore;
+		if (!isActive(snapshot.status)) return false;
+		const serverId = snapshot.info?.serverId ?? snapshot.target;
+		return $catalogStore.servers.some(
+			(server) => server.id === serverId && server.subscriptionId === sub.id,
+		);
+	}
 
 	const headerOwner = {};
 	$effect(() => {
@@ -359,7 +368,10 @@
 {#if deleting}
 	<ConfirmDialog
 		title={t('common.areYouSure')}
-		description={t('subscriptions.deleteConfirm', { name: deleting.name })}
+		description={t('subscriptions.deleteConfirm', { name: deleting.name }) +
+			(carriesTunnel(deleting)
+				? ' ' + t('subscriptions.deleteDisconnects')
+				: '')}
 		cancelLabel={t('common.cancel')}
 		confirmLabel={t('common.continue')}
 		onCancel={() => (deleting = null)}

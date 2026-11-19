@@ -12,6 +12,13 @@ const RELEASE_AFTER: Duration = Duration::from_secs(45);
 pub(crate) fn should_release_tunnel(unhealthy: u8, failing_for: Duration) -> bool {
     unhealthy >= 3 && failing_for >= RELEASE_AFTER
 }
+
+/// The once-a-second loop did not run for a while: by its own clock (App Nap,
+/// a stalled runtime) or by the wall clock (sleep, which stops `Instant` on macOS).
+fn resumed(monotonic: Duration, wall: Duration) -> bool {
+    const PAUSE: Duration = Duration::from_secs(15);
+    monotonic > PAUSE || wall > PAUSE
+}
 use crate::app::state::AppState;
 use crate::domain::errors::BackendError;
 use std::{
@@ -46,6 +53,8 @@ pub fn monitor(state: Arc<AppState>, app: tauri::AppHandle) {
     tauri::async_runtime::spawn(async move {
         let mut last_health = Instant::now();
         let mut last_tick = Instant::now();
+        // macOS stops `Instant` while asleep; the wall clock still shows the gap.
+        let mut last_wall = std::time::SystemTime::now();
         let mut generation = 0;
         #[cfg(any(windows, target_os = "macos"))]
         let watcher = crate::platform::network_watch::NetworkWatch::new();
@@ -67,8 +76,19 @@ pub fn monitor(state: Arc<AppState>, app: tauri::AppHandle) {
             tokio::select! {
                 _=shutdown.changed()=>break,
                 _=ticker.tick()=>{
-                    network_dirty |= last_tick.elapsed() > Duration::from_secs(15);
+                    // The loop itself stood still: the computer slept or the app was
+                    // throttled. Checks that failed before the pause say nothing about
+                    // the path now, so the release countdown starts over.
+                    if resumed(last_tick.elapsed(), last_wall.elapsed().unwrap_or_default()) {
+                        network_dirty = true;
+                        if failing_since.is_some() {
+                            log::info!("Connection checks restart after the app was paused");
+                        }
+                        unhealthy = 0;
+                        failing_since = None;
+                    }
                     last_tick = Instant::now();
+                    last_wall = std::time::SystemTime::now();
                     #[cfg(any(windows, target_os = "macos"))] { let now = watcher.revision(); network_dirty |= now != revision; revision = now; }
                     let Ok(operation)=state.connection_operation.try_acquire()else{continue};
                     let mut session=std::mem::take(&mut *state.session.lock().await);
@@ -76,7 +96,10 @@ pub fn monitor(state: Arc<AppState>, app: tauri::AppHandle) {
                     let mut failed_id = None;
                     if session.failed() {
                         failed_id = active_id.clone();
-                        log::warn!("Core stopped unexpectedly");
+                        match session.exit_status() {
+                            Some(status) => log::warn!("Core stopped unexpectedly ({status})"),
+                            None => log::warn!("Core stopped unexpectedly"),
+                        }
                         let _=stop(&mut session).await;
                         if active_id.is_some() {
                             publish(&state,&app,Snapshot{status:"error".into(),info:None,error:Some(BackendError::new("CORE_CRASHED","Networking engine stopped unexpectedly"))}).await;
@@ -195,8 +218,19 @@ pub fn monitor(state: Arc<AppState>, app: tauri::AppHandle) {
 
 #[cfg(test)]
 mod tests {
-    use super::should_release_tunnel;
+    use super::{resumed, should_release_tunnel};
     use std::time::Duration;
+
+    #[test]
+    fn a_pause_of_the_loop_restarts_the_countdown() {
+        let secs = Duration::from_secs;
+        assert!(!resumed(secs(1), secs(1)));
+        assert!(!resumed(secs(14), secs(14)));
+        // App Nap or a stalled runtime: the loop's own clock shows the gap.
+        assert!(resumed(secs(40), secs(40)));
+        // macOS sleep: `Instant` stood still, the wall clock did not.
+        assert!(resumed(secs(1), secs(600)));
+    }
 
     #[test]
     fn short_server_stalls_keep_the_tunnel() {

@@ -816,13 +816,8 @@ async fn apply_reload<P: AsyncRead + AsyncWrite + Unpin>(
     })
     .await
     .map_err(|_| error())??;
-    if routes.deactivate().is_err() || !super::network::routes_released() {
-        return Err(error());
-    }
-    if let Some(current) = child.as_mut() {
-        current.kill().await.map_err(|_| error())?;
-    }
-    *child = None;
+    // Build and stage while the running core still carries traffic: the
+    // switch is shorter, and a failure here leaves the old server working.
     let config = crate::xray::config::build_standby(
         &envelope.tunnel.repository,
         &envelope.tunnel.selected,
@@ -830,14 +825,33 @@ async fn apply_reload<P: AsyncRead + AsyncWrite + Unpin>(
         envelope.tunnel.metrics_port,
     )?;
     let next = serde_json::to_vec(&config).map_err(|_| error())?;
-    let bundled = stage_core(
-        &envelope.tunnel.core_version,
-        data,
-        envelope.geo,
-        &geoip,
-        &geosite,
-    )
-    .await?;
+    // A server switch keeps the core and geo data this session already staged
+    // and verified in its protected folder. Staging an updated core again
+    // cost a GitHub API request (rate limited), a 16 MB extraction and two
+    // validation runs on every switch.
+    let bundled = if staged_version(core) == Some(envelope.tunnel.core_version.as_str())
+        && core.is_file()
+        && crate::xray::geo::has_snapshot(data, &envelope.geo)
+    {
+        core.clone()
+    } else {
+        stage_core(
+            &envelope.tunnel.core_version,
+            data,
+            envelope.geo,
+            &geoip,
+            &geosite,
+        )
+        .await?
+    };
+    drop((geoip, geosite));
+    if routes.deactivate().is_err() || !super::network::routes_released() {
+        return Err(error());
+    }
+    if let Some(current) = child.as_mut() {
+        current.kill().await.map_err(|_| error())?;
+    }
+    *child = None;
     // Keep the previous config until the replacement is actually listening.
     // A failed wait used to leave the new process in place and overwrite the
     // bytes Sweep would use for the next restart.
@@ -894,6 +908,11 @@ async fn apply_reload<P: AsyncRead + AsyncWrite + Unpin>(
     Ok(())
 }
 
+/// The version folder a staged core runs from (`<data>/core/<version>/xray.exe`).
+fn staged_version(core: &std::path::Path) -> Option<&str> {
+    core.parent()?.file_name()?.to_str()
+}
+
 /// Stage what the session runs: the bundled Xray and Wintun (checked against the
 /// compiled-in hashes), the trusted geo snapshot, then an updated core if one is
 /// selected (checked against its release digest, validated with that snapshot).
@@ -907,7 +926,9 @@ async fn stage_core(
 ) -> Result<std::path::PathBuf> {
     let runtime = resolve_resources()?;
     let bundled = crate::xray::bundle::prepare_for_tunnel(&runtime, data)?;
-    crate::xray::geo::install_trusted_snapshot(data, geo, geoip, geosite)?;
+    if !crate::xray::geo::has_snapshot(data, &geo) {
+        crate::xray::geo::install_trusted_snapshot(data, geo, geoip, geosite)?;
+    }
     if version == crate::xray::bundle::VERSION {
         return Ok(bundled);
     }

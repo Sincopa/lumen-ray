@@ -75,7 +75,10 @@ export class ConnectionController {
 		if (patch.error) {
 			if (this.errorTimer) clearTimeout(this.errorTimer);
 			this.errorTimer = setTimeout(() => {
-				if (this.current.error) {
+				// A connection that dropped or failed keeps saying why until the
+				// next attempt: a drop while Lumen was in the background used to
+				// leave only a disconnected screen and no reason.
+				if (this.current.error && this.current.status !== 'error') {
 					this.update({ error: null });
 				}
 			}, 5000);

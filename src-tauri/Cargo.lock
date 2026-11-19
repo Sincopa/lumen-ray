@@ -129,6 +129,8 @@ dependencies = [
  "hickory-proto",
  "libc",
  "log",
+ "objc2",
+ "objc2-foundation",
  "percent-encoding",
  "png 0.17.16",
  "reqwest 0.12.28",

@@ -218,6 +218,16 @@ pub(crate) fn ports() -> Result<(u16, u16)> {
     }
     Err(error())
 }
+/// The four local ports `ports()` reserves for a core (proxy, metrics, HTTP,
+/// API) can be bound again, so a replacement core can listen on them.
+fn ports_free(proxy: u16, metrics: u16) -> bool {
+    let (Some(http), Some(api)) = (metrics.checked_add(1), metrics.checked_add(2)) else {
+        return false;
+    };
+    [proxy, metrics, http, api]
+        .into_iter()
+        .all(|port| std::net::TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, port)).is_ok())
+}
 #[cfg(any(windows, target_os = "macos"))]
 fn configuration_fingerprint(
     repo: &crate::storage::repository::Repository,
@@ -781,6 +791,7 @@ mod live_switch_tests {
                 .await?;
             let started = session.started;
             assert!(started.is_some());
+            let ports = (session.proxy_port, session.metrics_port);
             // All -> Rules with a new rule, then a server switch, then back to All.
             assert_eq!(
                 XrayBackend
@@ -796,6 +807,8 @@ mod live_switch_tests {
             assert_eq!(s.prepared_server_id.as_deref(), Some(second.id.as_str()));
             assert!(s.pending_live_switch.is_none());
             assert_ne!(s.started, started);
+            // The replacement listens where the system proxy already points.
+            assert_eq!((s.proxy_port, s.metrics_port), ports);
             let started = s.started;
             let mut toggled = rules.clone();
             toggled.rules[0].enabled = false;
@@ -1440,14 +1453,28 @@ impl CoreBackend for XrayBackend {
                     ));
                 }
             }
-            let (proxy_port, metrics_port) = if reuse {
+            // A system-proxy core restarted for another server hands its local
+            // ports to the replacement. The system proxy already points at them,
+            // so macOS needs no networksetup round trip (seconds with several
+            // network services) and traffic never bypasses Lumen in between.
+            #[cfg(any(windows, target_os = "macos"))]
+            let kept = (!tun
+                && !s.is_tun
+                && s.started.is_some()
+                && s.child
+                    .as_ref()
+                    .is_some_and(|child| matches!(child.try_wait(), Ok(None))))
+            .then_some((s.proxy_port, s.metrics_port));
+            #[cfg(not(any(windows, target_os = "macos")))]
+            let kept: Option<(u16, u16)> = None;
+            let (mut proxy_port, mut metrics_port) = if reuse {
                 (s.proxy_port, s.metrics_port)
+            } else if let Some(ports) = kept {
+                ports
             } else {
                 ports()?
             };
-            let bytes = if tun {
-                Vec::new()
-            } else {
+            let proxy_config = |proxy_port: u16, metrics_port: u16| -> Result<Vec<u8>> {
                 #[allow(unused_mut)]
                 let mut config =
                     crate::xray::config::build(repo, selected, proxy_port, metrics_port, false)?;
@@ -1455,7 +1482,12 @@ impl CoreBackend for XrayBackend {
                 crate::xray::config::enable_api(&mut config, metrics_port)?;
                 serde_json::to_vec(&config).map_err(|_| {
                     BackendError::new("INVALID_CONFIG", "Could not serialize Xray config")
-                })?
+                })
+            };
+            let mut bytes = if tun {
+                Vec::new()
+            } else {
+                proxy_config(proxy_port, metrics_port)?
             };
             #[cfg(windows)]
             {
@@ -1501,6 +1533,12 @@ impl CoreBackend for XrayBackend {
             #[cfg(not(any(windows, target_os = "android")))]
             if !reuse {
                 stop(s).await?;
+            }
+            // Another program can take one of them while no core listens.
+            if kept.is_some() && !ports_free(proxy_port, metrics_port) {
+                log::info!("engine=xray previous local ports are taken; using new ones");
+                (proxy_port, metrics_port) = ports()?;
+                bytes = proxy_config(proxy_port, metrics_port)?;
             }
             s.is_tun = tun;
             if tun {
@@ -1711,6 +1749,24 @@ pub async fn reassert_routes(session: &mut XraySession) -> Result<()> {
         .ok_or_else(|| BackendError::new("TUN_FAILED", "Tunnel helper is unavailable"))?;
     helper.deactivate().await?;
     helper.activate().await
+}
+
+/// The exit code or signal of a core process that has stopped. Says nothing
+/// about where the core connected, so it is safe to log.
+pub fn exit_status(session: &XraySession) -> Option<String> {
+    #[cfg(any(windows, target_os = "macos"))]
+    {
+        session
+            .child
+            .as_ref()
+            .and_then(|child| child.try_wait().ok().flatten())
+            .map(|status| status.to_string())
+    }
+    #[cfg(not(any(windows, target_os = "macos")))]
+    {
+        let _ = session;
+        None
+    }
 }
 
 pub fn failed(session: &mut XraySession) -> bool {

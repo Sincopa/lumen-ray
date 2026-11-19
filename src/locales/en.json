@@ -62,6 +62,7 @@
 		"skippedServers": "Skipped servers: {count}",
 		"skippedServersHint": "These servers turn certificate checks off or need something Xray lacks",
 		"deleteConfirm": "Do you want to delete “{name}”, its servers and associated rules?",
+		"deleteDisconnects": "The VPN is connected through this subscription and will disconnect.",
 		"shareTitle": "Share link",
 		"shareHint": "Copy the link to import this subscription on another device.",
 		"sourceUnavailable": "The link is unavailable in this demo session.",

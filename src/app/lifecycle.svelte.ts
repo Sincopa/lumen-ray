@@ -17,7 +17,8 @@ import {
 	refreshAllSubscriptions,
 } from '../lib/services/maintenance';
 import { i18n } from '../lib/i18n';
-import { isAndroid } from '../lib/platform';
+import { isAndroid, isMac } from '../lib/platform';
+import { installWheelScroll } from '../lib/utils/wheelScroll';
 import { shell } from './shell.svelte';
 
 function watchStore<T>(store: Readable<T>) {
@@ -126,6 +127,8 @@ export function installLifecycle() {
 		};
 		window.addEventListener('contextmenu', handleContextMenu);
 		window.addEventListener('keydown', handleKeyDown);
+		// The macOS window loses native wheel and trackpad scrolling of lists.
+		const removeWheelScroll = isMac ? installWheelScroll() : undefined;
 
 		let unlistenNavigate: (() => void) | undefined;
 		let unlistenBack: (() => void) | undefined;
@@ -153,6 +156,7 @@ export function installLifecycle() {
 		return () => {
 			window.removeEventListener('contextmenu', handleContextMenu);
 			window.removeEventListener('keydown', handleKeyDown);
+			removeWheelScroll?.();
 			document.removeEventListener('visibilitychange', handleVisible);
 			unlistenNavigate?.();
 			unlistenBack?.();

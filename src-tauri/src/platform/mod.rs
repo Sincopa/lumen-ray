@@ -1,3 +1,6 @@
+#[cfg(target_os = "macos")]
+#[path = "macos/activity.rs"]
+pub mod activity;
 #[cfg(target_os = "android")]
 pub mod android;
 #[cfg(target_os = "macos")]

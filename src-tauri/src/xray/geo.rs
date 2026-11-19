@@ -277,6 +277,19 @@ pub fn install_snapshot(
     validate_geo_files_sync(core, staging.path())?;
     commit(data, staging, meta)
 }
+/// `data` already runs the pair `meta` describes. The tunnel helper's data
+/// folder is its own protected staging copy, verified when it was installed;
+/// a server switch then skips writing, hashing and compacting ~17 MB again
+/// (0.2-0.6 s per switch, and a new generation folder each time).
+#[cfg(windows)]
+pub fn has_snapshot(data: &Path, meta: &GeoDatabaseMetadata) -> bool {
+    metadata(data).is_ok_and(|current| {
+        current.geoip_sha256 == meta.geoip_sha256 && current.geosite_sha256 == meta.geosite_sha256
+    }) && active_dir(data).is_ok_and(|generation| {
+        let assets = core_assets(&generation);
+        assets.join("geoip.dat").is_file() && assets.join("geosite.dat").is_file()
+    })
+}
 #[cfg(windows)]
 pub fn install_trusted_snapshot(
     data: &Path,
@@ -581,6 +594,25 @@ mod tests {
         assert_eq!(assets_for_core(&core), generation);
         ensure_initialized(&rt, data.path()).unwrap();
         assert_eq!(assets_for_core(&core), compact);
+    }
+    #[cfg(windows)]
+    #[test]
+    fn a_helper_reload_reuses_the_snapshot_it_already_installed() {
+        let source = tempfile::tempdir().unwrap();
+        ensure_initialized(runtime(), source.path()).unwrap();
+        let (meta, ip, site) = snapshot(source.path()).unwrap();
+        let helper = tempfile::tempdir().unwrap();
+        assert!(!has_snapshot(helper.path(), &meta));
+        install_trusted_snapshot(helper.path(), meta.clone(), &ip, &site).unwrap();
+        // The next server switch sends the same pair: nothing to install again.
+        assert!(has_snapshot(helper.path(), &meta));
+        // An updated database does go through installation.
+        let mut updated = meta.clone();
+        updated.geosite_sha256 = "0".repeat(64);
+        assert!(!has_snapshot(helper.path(), &updated));
+        // So does a generation whose files are gone.
+        std::fs::remove_dir_all(active_dir(helper.path()).unwrap()).unwrap();
+        assert!(!has_snapshot(helper.path(), &meta));
     }
     #[test]
     fn interrupted_invalid_and_concurrent_updates_preserve_last_good_pair() {
