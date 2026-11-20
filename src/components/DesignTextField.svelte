@@ -107,9 +107,7 @@
 		backdrop-filter: blur(25px);
 		box-sizing: border-box;
 		cursor: text;
-		transition:
-			background-color var(--field-duration) var(--ease-field),
-			box-shadow 180ms ease;
+		transition: background-color var(--field-duration) var(--ease-field);
 	}
 	/* Figma stacks 5% white over 20% black; one color keeps it animatable. */
 	.design-field.filled {
@@ -118,9 +116,6 @@
 	/* The same black base under a 12% red tint. */
 	.design-field.invalid {
 		background-color: rgba(104, 44, 42, 0.3);
-	}
-	.design-field:focus-within {
-		box-shadow: inset 0 0 0 1px #ffffff1f;
 	}
 
 	/* Geist centers its caps in a 1.3em line, so a line box centered on the

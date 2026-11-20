@@ -16,7 +16,10 @@
 			"endpoints": [
 				"https://github.com/Sincopa/lumen-ray/releases/latest/download/latest.json"
 			],
-			"requireSignedVersion": true
+			"requireSignedVersion": true,
+			"windows": {
+				"installMode": "quiet"
+			}
 		}
 	},
 	"build": {

@@ -1,7 +1,7 @@
 <script lang="ts">
 	import type { Rule, RuleMatcher, Server } from '../../lib/services/catalog';
 	import { t } from '../../lib/i18n';
-	import { screen, morphIn, morphOut } from '../../lib/motion';
+	import { screen, screenOut, morphIn, morphOut } from '../../lib/motion';
 	import DesignTextField from '../../components/DesignTextField.svelte';
 	import DesignPickerField from '../../components/DesignPickerField.svelte';
 	import IconButton from '../../components/IconButton.svelte';
@@ -210,7 +210,11 @@
 
 <section class="rule-editor-view" aria-label={t('rules.editTitle')}>
 	{#key step}
-		<div class="editor-step" in:screen={{ dir: step === 'form' ? 1 : -1 }}>
+		<div
+			class="editor-step"
+			in:screen={{ dir: step === 'form' ? 1 : -1 }}
+			out:screenOut={{ dir: step === 'form' ? 1 : -1, pin: true }}
+		>
 			{#if step === 'type'}
 				<RuleTypeStep
 					types={shownTypes}

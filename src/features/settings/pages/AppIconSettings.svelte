@@ -69,7 +69,10 @@
 		grid-template-columns: repeat(3, minmax(0, 1fr));
 		gap: 8px;
 	}
-	/* 18px tiles with a 15% white rim drawn over the artwork. */
+	/* 18px tiles with a 15% white rim drawn over the artwork (Figma: a 1px
+	   inside stroke). The rim is a border, which the browser snaps to a whole
+	   device pixel at any UI scale; a 1px inset shadow thinned out to nothing
+	   under the window zoom. */
 	.icon-tile {
 		position: relative;
 		aspect-ratio: 1;
@@ -89,8 +92,8 @@
 		content: '';
 		position: absolute;
 		inset: 0;
+		border: 1px solid #ffffff26;
 		border-radius: inherit;
-		box-shadow: inset 0 0 0 1px #ffffff26;
 		pointer-events: none;
 	}
 	.icon-tile img {

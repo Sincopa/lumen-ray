@@ -24,30 +24,36 @@
 	let searchClosing = $state(false);
 	let searchInputEl = $state<HTMLInputElement | null>(null);
 	let rowEl = $state<HTMLElement | null>(null);
-	// The field grows out of the magnifier and shrinks back into it.
-	let searchOrigin = $state('inset(50% 50% 50% 50% round 999px)');
+	let actionsEl = $state<HTMLElement | null>(null);
+	// The buttons' glass pill is what turns into the field and back: the field
+	// is clipped to the pill's box and springs open to the whole row.
+	let searchOrigin = $state('inset(0px 0px 0px 60% round 24px)');
 
-	function openSearch(event: MouseEvent) {
-		const button = event.currentTarget as HTMLElement | null;
-		if (button && rowEl) {
-			const b = button.getBoundingClientRect();
-			const p = rowEl.getBoundingClientRect();
-			searchOrigin =
-				`inset(${b.top - p.top}px ${p.right - b.right}px ` +
-				`${p.bottom - b.bottom}px ${b.left - p.left}px round 999px)`;
-		}
+	/** Offsets in layout pixels, so the clip stays right under the UI zoom. */
+	function pillInset() {
+		if (!actionsEl || !rowEl) return searchOrigin;
+		const left = actionsEl.offsetLeft;
+		const right = rowEl.offsetWidth - left - actionsEl.offsetWidth;
+		return `inset(0px ${Math.max(0, right)}px 0px ${left}px round 24px)`;
+	}
+
+	function openSearch() {
+		searchOrigin = pillInset();
 		searching = true;
 		searchClosing = false;
-		searchTask.schedule(() => searchInputEl?.focus(), 180);
+		searchTask.schedule(() => searchInputEl?.focus(), 160);
 	}
 
 	function closeSearch() {
+		searchOrigin = pillInset();
 		searchClosing = true;
+		// The pill fades back in under the shrinking field, so there is no gap
+		// between the field leaving and the buttons returning.
 		searchTask.schedule(() => {
 			searching = false;
 			searchClosing = false;
 			tabHeader.query = '';
-		}, 320);
+		}, 400);
 	}
 
 	// A tab without search, or a new tab, starts with the field closed.
@@ -72,7 +78,7 @@
 	<div class="tab-header">
 		<!-- Figma "top buttons tun": the profile pill and the buttons pill. -->
 		<div class="header-row" bind:this={rowEl}>
-			<div class="title-pill" class:header-hidden={searching}>
+			<div class="title-pill" class:header-hidden={searching && !searchClosing}>
 				{#key slots.title}
 					<span class="title-text" in:swap>{slots.title}</span>
 				{/key}
@@ -80,8 +86,8 @@
 			</div>
 			<div
 				class="actions-pill"
-				class:dim={slots.dimActions}
-				class:header-hidden={searching}
+				class:header-hidden={searching && !searchClosing}
+				bind:this={actionsEl}
 			>
 				{#if slots.searchPlaceholder}
 					<span class="morph-slot" in:morphWidth out:morphWidth>
@@ -152,6 +158,8 @@
 		width: 100%;
 		height: var(--design-tab-header-height);
 	}
+	/* Coming back (search closed): the pills condense out of a blur while the
+	   field shrinks into the buttons' pill. */
 	.title-pill,
 	.actions-pill {
 		display: flex;
@@ -162,8 +170,9 @@
 		-webkit-backdrop-filter: blur(25px);
 		backdrop-filter: blur(25px);
 		transition:
-			opacity 220ms ease,
-			filter 220ms ease;
+			opacity 220ms ease 90ms,
+			filter 300ms var(--ease-smooth) 90ms,
+			transform 300ms var(--ease-smooth) 90ms;
 	}
 	/* 14px name and the 8px dot, 17px in from every side. */
 	.title-pill {
@@ -180,14 +189,22 @@
 		white-space: nowrap;
 		line-height: 1.3;
 	}
+	/* Figma "top button": the buttons rest at 50% and light up on hover. */
 	.actions-pill {
+		--icon-rest: 0.5;
 		flex-shrink: 0;
 		padding: 0 8px;
 	}
+	/* Leaving (search opened): quick, so the field is not drawn over them. */
 	.header-hidden {
 		opacity: 0;
-		filter: blur(6px);
+		filter: blur(4px);
+		transform: scale(0.97);
 		pointer-events: none;
+		transition:
+			opacity 140ms ease-out,
+			filter 160ms ease-out,
+			transform 200ms ease-out;
 	}
 	.morph-slot {
 		display: inline-flex;
@@ -201,7 +218,8 @@
 		align-items: center;
 		gap: 6px;
 	}
-	/* Buttons are 34px hit areas around 28px icons. */
+	/* Buttons are 34px hit areas around 28px icons. Hover changes the icon,
+	   never draws a circle behind it. */
 	.header-btn,
 	.actions-pill :global(.icon-btn.design) {
 		display: grid;
@@ -214,10 +232,7 @@
 		border: 0;
 		border-radius: 50%;
 		background: transparent;
-		transition:
-			background-color 160ms ease,
-			opacity 160ms ease,
-			transform 160ms var(--ease-spring);
+		transition: transform 160ms var(--ease-spring);
 	}
 	.header-btn img,
 	.actions-pill :global(.icon-btn.design .btn-icon),
@@ -228,19 +243,15 @@
 		max-width: none;
 		max-height: none;
 	}
-	.dim .header-btn,
-	.dim :global(.icon-btn.design:not(:disabled)) {
-		opacity: 0.5;
+	.header-btn img {
+		opacity: var(--icon-rest);
+		transition: opacity var(--hover-duration) var(--ease-hover);
 	}
 	.header-btn:active {
 		transform: scale(0.92);
 	}
 	@media (hover: hover) and (pointer: fine) {
-		.header-btn:hover {
-			background: #ffffff14;
-		}
-		.dim .header-btn:hover,
-		.dim :global(.icon-btn.design:hover:not(:disabled)) {
+		.header-btn:hover img {
 			opacity: 1;
 		}
 	}
@@ -261,31 +272,36 @@
 		clip-path: var(--search-origin);
 		opacity: 0;
 		pointer-events: none;
+		/* Closing: the glass springs back to the pill without overshoot (an
+		   overshooting clip would stall against the row's edge), then hands
+		   over to the pill fading in beneath it. */
 		transition:
-			clip-path 260ms var(--ease-out),
-			opacity 140ms ease 120ms;
+			clip-path 380ms var(--ease-smooth),
+			opacity 120ms ease 210ms;
 	}
 	.header-search > * {
 		opacity: 0;
 		filter: blur(6px);
 		transition:
-			opacity 160ms ease,
-			filter 160ms ease;
+			opacity 120ms ease-out,
+			filter 140ms ease-out;
 	}
+	/* Opening: the pill's glass grows to the full row; its content condenses
+	   out of a blur once the shape is under way. */
 	.header-search.search-open {
-		clip-path: inset(0 round 24px);
+		clip-path: inset(0px 0px 0px 0px round 24px);
 		opacity: 1;
 		pointer-events: auto;
 		transition:
-			clip-path var(--morph-duration) var(--ease-morph),
-			opacity 80ms ease;
+			clip-path var(--smooth-duration) var(--ease-smooth),
+			opacity 60ms ease;
 	}
 	.header-search.search-open > * {
 		opacity: 1;
 		filter: blur(0);
 		transition:
-			opacity 260ms ease 140ms,
-			filter 260ms ease 140ms;
+			opacity 240ms ease 90ms,
+			filter 300ms var(--ease-smooth) 90ms;
 	}
 	.header-search.search-closing {
 		pointer-events: none;
@@ -331,9 +347,6 @@
 		flex-shrink: 0;
 		transition: transform 160ms var(--ease-spring);
 	}
-	.close-search-btn:hover {
-		transform: scale(1.06);
-	}
 	.close-search-btn:active {
 		transform: scale(0.94);
 	}
@@ -349,6 +362,12 @@
 		.header-search.search-open {
 			clip-path: none;
 			transition: opacity 120ms ease;
+		}
+		.title-pill,
+		.actions-pill,
+		.header-hidden {
+			filter: none;
+			transform: none;
 		}
 	}
 </style>

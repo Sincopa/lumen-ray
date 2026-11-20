@@ -4,6 +4,8 @@
  */
 
 .settings-view {
+	/* Containing block of a page that leaves while the next slides in. */
+	position: relative;
 	display: flex;
 	flex-direction: column;
 	width: 100%;
@@ -389,9 +391,14 @@
 	color: rgba(255, 255, 255, 0.6);
 }
 
+/* The back button keeps its glass; hover lights the arrow up instead. */
+.settings-view .circle-back img {
+	opacity: 0.8;
+	transition: opacity var(--hover-duration) var(--ease-hover);
+}
 @media (hover: hover) and (pointer: fine) {
-	.settings-view .circle-back:hover {
-		background: rgba(255, 255, 255, 0.1);
+	.settings-view .circle-back:hover img {
+		opacity: 1;
 	}
 	.settings-view .wide-btn:hover:not(:disabled) {
 		background: rgba(255, 255, 255, 0.09);

@@ -17,6 +17,30 @@ const DEFAULT_UPDATE_ENDPOINT: &str =
 #[cfg(not(target_os = "android"))]
 const DEFAULT_UPDATE_PUBLIC_KEY: &str = "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDI4NzdGRUNENEU4QzJBMDgKUldRSUtveE96ZjUzS1BpTnFIR1ozMlNYSDNPcXNlZzFwSXJmeWVjbGh3OEhXcm8xRmMxRlJobEEK";
 
+/// The whole manifest request. Without a limit a request that stalls (the
+/// tunnel coming up and re-routing traffic mid-request, a throttled CDN) kept
+/// the check spinning forever, and later checks waited on it.
+#[cfg(not(target_os = "android"))]
+const UPDATE_CHECK_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(20);
+/// Connecting, and silence between two reads. Bounds the package download
+/// too without capping how long a slow but moving download may take.
+#[cfg(not(target_os = "android"))]
+const UPDATE_CONNECT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
+#[cfg(not(target_os = "android"))]
+const UPDATE_READ_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
+
+/// What the last check found, so installing it does not ask GitHub again.
+#[cfg(not(target_os = "android"))]
+static FOUND_UPDATE: std::sync::Mutex<Option<tauri_plugin_updater::Update>> =
+    std::sync::Mutex::new(None);
+
+#[cfg(not(target_os = "android"))]
+fn found_update() -> std::sync::MutexGuard<'static, Option<tauri_plugin_updater::Update>> {
+    FOUND_UPDATE
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
 #[derive(serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ApplicationUpdate {
@@ -39,6 +63,12 @@ fn application_updater(app: &tauri::AppHandle) -> Result<tauri_plugin_updater::U
     }
     app.updater_builder()
         .pubkey(key)
+        .timeout(UPDATE_CHECK_TIMEOUT)
+        .configure_client(|client| {
+            client
+                .connect_timeout(UPDATE_CONNECT_TIMEOUT)
+                .read_timeout(UPDATE_READ_TIMEOUT)
+        })
         .endpoints(vec![url])
         .map_err(|_| BackendError::new("UPDATE_FAILED", "Invalid update endpoint"))?
         .build()
@@ -49,13 +79,15 @@ fn application_updater(app: &tauri::AppHandle) -> Result<tauri_plugin_updater::U
 pub async fn check_application_update(app: tauri::AppHandle) -> Result<ApplicationUpdate> {
     let current_version = app.package_info().version.to_string();
     let updater = application_updater(&app)?;
-    let update = updater
-        .check()
-        .await
-        .map_err(|_| BackendError::new("UPDATE_FAILED", "Could not check application updates"))?;
+    let update = updater.check().await.map_err(|error| {
+        log::warn!("Application update check failed: {error}");
+        BackendError::new("UPDATE_FAILED", "Could not check application updates")
+    })?;
+    let version = update.as_ref().map(|u| u.version.clone());
+    *found_update() = update;
     Ok(ApplicationUpdate {
         current_version,
-        version: update.map(|u| u.version),
+        version,
     })
 }
 #[cfg(not(target_os = "android"))]
@@ -65,12 +97,16 @@ pub async fn install_application_update(
     app: tauri::AppHandle,
 ) -> Result<()> {
     let _guard = state.updates.lock().await;
-    let updater = application_updater(&app)?;
-    if let Some(update) = updater
-        .check()
-        .await
-        .map_err(|_| BackendError::new("UPDATE_FAILED", "Could not check application updates"))?
-    {
+    // The home notice and the settings button both follow a check.
+    let cached = found_update().take();
+    let update = match cached {
+        Some(update) => Some(update),
+        None => application_updater(&app)?.check().await.map_err(|error| {
+            log::warn!("Application update check failed: {error}");
+            BackendError::new("UPDATE_FAILED", "Could not check application updates")
+        })?,
+    };
+    if let Some(update) = update {
         // The home screen draws a progress bar from these; one event per percent.
         let progress_app = app.clone();
         let mut downloaded: u64 = 0;
@@ -83,7 +119,8 @@ pub async fn install_application_update(
                 let _ = progress_app.emit("application-update-progress", (downloaded, total));
             }
         };
-        let bytes = update.download(on_chunk, || {}).await.map_err(|_| {
+        let bytes = update.download(on_chunk, || {}).await.map_err(|error| {
+            log::warn!("Application update download failed: {error}");
             BackendError::new(
                 "UPDATE_FAILED",
                 "Update download or signature verification failed",
@@ -93,7 +130,8 @@ pub async fn install_application_update(
         update
             .install(bytes)
             .map_err(|_| BackendError::new("UPDATE_FAILED", "Could not install signed update"))?;
-        // The Windows installer restarts Lumen itself; on macOS only the bundle was replaced.
+        // The Windows installer runs silently (plugins.updater.windows.installMode
+        // is "quiet") and starts Lumen again; on macOS only the bundle was replaced.
         #[cfg(target_os = "macos")]
         app.request_restart();
     }

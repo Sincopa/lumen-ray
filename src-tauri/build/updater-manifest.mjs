@@ -31,16 +31,19 @@ const repo =
 const { assets } = JSON.parse(gh('release', 'view', tag, '--repo', repo, '--json', 'assets'));
 const byName = new Map(assets.map((asset) => [asset.name, asset]));
 
-// The updater downloads through the API URL, which also works while the
-// release is a draft; the signature is the .sig file's text. Releases up to
-// v0.2.18 had the version in the file name.
+// The updater downloads the tag's public file URL. It works once the release
+// is published, which is also when releases/latest starts serving this
+// manifest. The API asset URL it used before counts against GitHub's 60
+// unauthenticated API requests an hour per address, which users behind a
+// shared VPN exit run out of. The signature is the .sig file's text.
+// Releases up to v0.2.18 had the version in the file name.
 function entry(name, legacy) {
 	const file = byName.has(name) ? name : legacy;
-	const asset = byName.get(file);
-	if (!asset) throw new Error(`${tag} has no ${name}`);
+	if (!byName.has(file)) throw new Error(`${tag} has no ${name}`);
 	if (!byName.has(`${file}.sig`)) throw new Error(`${tag} has no ${file}.sig`);
 	const signature = gh('release', 'download', tag, '--repo', repo, '--pattern', `${file}.sig`, '--output', '-');
-	return { signature: signature.trim(), url: asset.apiUrl };
+	const url = `https://github.com/${repo}/releases/download/${tag}/${encodeURIComponent(file)}`;
+	return { signature: signature.trim(), url };
 }
 
 const windows = entry('Lumen_x64-setup.exe', `Lumen_${version}_x64-setup.exe`);

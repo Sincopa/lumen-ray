@@ -42,35 +42,80 @@
 	/* Motion */
 	--ease-spring: cubic-bezier(0.22, 1, 0.36, 1);
 	--ease-soft: cubic-bezier(0.4, 0, 0.2, 1);
-	/* Damped spring with a 5% overshoot, for shapes that morph. Matches springOut in motion.ts. */
-	--ease-morph: linear(
+	/* Springs, as Apple tunes them (damping ratio, response). Both match the
+	   curves in motion.ts. Smooth: critically damped (1.0, 0.32 s), no
+	   overshoot, for anything that moves into place. Morph: (0.78, 0.36 s),
+	   a 2% overshoot, for glass shapes that change size, as on iOS. */
+	--ease-smooth: linear(
 		0,
-		0.059,
-		0.196,
-		0.366,
-		0.537,
-		0.69,
-		0.815,
-		0.911,
-		0.978,
-		1.021,
-		1.044,
-		1.053,
-		1.053,
-		1.047,
-		1.039,
-		1.029,
-		1.02,
-		1.013,
-		1.007,
-		1.003,
-		1,
-		0.998,
-		0.997,
-		0.997,
+		0.0471,
+		0.1514,
+		0.2756,
+		0.3993,
+		0.5123,
+		0.6104,
+		0.6927,
+		0.7601,
+		0.8142,
+		0.8572,
+		0.8909,
+		0.9171,
+		0.9372,
+		0.9527,
+		0.9645,
+		0.9734,
+		0.9801,
+		0.9852,
+		0.989,
+		0.9918,
+		0.994,
+		0.9955,
+		0.9967,
 		1
 	);
-	--morph-duration: 600ms;
+	--smooth-duration: 420ms;
+	--ease-morph: linear(
+		0,
+		0.0347,
+		0.1193,
+		0.2305,
+		0.3516,
+		0.4713,
+		0.5824,
+		0.6807,
+		0.7644,
+		0.8335,
+		0.8886,
+		0.9312,
+		0.963,
+		0.9858,
+		1.0014,
+		1.0113,
+		1.017,
+		1.0195,
+		1.0199,
+		1.0188,
+		1.0169,
+		1.0146,
+		1.0122,
+		1.0098,
+		1.0077,
+		1.0058,
+		1.0043,
+		1.003,
+		1.0019,
+		1.0012,
+		1.0006,
+		1.0002,
+		1
+	);
+	--morph-duration: 520ms;
+	/* Figma hover: Smart Animate "Ease out", 300 ms. Icons light up from their
+	   resting opacity; nothing appears behind them. */
+	--ease-hover: cubic-bezier(0, 0, 0.58, 1);
+	--hover-duration: 300ms;
+	/* The shared tab header floats over the view; views under it start here. */
+	--tab-header-space: calc(var(--design-tab-header-height) + 16px);
 	/* Figma Smart Animate "Ease out", 300 ms: the fields' empty/filled states. */
 	--ease-field: cubic-bezier(0, 0, 0.58, 1);
 	--field-duration: 300ms;

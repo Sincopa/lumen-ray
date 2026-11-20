@@ -32,7 +32,14 @@
 		persistentRuleIconCache,
 	} from './ruleDisplay';
 	import { flip } from 'svelte/animate';
-	import { screen, rise, pop, reveal, easeOut } from '../../lib/motion';
+	import {
+		screen,
+		screenOut,
+		rise,
+		pop,
+		reveal,
+		easeOut,
+	} from '../../lib/motion';
 	import addIcon from '../../assets/icons/plus.svg';
 	import pencilIcon from '../../assets/icons/edit.svg';
 	import { tabHeader } from '../../app/tabHeader.svelte';
@@ -214,7 +221,6 @@
 			title: activeSub?.name ?? t('rules.title'),
 			searchPlaceholder: t('rules.searchPlaceholder') || 'Поиск правил...',
 			actions: headerActions,
-			dimActions: true,
 			hidden: selectMode,
 		});
 	});
@@ -264,13 +270,17 @@
 					? 'presets'
 					: 'list',
 	);
-	let lastScreen = 'list';
-	function screenDir(next: string) {
-		const dir =
-			(screenDepth[next] ?? 0) >= (screenDepth[lastScreen] ?? 0) ? 1 : -1;
-		lastScreen = next;
-		return dir;
-	}
+	// Read by both the entering and the leaving screen, so it is worked out
+	// once per change, before the DOM swaps them.
+	let rulesDir = $state(1);
+	let shownScreen = 'list';
+	$effect.pre(() => {
+		const next = rulesScreen;
+		if (next === shownScreen) return;
+		rulesDir =
+			(screenDepth[next] ?? 0) >= (screenDepth[shownScreen] ?? 0) ? 1 : -1;
+		shownScreen = next;
+	});
 
 	// Action handlers
 	async function pickServer(server: { id: string }) {
@@ -506,7 +516,11 @@
 {/snippet}
 
 {#key rulesScreen}
-	<div class="rules-screen" in:screen={{ dir: screenDir(rulesScreen) }}>
+	<div
+		class="rules-screen"
+		in:screen={{ dir: rulesDir }}
+		out:screenOut={{ dir: rulesDir, pin: true }}
+	>
 		{#if editing}
 			{#if choosingProcess}
 				<ProcessPickerView
@@ -722,13 +736,16 @@
 		padding: 0 16px;
 	}
 
+	/* The list sits under the shared header, which floats over the top. In
+	   selection mode "Select all" takes the header's place, so the list does
+	   not move. */
 	.rules-view {
 		display: flex;
 		flex-direction: column;
 		width: 100%;
 		flex: 1;
 		gap: 12px;
-		padding-top: 0;
+		padding-top: var(--tab-header-space);
 		position: relative;
 		min-height: 0;
 		height: 100%;
@@ -816,11 +833,15 @@
 		padding-left: 4px;
 	}
 	.select-all-row {
+		position: absolute;
+		top: 0;
+		left: 0;
+		right: 0;
+		z-index: 1;
 		display: flex;
 		justify-content: flex-end;
-		flex-shrink: 0;
-		height: 28px;
-		margin-bottom: 4px;
+		align-items: center;
+		height: var(--design-tab-header-height);
 		padding-right: 16px;
 	}
 	.select-all-btn {

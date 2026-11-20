@@ -104,9 +104,7 @@
 		cursor: pointer;
 		padding: 0;
 		flex-shrink: 0;
-		transition:
-			background 150ms ease,
-			transform 150ms ease;
+		transition: transform 150ms ease;
 	}
 	.rename-action-btn.check {
 		margin-left: 10px;
@@ -114,15 +112,20 @@
 	.rename-action-btn.cancel {
 		margin-left: -2px;
 	}
-	.rename-action-btn:hover {
-		background: rgba(255, 255, 255, 0.12);
-	}
 	.rename-action-btn:active {
 		transform: scale(0.92);
 	}
+	/* Hover lights the icon up; nothing appears behind it. */
 	.action-svg {
 		display: block;
 		width: 100%;
 		height: 100%;
+		opacity: 0.8;
+		transition: opacity var(--hover-duration) var(--ease-hover);
+	}
+	@media (hover: hover) and (pointer: fine) {
+		.rename-action-btn:hover .action-svg {
+			opacity: 1;
+		}
 	}
 </style>

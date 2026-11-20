@@ -186,6 +186,8 @@
 
 <style>
 	.bottom-nav {
+		/* The tab pill: 6px padding around four 52px tabs. */
+		--pill-w: 220px;
 		position: absolute;
 		bottom: var(--nav-bottom);
 		left: var(--nav-inset);
@@ -197,20 +199,31 @@
 		gap: 12px;
 		z-index: 20;
 	}
+	/* Glass that changes shape carries explicit sizes, so the capsule itself
+	   springs from one shape to the next while its content dissolves inside
+	   it (iOS morph). Only these two small boxes re-lay out per frame. */
 	.nav-pill {
 		display: flex;
 		flex-shrink: 0;
 		align-items: center;
+		width: var(--pill-w);
 		height: 50px;
 		padding: 0 6px;
 		box-sizing: border-box;
+		overflow: hidden;
 		border-radius: 123px;
 		background: var(--design-glass);
 		backdrop-filter: blur(25px);
-		transition: background-color 300ms ease;
+		transition:
+			width var(--morph-duration) var(--ease-morph),
+			height var(--morph-duration) var(--ease-morph),
+			padding var(--morph-duration) var(--ease-morph),
+			background-color 300ms ease,
+			box-shadow 300ms ease;
 	}
 	/* The tab pill shrinks into the 42px red delete button with a 15% rim. */
 	.nav-pill.danger {
+		width: 42px;
 		height: 42px;
 		padding: 4px;
 		background: #d03441;
@@ -263,7 +276,7 @@
 	.pill-btn img {
 		display: block;
 		opacity: 0.5;
-		transition: opacity 200ms ease;
+		transition: opacity var(--hover-duration) var(--ease-hover);
 	}
 	.pill-btn.active img {
 		opacity: 1;
@@ -286,23 +299,31 @@
 	.delete-btn:disabled {
 		opacity: 0.5;
 	}
+	/* "Add" and presets: a 58px glass circle. */
 	.nav-action {
+		position: relative;
 		display: flex;
 		align-items: center;
 		justify-content: center;
-		flex-shrink: 0;
+		flex: none;
+		width: var(--nav-height);
 		height: var(--nav-height);
 		padding: 8px;
 		box-sizing: border-box;
+		overflow: hidden;
 		border: 1px solid #ffffff26;
 		border-radius: 123px;
 		background: var(--design-glass);
 		color: #262626;
 		backdrop-filter: blur(25px);
 		transition:
+			width var(--morph-duration) var(--ease-morph),
+			height var(--morph-duration) var(--ease-morph),
+			padding var(--morph-duration) var(--ease-morph),
 			background-color 300ms ease,
 			border-color 300ms ease,
-			transform 160ms var(--ease-spring);
+			box-shadow 300ms ease,
+			transform 420ms var(--ease-morph);
 	}
 	/* Mode and "done" are light; "add" stays glass. */
 	.nav-action.light {
@@ -318,9 +339,27 @@
 	}
 	/* The routing mode takes the rest of the row. */
 	.nav-action.mode-action {
-		flex: 1 1 0;
-		min-width: 0;
+		width: calc(100% - var(--pill-w) - 12px);
 		padding: 8px 18px 8px 8px;
+	}
+	/* Liquid Glass press: the capsule swells a little and lights up under the
+	   finger on pointer-down, then springs back as it morphs. */
+	.bottom-nav .nav-action:active:not(:disabled) {
+		transform: scale(1.06);
+		background: #ffffff1f;
+		box-shadow: inset 0 0 18px #ffffff40;
+		transition:
+			width var(--morph-duration) var(--ease-morph),
+			height var(--morph-duration) var(--ease-morph),
+			padding var(--morph-duration) var(--ease-morph),
+			background-color 120ms ease-out,
+			border-color 120ms ease-out,
+			box-shadow 120ms ease-out,
+			transform 160ms var(--ease-smooth);
+	}
+	.bottom-nav .nav-action.light:active:not(:disabled) {
+		background: #f2f2f2;
+		box-shadow: inset 0 0 18px #fff;
 	}
 	.on-dark .nav-pill:not(.danger),
 	.on-dark .nav-action:not(.light) {
@@ -345,13 +384,15 @@
 		object-fit: contain;
 	}
 	.pill-btn:active,
-	.delete-btn:active:not(:disabled),
-	.nav-action:active:not(:disabled) {
+	.delete-btn:active:not(:disabled) {
 		transform: scale(0.94);
 	}
 	/* Narrow windows tighten the tabs and keep the mode toggle as an icon so
 	   the row still fits. */
 	@media (max-width: 350px) {
+		.bottom-nav {
+			--pill-w: 188px;
+		}
 		.tab-row {
 			--tab-w: 44px;
 		}
@@ -367,8 +408,9 @@
 		}
 	}
 	@media (hover: hover) and (pointer: fine) {
-		.pill-btn:not(.active):hover {
-			background-color: #ffffff12;
+		/* Figma: a tab's icon lights up from 50%; nothing appears behind it. */
+		.pill-btn:not(.active):hover img {
+			opacity: 1;
 		}
 		.nav-action:not(.light):hover {
 			background: #ffffff12;

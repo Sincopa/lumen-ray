@@ -27,9 +27,25 @@ function createApplicationUpdateController() {
 		progress: null,
 	});
 	let pendingCheck: Promise<void> | null = null;
+	// A failed background check (no network yet, the tunnel still coming up)
+	// tries again a little later instead of waiting for the next launch.
+	const retryDelays = [30_000, 120_000, 600_000];
+	let retries = 0;
+	let retryTimer: ReturnType<typeof setTimeout> | undefined;
 
 	async function check(options: { silent?: boolean } = {}) {
-		if (pendingCheck) return pendingCheck;
+		if (pendingCheck) {
+			// The user asked while a background check runs: show that it does.
+			if (!options.silent) {
+				state.update((value) =>
+					value.status === 'downloading'
+						? value
+						: { ...value, status: 'checking' },
+				);
+			}
+			return pendingCheck;
+		}
+		clearTimeout(retryTimer);
 		if (!runtime.isTauri) {
 			state.set({
 				status: 'latest',
@@ -45,6 +61,7 @@ function createApplicationUpdateController() {
 		}
 		pendingCheck = invoke<NativeApplicationUpdate>('check_application_update')
 			.then((result) => {
+				retries = 0;
 				state.set({
 					status: result.version ? 'available' : 'latest',
 					currentVersion: result.currentVersion,
@@ -54,7 +71,17 @@ function createApplicationUpdateController() {
 			})
 			.catch((cause) => {
 				console.error('[application-update] Update check failed', cause);
-				state.update((value) => ({ ...value, status: 'error' }));
+				let shown = false;
+				state.update((value) => {
+					shown = value.status === 'checking';
+					return shown ? { ...value, status: 'error' } : value;
+				});
+				if (!shown && retries < retryDelays.length) {
+					retryTimer = setTimeout(
+						() => void check({ silent: true }),
+						retryDelays[retries++],
+					);
+				}
 			})
 			.finally(() => {
 				pendingCheck = null;

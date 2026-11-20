@@ -3,8 +3,7 @@
 	import { runtime } from '../../lib/runtime';
 	import { isDesktopWindow, isMac } from '../../lib/platform';
 	import { t } from '../../lib/i18n';
-	import minimizeIcon from '../../assets/icons/window-minimize.svg';
-	import crossIcon from '../../assets/icons/window-close.svg';
+	import { pop } from '../../lib/motion';
 	import settingsIcon from '../../assets/icons/settings.svg';
 
 	interface Props {
@@ -52,6 +51,7 @@
 	<div class="header-right">
 		{#if onOpenSettings && showQuickActions}
 			<button
+				transition:pop|global={{ start: 0.8 }}
 				class="header-circle-btn settings-btn"
 				class:active={isSettingsOpen}
 				onclick={onOpenSettings}
@@ -75,7 +75,15 @@
 					onclick={() => control('minimize')}
 					aria-label={t('common.minimize')}
 				>
-					<img src={minimizeIcon} alt="" width="28" height="28" />
+					<!-- Inline, so hover can change the icon's own color. -->
+					<svg viewBox="0 0 28 28" width="28" height="28" aria-hidden="true">
+						<path
+							d="M8 14H20"
+							stroke="currentColor"
+							stroke-width="2"
+							stroke-linecap="round"
+						/>
+					</svg>
 				</button>
 
 				<button
@@ -83,7 +91,14 @@
 					onclick={() => control('close')}
 					aria-label={t('common.close')}
 				>
-					<img src={crossIcon} alt="" width="28" height="28" />
+					<svg viewBox="0 0 28 28" width="28" height="28" aria-hidden="true">
+						<path
+							d="M19 19L9 9M19 9L9 19"
+							stroke="currentColor"
+							stroke-width="2"
+							stroke-linecap="round"
+						/>
+					</svg>
 				</button>
 			</div>
 		{/if}
@@ -151,8 +166,11 @@
 			box-shadow 160ms ease,
 			transform 160ms var(--ease-spring);
 	}
+	/* Hover changes the icon; nothing appears behind it. */
 	.header-circle-btn img {
 		display: block;
+		opacity: 0.8;
+		transition: opacity var(--hover-duration) var(--ease-hover);
 	}
 	.settings-btn.active {
 		background: #ffffff20;
@@ -190,25 +208,33 @@
 		border: 0;
 		border-radius: 50%;
 		background: transparent;
+		color: #ffffffcc;
 		transition:
-			background-color 160ms ease,
+			color var(--hover-duration) var(--ease-hover),
 			transform 160ms var(--ease-spring);
 	}
-	.control-btn img {
+	.control-btn svg {
+		display: block;
 		width: 28px;
 		height: 28px;
+	}
+	.settings-btn.active img {
+		opacity: 1;
 	}
 	.header-circle-btn:active,
 	.control-btn:active {
 		transform: scale(0.94);
 	}
 	@media (hover: hover) and (pointer: fine) {
-		.header-circle-btn:hover,
-		.control-btn:hover {
-			background: #ffffff20;
+		.header-circle-btn:hover img {
+			opacity: 1;
 		}
+		.control-btn:hover {
+			color: #fff;
+		}
+		/* The cross turns red (the app's error tint), as a close should. */
 		.control-btn.close:hover {
-			background: #f3393980;
+			color: #ff4b5a;
 		}
 	}
 	@media (max-width: 350px) {

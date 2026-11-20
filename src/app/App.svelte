@@ -1,6 +1,5 @@
 <script lang="ts">
-	import { fade } from 'svelte/transition';
-	import { screen, rise, leaveInPlace, leaveScreen } from '../lib/motion';
+	import { screen, screenOut, rise } from '../lib/motion';
 	import BackgroundShader from './chrome/BackgroundShader.svelte';
 	import WindowHeader from './chrome/WindowHeader.svelte';
 	import BottomNav from './chrome/BottomNav.svelte';
@@ -46,25 +45,27 @@
 			(s) => s.id === selectedServer?.subscriptionId,
 		),
 	);
-	// Subscriptions, servers and rules share one header that stays put between them.
+	// Servers and rules share one header that stays put between them. It
+	// follows the tab on screen: a leaving view still holds the header until it
+	// is destroyed, and the header must not linger over the next tab.
 	let showTabHeader = $derived(
 		!shell.importing &&
-			(shell.currentTab === 'subscriptions' ||
-				shell.currentTab === 'servers' ||
+			(shell.currentTab === 'servers' ||
 				(shell.currentTab === 'rules' && shell.ruleChrome === 'default')) &&
 			!!tabHeader.slots &&
 			!tabHeader.slots.hidden,
 	);
-
-	// The tab header pushes the view stack down as it appears and lets it rise as
-	// it leaves. The leaving screen holds the place it had before that change.
-	let viewContent = $state<HTMLDivElement>();
-	const leaving = { top: 0 };
+	// Screens slide toward where the new tab sits in the bar.
+	let tabDir = $derived(shell.direction(shell.currentTab, shell.prevTab));
+	// The header slides in with a tab that brings it, and only fades back on
+	// the tab that hid it (rules selection, a rule sub-screen).
+	const header = { slide: 20, hiddenOn: '', shown: false };
 	$effect.pre(() => {
-		void shell.currentTab;
-		void shell.importing;
-		void showTabHeader;
-		if (viewContent) leaving.top = viewContent.offsetTop;
+		const shown = showTabHeader;
+		const tab = shell.currentTab;
+		if (shown && !header.shown) header.slide = header.hiddenOn === tab ? 0 : 20;
+		if (!shown && header.shown) header.hiddenOn = tab;
+		header.shown = shown;
 	});
 
 	let subscriptionExpired = $derived(
@@ -130,23 +131,27 @@
 			<p role="alert" transition:rise>{shell.actionError}</p>
 		{/if}
 
-		{#if showTabHeader}
-			<div
-				class="tab-header-host"
-				in:screen={{ dir: shell.direction(shell.currentTab, shell.prevTab) }}
-				out:leaveInPlace
-			>
-				<TabHeader />
-			</div>
-		{/if}
+		<!-- The views stack in one fixed box: a tab change never moves the box,
+		     so the leaving screen stays exactly where it was (the face does not
+		     jump) while the next one slides in over it. -->
+		<div class="view-content">
+			<!-- The tab header floats over the top of the views; views that use
+			     it start below it (--tab-header-space). -->
+			{#if showTabHeader}
+				<div
+					class="tab-header-host"
+					in:screen|global={{ dir: tabDir, distance: header.slide }}
+					out:screenOut|global={{ dir: tabDir, distance: 0 }}
+				>
+					<TabHeader />
+				</div>
+			{/if}
 
-		<!-- Tab Views with directional fly transitions -->
-		<div class="view-content" bind:this={viewContent}>
 			{#if shell.importing}
 				<div
 					class="tab-view"
 					in:screen={{ dir: 1 }}
-					out:fade={{ duration: 120 }}
+					out:screenOut={{ dir: -1 }}
 				>
 					<AddProfileView
 						initialSource={shell.pendingImport}
@@ -165,10 +170,8 @@
 				{#key shell.currentTab}
 					<div
 						class="tab-view"
-						in:screen|global={{
-							dir: shell.direction(shell.currentTab, shell.prevTab),
-						}}
-						out:leaveScreen|global={{ top: leaving.top }}
+						in:screen|global={{ dir: tabDir }}
+						out:screenOut|global={{ dir: tabDir, distance: 0 }}
 					>
 						{#if shell.currentTab === 'home'}
 							{#if !hasSubscriptions}
@@ -352,10 +355,11 @@
 	}
 
 	.tab-header-host {
-		position: relative;
+		position: absolute;
+		top: 0;
+		left: 0;
+		right: 0;
 		z-index: 20;
-		flex-shrink: 0;
-		width: 100%;
 	}
 
 	.tab-view {

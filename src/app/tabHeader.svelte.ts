@@ -17,8 +17,6 @@ export interface HeaderSlots {
 	popover?: Snippet;
 	/** Adds a search button that opens a field over the header. */
 	searchPlaceholder?: string;
-	/** Figma "top button": the buttons rest at 50% and light up on hover. */
-	dimActions?: boolean;
 	hidden?: boolean;
 }
 

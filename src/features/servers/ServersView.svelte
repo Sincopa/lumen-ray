@@ -367,6 +367,10 @@
 		min-height: 0;
 		position: relative;
 	}
+	/* The tab shows the shared header, which floats over the top. */
+	.servers-view:not(.compact) {
+		padding-top: var(--tab-header-space);
+	}
 	/* Figma "region 2 loading": a 16px open ring turning in a 24px box. */
 	.ping-spinner {
 		display: block;

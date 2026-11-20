@@ -368,9 +368,10 @@
 			gap 220ms ease;
 		cursor: pointer;
 	}
+	/* Figma "profile open": the card in use also has a 5% inside stroke. */
 	.sub-card.active {
 		background: var(--design-panel-open);
-		box-shadow: var(--design-glow);
+		box-shadow: var(--design-edge), var(--design-glow);
 	}
 	.sub-card.editing {
 		gap: 0;

@@ -30,7 +30,7 @@
 		type SupportedLanguage,
 	} from '../../lib/i18n';
 	import { shaderSettings } from '../../lib/stores/shaderSettings.svelte';
-	import { screen } from '../../lib/motion';
+	import { screen, screenOut } from '../../lib/motion';
 	import ChoiceList from './ui/ChoiceList.svelte';
 	import SettingHint from './ui/SettingHint.svelte';
 	import AppVersionSettings from './pages/AppVersionSettings.svelte';
@@ -223,6 +223,7 @@
 		<div
 			class="settings-page"
 			in:screen={{ dir: currentSubView === 'main' ? -1 : 1 }}
+			out:screenOut={{ dir: currentSubView === 'main' ? -1 : 1, pin: true }}
 		>
 			<!-- A sibling of the header, so it stays pinned while the page scrolls. -->
 			<button

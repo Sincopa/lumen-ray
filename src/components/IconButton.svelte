@@ -119,8 +119,8 @@
 	.variant-ghost {
 		background: transparent;
 	}
-	.variant-ghost:hover:not(:disabled),
-	.variant-ghost.active {
+	.variant-ghost:not(.design):hover:not(:disabled),
+	.variant-ghost.active:not(.design) {
 		background: rgba(255, 255, 255, 0.15);
 	}
 
@@ -195,6 +195,24 @@
 		max-height: 100%;
 		filter: none;
 		opacity: 1;
+	}
+	/* Bare design icons (headers, card actions): hover changes the icon, it
+	   never draws a circle behind it. They rest a little dimmer (the header
+	   sets --icon-rest: 0.5, Figma "top button") and light up to full white
+	   with Figma's 300 ms ease-out. */
+	.design.variant-ghost .btn-icon {
+		opacity: var(--icon-rest, 0.8);
+		transition:
+			opacity var(--hover-duration) var(--ease-hover),
+			transform 200ms ease;
+	}
+	.design.variant-ghost.active .btn-icon {
+		opacity: 1;
+	}
+	@media (hover: hover) and (pointer: fine) {
+		.design.variant-ghost:hover:not(:disabled) .btn-icon {
+			opacity: 1;
+		}
 	}
 	/* In-card actions draw the 24px icons at 28px, as the Figma instances do. */
 	.design.size-sm .btn-icon {
