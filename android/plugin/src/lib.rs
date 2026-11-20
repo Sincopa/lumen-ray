@@ -259,6 +259,17 @@ impl<R: Runtime> Lumen<R> {
             .map(|_| ())
     }
 
+    /// Switches the home screen entry to the activity-alias of `icon`.
+    pub async fn set_launcher_icon(&self, icon: &str) -> Result<()> {
+        #[derive(Serialize)]
+        struct LauncherIcon<'a> {
+            icon: &'a str,
+        }
+        self.call::<serde_json::Value>("setLauncherIcon", LauncherIcon { icon })
+            .await
+            .map(|_| ())
+    }
+
     /// Moves Lumen's task to the background; the VPN service keeps running.
     pub async fn move_to_background(&self) -> Result<()> {
         self.call::<serde_json::Value>("moveToBackground", ())

@@ -1,52 +1,23 @@
 <script lang="ts">
-	import backIcon from '../../assets/chevron-left.svg';
-	import sunLowIcon from '../../assets/sun-low.svg';
-	import sunHighIcon from '../../assets/sun-high.svg';
-	import LumenFace from '../../components/LumenFace.svelte';
+	import backIcon from '../../assets/icons/back.svg';
+	import sunLowIcon from '../../assets/icons/sun.svg';
+	import sunHighIcon from '../../assets/icons/sun-fill.svg';
 	import { shaderSettings } from '../../lib/stores/shaderSettings.svelte';
 	import { t } from '../../lib/i18n';
 	import { fade } from 'svelte/transition';
-	import { pop, rise } from '../../lib/motion';
-	import type { VpnConnectionState } from '../../lib/types/models';
-	import reloadIcon from '../../assets/reload.svg';
+	import { rise } from '../../lib/motion';
 
 	interface Props {
-		connectionState: VpnConnectionState;
+		/** The shader under the title is bright, so the title turns dark. */
+		lightBackdrop?: boolean;
 		onClose: () => void;
 	}
 
-	let { connectionState, onClose }: Props = $props();
+	let { lightBackdrop = false, onClose }: Props = $props();
 
 	const MIN = 0.8;
 	const MAX = 2.5;
-	const DEFAULT_EXPOSURE = 1.6;
-	const THUMB_HALF = 8;
 	let progress = $derived((shaderSettings.exposure - MIN) / (MAX - MIN));
-
-	// The track is a wedge that grows from 16px on the left to 32px on the right.
-	let trackWidth = $state(208);
-	const CY = 16;
-	const halfHeight = (x: number) => 8 + (8 * x) / trackWidth;
-	let thumbX = $derived(THUMB_HALF + (trackWidth - THUMB_HALF * 2) * progress);
-
-	/** A wedge from 0 to `end` with round caps, shrunk by `inset` on every side. */
-	function wedge(end: number, inset: number) {
-		const left = halfHeight(0) - inset;
-		const right = Math.max(left, halfHeight(end) - inset);
-		const leftCenter = left + inset;
-		const rightCenter = Math.max(leftCenter, end - right);
-		return [
-			`M ${leftCenter} ${CY - left}`,
-			`L ${rightCenter} ${CY - right}`,
-			`A ${right} ${right} 0 0 1 ${rightCenter} ${CY + right}`,
-			`L ${leftCenter} ${CY + left}`,
-			`A ${left} ${left} 0 0 1 ${leftCenter} ${CY - left}`,
-			'Z',
-		].join(' ');
-	}
-
-	let trackPath = $derived(wedge(trackWidth, 0));
-	let fillPath = $derived(wedge(thumbX, 0.6));
 </script>
 
 <svelte:window
@@ -55,58 +26,30 @@
 	}}
 />
 
-<!-- Brightness of the background shader over the idle face. -->
+<!-- Figma "Яркость": the live shader with the brightness bar under the title. -->
 <div
 	class="brightness-view"
+	class:light-backdrop={lightBackdrop}
 	data-tauri-drag-region
 	in:fade={{ duration: 220 }}
 	out:fade={{ duration: 160 }}
 >
-	<button
-		type="button"
-		class="back-btn"
-		aria-label={t('common.back')}
-		onclick={onClose}
-	>
-		<img src={backIcon} alt="" width="32" height="32" />
-	</button>
-
-	<button
-		type="button"
-		class="reset-btn"
-		aria-label={t('settings.brightnessReset')}
-		disabled={shaderSettings.exposure === DEFAULT_EXPOSURE}
-		onclick={() => shaderSettings.setExposure(DEFAULT_EXPOSURE)}
-	>
-		<img src={reloadIcon} alt="" width="32" height="32" />
-	</button>
-
-	<div
-		class="face"
-		aria-hidden="true"
-		in:pop|global={{ start: 0.92, duration: 360 }}
-	>
-		<LumenFace status={connectionState} />
+	<div class="page-header" data-tauri-drag-region>
+		<button
+			type="button"
+			class="back-btn"
+			aria-label={t('common.back')}
+			onclick={onClose}
+		>
+			<img src={backIcon} alt="" width="24" height="24" />
+		</button>
+		<span class="title">{t('settings.brightness')}</span>
 	</div>
 
-	<div class="slider-card" in:rise|global={{ y: 16, delay: 80, duration: 300 }}>
+	<div class="slider-card" in:rise|global={{ y: -8, delay: 60, duration: 300 }}>
 		<img src={sunLowIcon} alt="" class="sun" width="32" height="32" />
-		<div
-			class="track"
-			bind:clientWidth={trackWidth}
-			style="--thumb-x: {thumbX}px"
-		>
-			<svg
-				class="wedge"
-				width={trackWidth}
-				height="32"
-				viewBox="0 0 {trackWidth} 32"
-				aria-hidden="true"
-			>
-				<path class="wedge-track" d={trackPath} />
-				<path d={fillPath} fill="#000" fill-opacity="0.25" />
-				<path d={fillPath} fill="#fff" fill-opacity="0.75" />
-			</svg>
+		<div class="track" style:--progress={progress}>
+			<span class="track-fill"></span>
 			<span class="thumb"></span>
 			<input
 				type="range"
@@ -130,65 +73,67 @@
 		position: absolute;
 		inset: 0;
 		z-index: 30;
+		padding: 0 16px;
 	}
 
-	.back-btn,
-	.reset-btn {
+	/* The back button and the centred title, under the window header. */
+	.page-header {
 		position: absolute;
-		/* Sits under the window header, which stays visible on this screen. */
-		top: 72px;
-		left: 30px;
-		z-index: 2;
+		top: 77px;
+		left: 16px;
+		right: 16px;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		height: 50px;
+	}
+	.back-btn {
+		position: absolute;
+		left: 0;
+		top: 0;
 		display: grid;
 		place-items: center;
-		width: 64px;
-		height: 64px;
+		width: 50px;
+		height: 50px;
 		padding: 0;
 		border: 0;
 		border-radius: 50%;
-		background: var(--design-glass);
-		box-shadow: var(--design-glow);
+		background: linear-gradient(#ffffff0d, #ffffff0d), #00000033;
 		-webkit-backdrop-filter: blur(25px);
 		backdrop-filter: blur(25px);
 		transition:
 			background-color 160ms ease,
 			transform 160ms var(--ease-spring);
 	}
-	/* Lines up with the window controls above it, as in the design. */
-	.reset-btn {
-		left: auto;
-		right: 16px;
-	}
-	.back-btn:active,
-	.reset-btn:active:not(:disabled) {
+	.back-btn:active {
 		transform: scale(0.94);
 	}
-	.reset-btn:disabled {
-		cursor: default;
-	}
-
-	/* Same face geometry as the connection screen. */
-	.face {
-		position: absolute;
-		top: calc(72px + (100% - 72px) * 0.3764 - 87.5px);
-		left: calc(50% - 128px);
-		width: 256px;
-		height: 175px;
+	.title {
+		color: #ffffff80;
+		font-size: 14px;
+		font-weight: 500;
+		letter-spacing: -0.28px;
+		transition: color 600ms ease;
 		pointer-events: none;
 	}
+	.light-backdrop .title {
+		color: #00000080;
+	}
 
+	/* 340x72, 24px corners: 2% white over 20% black, 18px padding. */
 	.slider-card {
 		position: absolute;
-		left: 30px;
-		right: 30px;
-		bottom: 30px;
+		top: 152px;
+		left: 25px;
+		right: 25px;
 		display: flex;
 		align-items: center;
-		gap: 13px;
+		justify-content: space-between;
+		gap: 16px;
 		height: 72px;
-		padding: 16px;
-		border-radius: 123px;
-		background: #00000029;
+		padding: 18px;
+		border-radius: 24px;
+		background: linear-gradient(#ffffff05, #ffffff05), #00000033;
 		-webkit-backdrop-filter: blur(25px);
 		backdrop-filter: blur(25px);
 	}
@@ -196,50 +141,60 @@
 		flex: 0 0 32px;
 	}
 
+	/* A 16px bar (6px corners on the left, round on the right) filling with
+	   75% white; the 4x26 thumb rides its end. */
 	.track {
 		position: relative;
 		flex: 1;
 		min-width: 0;
-		height: 32px;
+		height: 26px;
+		--fill: calc(4px + (100% - 4px) * var(--progress));
 	}
-	.wedge {
+	.track::before,
+	.track-fill {
+		content: '';
 		position: absolute;
-		inset: 0;
-		overflow: visible;
-		pointer-events: none;
+		top: 5px;
+		left: 0;
+		height: 16px;
+		border-radius: 6px 8px 8px 6px;
 	}
-	.wedge-track {
-		fill: #00000040;
-		filter: drop-shadow(0 0 12.5px #00000040);
+	.track::before {
+		right: 0;
+		background: #00000080;
+	}
+	.track-fill {
+		width: var(--fill);
+		border-radius: 6px 0 0 6px;
+		background: linear-gradient(#ffffffbf, #ffffffbf), #00000040;
 	}
 	.thumb {
 		position: absolute;
-		top: -4px;
-		left: calc(var(--thumb-x) - 8px);
-		width: 16px;
-		height: 40px;
+		top: 0;
+		left: calc(var(--fill) - 4px);
+		width: 4px;
+		height: 26px;
 		border-radius: 123px;
 		background: #fff;
 		pointer-events: none;
 		transition: transform 160ms var(--ease-spring);
 	}
 	.track:active .thumb {
-		transform: scaleY(1.06);
+		transform: scaleY(1.08);
 	}
 	.track input {
 		position: absolute;
-		inset: -4px 0;
+		inset: -6px 0;
 		width: 100%;
-		height: calc(100% + 8px);
+		height: calc(100% + 12px);
 		margin: 0;
 		opacity: 0;
 		cursor: pointer;
 	}
 
 	@media (hover: hover) and (pointer: fine) {
-		.back-btn:hover,
-		.reset-btn:hover:not(:disabled) {
-			background: #00000040;
+		.back-btn:hover {
+			background: linear-gradient(#ffffff1a, #ffffff1a), #00000033;
 		}
 	}
 </style>

@@ -1,7 +1,7 @@
 <script lang="ts">
-	import closeBoldIcon from '../../../assets/close-bold.svg';
-	import checkIcon from '../../../assets/check.svg';
-	import pencilIcon from '../../../assets/pencil.svg';
+	import closeBoldIcon from '../../../assets/icons/close.svg';
+	import checkIcon from '../../../assets/icons/check.svg';
+	import pencilIcon from '../../../assets/icons/edit.svg';
 	import { t } from '../../../lib/i18n';
 
 	interface Props {
@@ -62,17 +62,14 @@
 </div>
 
 <style>
-	/* A lighter pill, so the title visibly unrolls into a field. */
+	/* Figma "profile edit": the pencil, the name in 16px Medium, then check
+	   and cross, all 28px white glyphs on the card itself. */
 	.card-rename-inline {
 		display: flex;
 		align-items: center;
 		gap: 10px;
-		width: calc(100% + 18px);
-		height: 44px;
-		margin: 0 -8px 0 -10px;
-		padding: 0 4px 0 3px;
-		border-radius: 999px;
-		background: #ffffff0d;
+		width: 100%;
+		height: 28px;
 		box-sizing: border-box;
 	}
 	.rename-icon {
@@ -82,13 +79,14 @@
 	}
 	.rename-input {
 		flex: 1;
+		min-width: 0;
 		height: 100%;
 		background: transparent !important;
 		border: none !important;
 		outline: none !important;
 		box-shadow: none !important;
 		font-size: 16px;
-		font-weight: 400;
+		font-weight: 500;
 		color: #ffffff !important;
 		padding: 0 !important;
 		letter-spacing: 0;
@@ -96,6 +94,7 @@
 	.rename-action-btn {
 		width: 28px;
 		height: 28px;
+		min-height: 0;
 		border-radius: 50%;
 		background: transparent;
 		border: none;
@@ -109,31 +108,21 @@
 			background 150ms ease,
 			transform 150ms ease;
 	}
+	.rename-action-btn.check {
+		margin-left: 10px;
+	}
+	.rename-action-btn.cancel {
+		margin-left: -2px;
+	}
 	.rename-action-btn:hover {
 		background: rgba(255, 255, 255, 0.12);
-		transform: scale(1.08);
 	}
-	.rename-action-btn.check:hover {
-		background: rgba(134, 225, 111, 0.2);
-	}
-	.rename-action-btn.cancel:hover {
-		background: rgba(243, 57, 57, 0.2);
-	}
-	.rename-action-btn.check {
-		width: 34px;
-		height: 34px;
-		margin: -3px 0;
+	.rename-action-btn:active {
+		transform: scale(0.92);
 	}
 	.action-svg {
 		display: block;
 		width: 100%;
 		height: 100%;
-		opacity: 0.85;
-	}
-	.rename-action-btn.check .action-svg {
-		filter: brightness(0) invert(1);
-	}
-	.rename-action-btn:hover .action-svg {
-		opacity: 1;
 	}
 </style>

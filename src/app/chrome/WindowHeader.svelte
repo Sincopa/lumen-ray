@@ -3,10 +3,9 @@
 	import { runtime } from '../../lib/runtime';
 	import { isDesktopWindow, isMac } from '../../lib/platform';
 	import { t } from '../../lib/i18n';
-	import minimizeIcon from '../../assets/minimize.svg';
-	import maximizeIcon from '../../assets/maximize.svg';
-	import crossIcon from '../../assets/close.svg';
-	import settingsIcon from '../../assets/settings.svg';
+	import minimizeIcon from '../../assets/icons/window-minimize.svg';
+	import crossIcon from '../../assets/icons/window-close.svg';
+	import settingsIcon from '../../assets/icons/settings.svg';
 
 	interface Props {
 		title?: string;
@@ -76,20 +75,15 @@
 					onclick={() => control('minimize')}
 					aria-label={t('common.minimize')}
 				>
-					<img src={minimizeIcon} alt="" width="21" height="21" />
+					<img src={minimizeIcon} alt="" width="28" height="28" />
 				</button>
-
-				<!-- Maximize is shown for the layout only; the window keeps its size. -->
-				<span class="control-btn inert" aria-hidden="true">
-					<img src={maximizeIcon} alt="" width="21" height="21" />
-				</span>
 
 				<button
 					class="control-btn close"
 					onclick={() => control('close')}
 					aria-label={t('common.close')}
 				>
-					<img src={crossIcon} alt="" width="21" height="21" />
+					<img src={crossIcon} alt="" width="28" height="28" />
 				</button>
 			</div>
 		{/if}
@@ -140,6 +134,8 @@
 		align-items: center;
 		gap: 12px;
 	}
+	/* Figma "top main 2": over the bright shader both buttons are 20% black;
+	   "top 1": over the dimmed screens, raised white glass. */
 	.header-circle-btn {
 		display: grid;
 		place-items: center;
@@ -150,9 +146,9 @@
 		border: 0;
 		border-radius: 50%;
 		background: var(--design-glass);
-		backdrop-filter: blur(25px);
 		transition:
 			background-color 160ms ease,
+			box-shadow 160ms ease,
 			transform 160ms var(--ease-spring);
 	}
 	.header-circle-btn img {
@@ -162,20 +158,25 @@
 		background: #ffffff20;
 	}
 	.dark-surface .header-circle-btn {
-		background: var(--design-glass-dark);
-	}
-	.dark-surface .controls-pill {
 		background: var(--design-glass-raised);
+		box-shadow: var(--design-glow);
+		backdrop-filter: blur(25px);
 	}
 	.controls-pill {
 		display: flex;
 		align-items: center;
 		gap: 6px;
-		width: 112px;
+		width: 78px;
 		height: 40px;
 		padding: 6px 8px;
 		border-radius: 32px;
 		background: var(--design-glass);
+		transition:
+			background-color 160ms ease,
+			box-shadow 160ms ease;
+	}
+	.dark-surface .controls-pill {
+		background: var(--design-panel);
 		box-shadow: var(--design-edge), var(--design-glow);
 		backdrop-filter: blur(25px);
 	}
@@ -198,12 +199,12 @@
 		height: 28px;
 	}
 	.header-circle-btn:active,
-	.control-btn:not(.inert):active {
+	.control-btn:active {
 		transform: scale(0.94);
 	}
 	@media (hover: hover) and (pointer: fine) {
 		.header-circle-btn:hover,
-		.control-btn:not(.inert):hover {
+		.control-btn:hover {
 			background: #ffffff20;
 		}
 		.control-btn.close:hover {

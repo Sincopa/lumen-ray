@@ -4,7 +4,7 @@
 </script>
 
 <script lang="ts">
-	import backIcon from '../../assets/chevron-left-small.svg';
+	import backIcon from '../../assets/icons/back.svg';
 	import './settings-page.css';
 	import { onMount, tick } from 'svelte';
 	import SettingRow from '../../components/SettingRow.svelte';
@@ -42,6 +42,8 @@
 	import LogConsoleSettings from './pages/LogConsoleSettings.svelte';
 	import PresetsSettings from './pages/PresetsSettings.svelte';
 	import ColorsSettings from './pages/ColorsSettings.svelte';
+	import AppIconSettings from './pages/AppIconSettings.svelte';
+	import { applicationUpdate } from '../../lib/services/applicationUpdate';
 
 	interface Props {
 		onClose?: () => void;
@@ -52,6 +54,7 @@
 	type SubView =
 		| 'main'
 		| 'language'
+		| 'appIcon'
 		| 'uiScale'
 		| 'appVersion'
 		| 'notifications'
@@ -69,6 +72,7 @@
 		| 'colors';
 
 	let currentSubView = $state<SubView>('main');
+	const updateState = applicationUpdate.state;
 	let scroller = $state<HTMLDivElement | null>(null);
 	let mainScroll = 0;
 
@@ -195,6 +199,7 @@
 	let titles = $derived<Record<SubView, string>>({
 		main: '',
 		language: t('settings.language'),
+		appIcon: t('settings.appAppearance'),
 		uiScale: t('settings.uiScale'),
 		appVersion: t('settings.appVersion'),
 		notifications: t('settings.notifications'),
@@ -245,6 +250,11 @@
 							showChevron
 							onclick={() => open('language')}
 						/>
+						<SettingRow
+							label={t('settings.appAppearance')}
+							showChevron
+							onclick={() => open('appIcon')}
+						/>
 						<SettingRow label={t('settings.animation')}>
 							<ToggleSwitch
 								mode="checkbox"
@@ -275,7 +285,24 @@
 							label={t('settings.appVersion')}
 							showChevron
 							onclick={() => open('appVersion')}
-						/>
+						>
+							{#if $updateState.status === 'downloading'}
+								<!-- Figma "loading": the download as a short bar before the chevron. -->
+								<span
+									class="row-progress"
+									role="progressbar"
+									aria-label={t('home.updating')}
+								>
+									<span
+										class="row-progress-fill"
+										style:width="{Math.max(
+											8,
+											($updateState.progress ?? 0) * 100,
+										)}%"
+									></span>
+								</span>
+							{/if}
+						</SettingRow>
 					</div>
 				</section>
 
@@ -497,6 +524,8 @@
 					value={i18n.currentLanguage}
 					onSelect={(value) => i18n.setLanguage(value as SupportedLanguage)}
 				/>
+			{:else if currentSubView === 'appIcon'}
+				<AppIconSettings />
 			{:else if currentSubView === 'uiScale'}
 				<ChoiceList
 					options={uiScaleOptions}

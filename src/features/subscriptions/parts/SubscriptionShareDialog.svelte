@@ -1,12 +1,12 @@
 <script lang="ts">
 	import { onDestroy } from 'svelte';
-	import copyIcon from '../../../assets/copy.svg';
-	import backIcon from '../../../assets/back.svg';
+	import copyIcon from '../../../assets/icons/copy.svg';
+	import backIcon from '../../../assets/icons/back.svg';
 	import { t } from '../../../lib/i18n';
 	import type { Subscription } from '../../../lib/services/catalog';
 	import DesignOverlay from '../../../components/DesignOverlay.svelte';
 	import IconButton from '../../../components/IconButton.svelte';
-	import MaterialIcon from '../../../components/MaterialIcon.svelte';
+	import checkIcon from '../../../assets/icons/check-dark.svg';
 
 	interface Props {
 		subscription: Subscription;
@@ -84,7 +84,7 @@
 				>
 					<span class="copy-icon">
 						{#if copyState === 'copied'}
-							<MaterialIcon name="check" size={20} />
+							<img src={checkIcon} alt="" width="34" height="34" />
 						{:else}
 							<img src={copyIcon} alt="" width="34" height="34" />
 						{/if}
@@ -127,6 +127,7 @@
 		margin-bottom: 171px;
 	}
 	.share-copy h2 {
+		max-width: 290px;
 		margin: 0;
 		font-size: 32px;
 		font-weight: 400;
@@ -149,7 +150,7 @@
 		width: 100%;
 		height: 64px;
 		padding: 7px 7px 7px 24px;
-		border-radius: 123px;
+		border-radius: 24px;
 		background: #ffffff0d;
 		box-shadow: var(--design-edge);
 		box-sizing: border-box;
@@ -176,7 +177,7 @@
 		min-height: 0;
 		padding: 0;
 		border: 0;
-		border-radius: 50%;
+		border-radius: 16px;
 		/* 5% glass with a light falling from the top. */
 		background: linear-gradient(#ffffff1a, #99999900), #ffffff0d;
 		color: #fff;

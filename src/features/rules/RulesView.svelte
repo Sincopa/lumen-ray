@@ -8,7 +8,6 @@
 	import { serverDisplayName } from '../../lib/utils/serverDisplayName';
 	import type { Rule, Server } from '../../lib/services/catalog';
 	import ConfirmDialog from '../../components/ConfirmDialog.svelte';
-	import MaterialIcon from '../../components/MaterialIcon.svelte';
 	import IconButton from '../../components/IconButton.svelte';
 	import RoundCheckbox from '../../components/RoundCheckbox.svelte';
 	import RuleEditorView from './RuleEditorView.svelte';
@@ -33,9 +32,9 @@
 		persistentRuleIconCache,
 	} from './ruleDisplay';
 	import { flip } from 'svelte/animate';
-	import { screen, rise, pop, easeOut } from '../../lib/motion';
-	import addIcon from '../../assets/plus.svg';
-	import pencilIcon from '../../assets/pencil.svg';
+	import { screen, rise, pop, reveal, easeOut } from '../../lib/motion';
+	import addIcon from '../../assets/icons/plus.svg';
+	import pencilIcon from '../../assets/icons/edit.svg';
 	import { tabHeader } from '../../app/tabHeader.svelte';
 	import type { SelectionBar } from '../../app/shell.svelte';
 
@@ -43,9 +42,11 @@
 		onChromeChange?: (mode: 'default' | 'selection' | 'picker') => void;
 		/** Selection mode hands delete and done to the bottom bar. */
 		onSelectionChange?: (bar: SelectionBar | null) => void;
+		/** The list screen gives the bottom bar its presets button. */
+		onPresetsChange?: (open: (() => void) | null) => void;
 	}
 
-	let { onChromeChange, onSelectionChange }: Props = $props();
+	let { onChromeChange, onSelectionChange, onPresetsChange }: Props = $props();
 
 	const catalogStore = catalog.state;
 
@@ -213,11 +214,18 @@
 			title: activeSub?.name ?? t('rules.title'),
 			searchPlaceholder: t('rules.searchPlaceholder') || 'Поиск правил...',
 			actions: headerActions,
-			trailing: selectMode ? undefined : headerAdd,
+			dimActions: true,
 			hidden: selectMode,
 		});
 	});
 	onDestroy(() => tabHeader.release(headerOwner));
+
+	$effect(() => {
+		onPresetsChange?.(
+			rulesScreen === 'list' && !selectMode ? () => (showPresets = true) : null,
+		);
+	});
+	onDestroy(() => onPresetsChange?.(null));
 
 	$effect(() => {
 		onSelectionChange?.(
@@ -457,11 +465,11 @@
 	/>
 	<IconButton
 		design
-		ariaLabel={t('rules.presets')}
-		onclick={() => (showPresets = true)}
-	>
-		<MaterialIcon name="tune" size={18} />
-	</IconButton>
+		icon={addIcon}
+		ariaLabel={t('common.add')}
+		disabled={!$catalogStore.servers.length}
+		onclick={add}
+	/>
 {/snippet}
 
 {#snippet ruleRow(rule: Rule, nested: boolean)}
@@ -476,6 +484,7 @@
 		<RuleIdentity
 			{rule}
 			{matcher}
+			{nested}
 			serverName={serverLabel(rule, server, ruleSubscription?.name)}
 			ruleIcon={getRuleIcon(rule)}
 			onEdit={() => openRule(rule)}
@@ -484,6 +493,7 @@
 			{rule}
 			{matcher}
 			{server}
+			compact={nested}
 			serverName={serverLabel(rule, server, ruleSubscription?.name)}
 			isSub={isSubscriptionRule(rule)}
 			{selectMode}
@@ -493,19 +503,6 @@
 			onSelect={() => toggleSelected(rule.id)}
 		/>
 	</article>
-{/snippet}
-
-{#snippet headerAdd()}
-	<IconButton
-		design
-		icon={addIcon}
-		ariaLabel={t('common.add')}
-		size="lg"
-		variant="surface"
-		class="header-add"
-		disabled={!$catalogStore.servers.length}
-		onclick={add}
-	/>
 {/snippet}
 
 {#key rulesScreen}
@@ -630,36 +627,41 @@
 									groupServer,
 									subscriptionsById.get(group.serverId)?.name,
 								)}
-								<article class="rule-row">
-									<RuleGroupIdentity
-										{group}
-										label={row.name}
-										subscriptionName={subscriptionsById.get(
-											group.subscriptionId,
-										)?.name}
-										{open}
-										onToggleOpen={() => toggleExpanded(group.key)}
-									/>
-									<RuleServerControls
-										rule={row}
-										matcher="domain"
-										server={groupServer}
-										serverName={groupServerName}
-										isSub={isSubscriptionRule(row)}
-										{selectMode}
-										checked={groupSelected(group)}
-										onPickServer={() => openGroupServerPicker(group)}
-										onToggle={() => toggleGroup(group)}
-										onSelect={() => toggleGroupSelected(group)}
-									/>
-								</article>
-								{#if open}
-									<div class="group-rules" transition:rise={{ y: -8 }}>
-										{#each group.rules as rule (rule.id)}
-											{@render ruleRow(rule, true)}
-										{/each}
-									</div>
-								{/if}
+								<div class="rule-group" class:open>
+									<article class="rule-row group-head">
+										<RuleGroupIdentity
+											{group}
+											label={row.name}
+											subscriptionName={subscriptionsById.get(
+												group.subscriptionId,
+											)?.name}
+											{open}
+											onToggleOpen={() => toggleExpanded(group.key)}
+										/>
+										<RuleServerControls
+											rule={row}
+											matcher="domain"
+											server={groupServer}
+											serverName={groupServerName}
+											isSub={isSubscriptionRule(row)}
+											{selectMode}
+											checked={groupSelected(group)}
+											onPickServer={() => openGroupServerPicker(group)}
+											onToggle={() => toggleGroup(group)}
+											onSelect={() => toggleGroupSelected(group)}
+										/>
+									</article>
+									{#if open}
+										<div
+											class="group-rules"
+											transition:reveal={{ duration: 280 }}
+										>
+											{#each group.rules as rule (rule.id)}
+												{@render ruleRow(rule, true)}
+											{/each}
+										</div>
+									{/if}
+								</div>
 							{/if}
 						</div>
 					{:else}
@@ -717,7 +719,7 @@
 		align-items: center;
 		justify-content: center;
 		gap: 12px;
-		padding: 6px 16px 0;
+		padding: 0 16px;
 	}
 
 	.rules-view {
@@ -730,11 +732,6 @@
 		position: relative;
 		min-height: 0;
 		height: 100%;
-	}
-	/* The header "+" is the flat glass circle with a 15% rim, not the glowing one. */
-	:global(.icon-btn.design.variant-surface.header-add) {
-		background: var(--design-panel);
-		box-shadow: inset 0 0 0 1px #ffffff26;
 	}
 	.rules-list {
 		display: flex;
@@ -761,12 +758,13 @@
 		letter-spacing: -0.28px;
 		text-align: center;
 	}
+	/* Figma Component 23: a 48px row, 8px above and below the 32px content. */
 	.rule-row {
-		min-height: var(--design-row-height);
-		height: var(--design-row-height);
+		min-height: 48px;
+		height: 48px;
 		flex-shrink: 0;
-		border-radius: 124px;
-		padding: 10px 12px;
+		border-radius: 32px;
+		padding: 8px 12px;
 		display: flex;
 		justify-content: space-between;
 		align-items: center;
@@ -776,23 +774,53 @@
 	.rule-row:hover {
 		background: #ffffff0a;
 	}
-	.rule-item,
-	.group-rules {
+	.rule-item {
 		display: flex;
 		flex-direction: column;
 		gap: 4px;
 		flex-shrink: 0;
 	}
-	/* Rules of an opened group sit under it, shifted right. */
-	.rule-row.nested {
-		padding-left: 28px;
+	/* A group is a 24px card: 12px padding, 16px between its rows. It is only
+	   filled while open. */
+	.rule-group {
+		display: flex;
+		flex-direction: column;
+		gap: 0;
+		padding: 12px;
+		border-radius: 24px;
+		background: transparent;
+		transition: background-color 200ms ease;
+	}
+	.rule-group.open {
+		background: var(--design-panel);
+	}
+	.rule-group .rule-row {
+		height: 32px;
+		min-height: 32px;
+		padding: 0;
+		border-radius: 0;
+		background: none;
+	}
+	/* Its own top margin, so the height reveal also opens the 16px gap. */
+	.group-rules {
+		display: flex;
+		flex-direction: column;
+		gap: 16px;
+		flex-shrink: 0;
+		margin-top: 16px;
+	}
+	/* Its rules: 24px rows without the icon, 4px in from the head. */
+	.rule-group .rule-row.nested {
+		height: 24px;
+		min-height: 24px;
+		padding-left: 4px;
 	}
 	.select-all-row {
 		display: flex;
 		justify-content: flex-end;
 		flex-shrink: 0;
 		height: 28px;
-		margin-bottom: 16px;
+		margin-bottom: 4px;
 		padding-right: 16px;
 	}
 	.select-all-btn {

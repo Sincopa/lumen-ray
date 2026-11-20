@@ -1,19 +1,13 @@
 <script lang="ts">
 	import { onDestroy } from 'svelte';
-	import IconButton from '../../components/IconButton.svelte';
 	import Morph from '../../components/Morph.svelte';
 	import StatusDot from '../../components/StatusDot.svelte';
 	import { t } from '../../lib/i18n';
-	import {
-		morphGrow,
-		morphOut,
-		morphWidth,
-		reveal,
-		swap,
-	} from '../../lib/motion';
+	import { morphWidth, swap } from '../../lib/motion';
+	import { tooltip } from '../../lib/actions/tooltip';
 	import { createDeferredTask } from '../../lib/utils/deferredTask';
-	import searchIcon from '../../assets/search.svg';
-	import crossIcon from '../../assets/close.svg';
+	import searchIcon from '../../assets/icons/search.svg';
+	import crossIcon from '../../assets/icons/close.svg';
 	import { tabHeader, type HeaderSlots } from '../tabHeader.svelte';
 
 	// Keep the last content while the header leaves after its view released it.
@@ -29,15 +23,15 @@
 	let searching = $state(false);
 	let searchClosing = $state(false);
 	let searchInputEl = $state<HTMLInputElement | null>(null);
-	let pillEl = $state<HTMLElement | null>(null);
+	let rowEl = $state<HTMLElement | null>(null);
 	// The field grows out of the magnifier and shrinks back into it.
 	let searchOrigin = $state('inset(50% 50% 50% 50% round 999px)');
 
 	function openSearch(event: MouseEvent) {
 		const button = event.currentTarget as HTMLElement | null;
-		if (button && pillEl) {
+		if (button && rowEl) {
 			const b = button.getBoundingClientRect();
-			const p = pillEl.getBoundingClientRect();
+			const p = rowEl.getBoundingClientRect();
 			searchOrigin =
 				`inset(${b.top - p.top}px ${p.right - b.right}px ` +
 				`${p.bottom - b.bottom}px ${b.left - p.left}px round 999px)`;
@@ -76,82 +70,65 @@
 
 {#if slots}
 	<div class="tab-header">
-		<div class="header-row">
-			<div class="header-pill" class:has-body={!!slots.body} bind:this={pillEl}>
-				<!-- Title row and rename field share one cell and morph into each other. -->
-				<div class="header-line" class:header-hidden={searching}>
-					{#if slots.replace}
-						<div class="replace" in:morphGrow out:morphOut>
-							{@render slots.replace()}
-						</div>
-					{:else}
-						<div class="line-normal" in:swap out:morphOut>
-							<div class="header-title">
-								{#key slots.title}
-									<span class="title-text" in:swap>{slots.title}</span>
-								{/key}
-								<StatusDot variant="active" />
-							</div>
-							<div class="header-actions">
-								{#if slots.searchPlaceholder}
-									<span class="morph-slot" in:morphWidth out:morphWidth>
-										<IconButton
-											design
-											icon={searchIcon}
-											ariaLabel={t('common.search')}
-											onclick={openSearch}
-										/>
-									</span>
-								{/if}
-								<Morph key={slots.key} anchor="end" class="header-morph">
-									<span class="actions-set">{@render slots.actions?.()}</span>
-								</Morph>
-							</div>
-						</div>
-					{/if}
-				</div>
-
+		<!-- Figma "top buttons tun": the profile pill and the buttons pill. -->
+		<div class="header-row" bind:this={rowEl}>
+			<div class="title-pill" class:header-hidden={searching}>
+				{#key slots.title}
+					<span class="title-text" in:swap>{slots.title}</span>
+				{/key}
+				<StatusDot variant="active" />
+			</div>
+			<div
+				class="actions-pill"
+				class:dim={slots.dimActions}
+				class:header-hidden={searching}
+			>
 				{#if slots.searchPlaceholder}
-					<div
-						class="header-search"
-						class:search-open={searching && !searchClosing}
-						class:search-closing={searchClosing}
-						style:--search-origin={searchOrigin}
-					>
-						<img src={searchIcon} alt="" class="search-icon" />
-						<input
-							bind:this={searchInputEl}
-							type="text"
-							class="search-input"
-							placeholder={slots.searchPlaceholder}
-							bind:value={tabHeader.query}
-							autocomplete="off"
-							spellcheck="false"
-							tabindex={searching ? 0 : -1}
-						/>
+					<span class="morph-slot" in:morphWidth out:morphWidth>
 						<button
 							type="button"
-							class="close-search-btn"
-							onclick={closeSearch}
-							aria-label={t('common.close')}
-							tabindex={searching ? 0 : -1}
+							class="header-btn"
+							aria-label={t('common.search')}
+							use:tooltip={t('common.search')}
+							onclick={openSearch}
 						>
-							<img src={crossIcon} alt="" class="close-icon" />
+							<img src={searchIcon} alt="" width="28" height="28" />
 						</button>
-					</div>
+					</span>
 				{/if}
-
-				{#if slots.body}
-					<div class="header-body" transition:reveal>
-						{@render slots.body()}
-					</div>
-				{/if}
+				<Morph key={slots.key} anchor="end" class="header-morph">
+					<span class="actions-set">{@render slots.actions?.()}</span>
+				</Morph>
 			</div>
 
-			{#if slots.trailing}
-				<span class="morph-slot trailing" in:morphWidth out:morphWidth>
-					{@render slots.trailing()}
-				</span>
+			{#if slots.searchPlaceholder}
+				<div
+					class="header-search"
+					class:search-open={searching && !searchClosing}
+					class:search-closing={searchClosing}
+					style:--search-origin={searchOrigin}
+				>
+					<img src={searchIcon} alt="" class="search-icon" />
+					<input
+						bind:this={searchInputEl}
+						type="text"
+						class="search-input"
+						placeholder={slots.searchPlaceholder}
+						bind:value={tabHeader.query}
+						autocomplete="off"
+						spellcheck="false"
+						tabindex={searching ? 0 : -1}
+					/>
+					<button
+						type="button"
+						class="close-search-btn"
+						onclick={closeSearch}
+						aria-label={t('common.close')}
+						tabindex={searching ? 0 : -1}
+					>
+						<img src={crossIcon} alt="" class="close-icon" />
+					</button>
+				</div>
 			{/if}
 		</div>
 		{@render slots.popover?.()}
@@ -164,123 +141,123 @@
 		z-index: 20;
 		flex-shrink: 0;
 		width: 100%;
-		padding-bottom: 12px;
+		padding-bottom: 16px;
 	}
 	.header-row {
-		display: flex;
-		align-items: flex-start;
-		width: 100%;
-	}
-	.header-pill {
 		position: relative;
-		flex: 1;
-		min-width: 0;
-		min-height: var(--design-header-height);
-		/* Half the height: a pill when collapsed, a card when it grows. */
-		border-radius: calc(var(--design-header-height) / 2);
-		background: var(--design-panel);
-		-webkit-backdrop-filter: blur(14px);
-		backdrop-filter: blur(14px);
-		overflow: hidden;
-		transition: background-color 240ms ease;
+		display: flex;
+		justify-content: space-between;
+		align-items: center;
+		gap: 12px;
+		width: 100%;
+		height: var(--design-tab-header-height);
 	}
-	.header-pill.has-body {
-		background: var(--design-panel-open);
-		box-shadow:
-			var(--design-edge),
-			inset 0 0 21.7px rgba(255, 255, 255, 0.02);
+	.title-pill,
+	.actions-pill {
+		display: flex;
+		align-items: center;
+		height: 100%;
+		border-radius: 24px;
+		background: var(--design-panel);
 		-webkit-backdrop-filter: blur(25px);
 		backdrop-filter: blur(25px);
-	}
-	/* One grid cell: the leaving row and the arriving one overlap. */
-	.header-line {
-		display: grid;
-		align-items: center;
-		height: var(--design-header-height);
-		padding: 0 20px 0 23px;
-		box-sizing: border-box;
 		transition:
 			opacity 220ms ease,
 			filter 220ms ease;
 	}
-	.header-line > * {
-		grid-area: 1 / 1;
+	/* 14px name and the 8px dot, 17px in from every side. */
+	.title-pill {
+		gap: 10px;
 		min-width: 0;
+		padding: 0 17px;
+		font-size: 14px;
+		line-height: 1;
 	}
-	.header-line.header-hidden {
+	.title-text {
+		min-width: 0;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+		line-height: 1.3;
+	}
+	.actions-pill {
+		flex-shrink: 0;
+		padding: 0 8px;
+	}
+	.header-hidden {
 		opacity: 0;
 		filter: blur(6px);
 		pointer-events: none;
-	}
-	.line-normal {
-		display: flex;
-		justify-content: space-between;
-		align-items: center;
-		gap: 8px;
-	}
-	.replace {
-		display: flex;
-		align-items: center;
-		width: 100%;
-		height: 100%;
-	}
-	.header-title {
-		display: flex;
-		align-items: center;
-		gap: 10px;
-		min-width: 0;
-		font-size: 16px;
-		font-weight: 400;
-	}
-	.title-text {
-		line-height: 1.3;
-		white-space: nowrap;
-		overflow: hidden;
-		text-overflow: ellipsis;
-	}
-	.header-actions {
-		display: flex;
-		align-items: center;
-		flex-shrink: 0;
-		height: 100%;
 	}
 	.morph-slot {
 		display: inline-flex;
 		box-sizing: border-box;
 		justify-content: center;
 		flex-shrink: 0;
-	}
-	.header-actions .morph-slot {
 		padding-right: 6px;
-	}
-	.morph-slot.trailing {
-		align-self: center;
-		justify-content: flex-end;
-		padding-left: 8px;
 	}
 	.actions-set {
 		display: flex;
 		align-items: center;
 		gap: 6px;
 	}
-	.header-body {
-		padding: 0 20px 20px 23px;
+	/* Buttons are 34px hit areas around 28px icons. */
+	.header-btn,
+	.actions-pill :global(.icon-btn.design) {
+		display: grid;
+		place-items: center;
+		width: 34px;
+		height: 34px;
+		min-width: 34px;
+		min-height: 0;
+		padding: 0;
+		border: 0;
+		border-radius: 50%;
+		background: transparent;
+		transition:
+			background-color 160ms ease,
+			opacity 160ms ease,
+			transform 160ms var(--ease-spring);
+	}
+	.header-btn img,
+	.actions-pill :global(.icon-btn.design .btn-icon),
+	.actions-pill :global(.icon-btn.design > img) {
+		display: block;
+		width: 28px;
+		height: 28px;
+		max-width: none;
+		max-height: none;
+	}
+	.dim .header-btn,
+	.dim :global(.icon-btn.design:not(:disabled)) {
+		opacity: 0.5;
+	}
+	.header-btn:active {
+		transform: scale(0.92);
+	}
+	@media (hover: hover) and (pointer: fine) {
+		.header-btn:hover {
+			background: #ffffff14;
+		}
+		.dim .header-btn:hover,
+		.dim :global(.icon-btn.design:hover:not(:disabled)) {
+			opacity: 1;
+		}
 	}
 
 	.header-search {
 		position: absolute;
-		left: 0;
-		top: 0;
-		width: 100%;
-		height: var(--design-header-height);
-		padding: 0 8px 0 20px;
+		inset: 0;
+		padding: 0 6px 0 14px;
 		display: flex;
 		align-items: center;
-		gap: 12px;
+		gap: 10px;
 		box-sizing: border-box;
 		/* The field is a lighter pill that grows out of the magnifier. */
 		background: var(--design-panel-open);
-		border-radius: calc(var(--design-header-height) / 2);
+		border-radius: 24px;
+		-webkit-backdrop-filter: blur(25px);
+		backdrop-filter: blur(25px);
 		clip-path: var(--search-origin);
 		opacity: 0;
 		pointer-events: none;
@@ -296,7 +273,7 @@
 			filter 160ms ease;
 	}
 	.header-search.search-open {
-		clip-path: inset(0 round calc(var(--design-header-height) / 2));
+		clip-path: inset(0 round 24px);
 		opacity: 1;
 		pointer-events: auto;
 		transition:
@@ -317,7 +294,6 @@
 		width: 28px;
 		height: 28px;
 		object-fit: contain;
-		filter: brightness(0) invert(1);
 		opacity: 0.6;
 		flex-shrink: 0;
 	}
@@ -343,16 +319,17 @@
 	.close-search-btn {
 		width: 32px;
 		height: 32px;
+		min-height: 0;
 		border-radius: 50%;
 		background: #ffffff;
 		border: none;
+		padding: 0;
 		cursor: pointer;
 		display: flex;
 		align-items: center;
 		justify-content: center;
 		flex-shrink: 0;
 		transition: transform 160ms var(--ease-spring);
-		box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
 	}
 	.close-search-btn:hover {
 		transform: scale(1.06);
@@ -361,18 +338,12 @@
 		transform: scale(0.94);
 	}
 	.close-icon {
-		width: 14px;
-		height: 14px;
+		width: 24px;
+		height: 24px;
 		object-fit: contain;
 		filter: brightness(0);
 	}
 
-	@media (max-width: 350px) {
-		.header-line {
-			padding-left: 16px;
-			padding-right: 12px;
-		}
-	}
 	@media (prefers-reduced-motion: reduce) {
 		.header-search,
 		.header-search.search-open {

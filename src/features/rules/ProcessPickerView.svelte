@@ -5,13 +5,13 @@
 	import { isAndroid } from '../../lib/platform';
 	import { catalog } from '../../lib/services';
 	import { createDeferredTask } from '../../lib/utils/deferredTask';
-	import backIcon from '../../assets/back.svg';
+	import backIcon from '../../assets/icons/back.svg';
 	import yandexIcon from '../../assets/yandex.png';
-	import searchIcon from '../../assets/search.svg';
-	import checkIcon from '../../assets/check.svg';
-	import crossIcon from '../../assets/close.svg';
+	import searchIcon from '../../assets/icons/search.svg';
+	import checkIcon from '../../assets/icons/check-dark.svg';
+	import crossIcon from '../../assets/icons/close.svg';
 	import IconButton from '../../components/IconButton.svelte';
-	import MaterialIcon from '../../components/MaterialIcon.svelte';
+	import fileIcon from '../../assets/icons/file.svg';
 	import RoundCheckbox from '../../components/RoundCheckbox.svelte';
 	import { t } from '../../lib/i18n';
 
@@ -237,7 +237,7 @@
 							<img src={item.icon} alt="" class="app-icon-img" />
 						{:else}
 							<span class="generic-file-icon">
-								<MaterialIcon name="description" size={20} />
+								<img src={fileIcon} alt="" width="24" height="24" />
 							</span>
 						{/if}
 					</div>

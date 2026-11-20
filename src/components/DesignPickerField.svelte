@@ -1,6 +1,6 @@
 <script lang="ts">
 	import type { Snippet } from 'svelte';
-	import chevronIcon from '../assets/chevron-down.svg';
+	import chevronIcon from '../assets/icons/chevron-right.svg';
 
 	interface Props {
 		/** "Выбрать сервер": the prompt while empty, a small caption once chosen. */
@@ -155,7 +155,5 @@
 		right: 18px;
 		width: 24px;
 		height: 24px;
-		transform: rotate(-90deg);
-		filter: brightness(0) invert(1);
 	}
 </style>

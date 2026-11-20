@@ -4,10 +4,10 @@
 	import IconButton from '../../../components/IconButton.svelte';
 	import { t } from '../../../lib/i18n';
 	import { createDeferredTask } from '../../../lib/utils/deferredTask';
-	import backIcon from '../../../assets/back.svg';
-	import searchIcon from '../../../assets/search.svg';
-	import crossIcon from '../../../assets/close.svg';
-	import checkIcon from '../../../assets/check.svg';
+	import backIcon from '../../../assets/icons/back.svg';
+	import searchIcon from '../../../assets/icons/search.svg';
+	import crossIcon from '../../../assets/icons/close.svg';
+	import checkIcon from '../../../assets/icons/check-dark.svg';
 
 	interface Props {
 		selectedId: string;

@@ -1,6 +1,6 @@
 <script lang="ts">
-	import backIcon from '../assets/chevron-left.svg';
-	import trashIcon from '../assets/trash-danger.svg';
+	import backIcon from '../assets/icons/back.svg';
+	import trashIcon from '../assets/icons/trash.svg';
 	import { onMount } from 'svelte';
 	import DesignOverlay from './DesignOverlay.svelte';
 
@@ -39,7 +39,7 @@
 <DesignOverlay
 	labelledby="confirm-dialog-title"
 	describedby="confirm-dialog-description"
-	panel
+	panel={!destructive}
 	dismissible={!busy}
 	onDismiss={onCancel}
 >
@@ -49,29 +49,7 @@
 			<p id="confirm-dialog-description">{description}</p>
 		</div>
 
-		{#if destructive}
-			<div class="confirm-actions round">
-				<button
-					bind:this={cancelButton}
-					type="button"
-					class="round-button cancel"
-					aria-label={cancelLabel}
-					disabled={busy}
-					onclick={onCancel}
-				>
-					<img src={backIcon} alt="" width="32" height="32" />
-				</button>
-				<button
-					type="button"
-					class="round-button delete"
-					aria-label={confirmLabel}
-					disabled={busy}
-					onclick={onConfirm}
-				>
-					<img src={trashIcon} alt="" width="32" height="32" />
-				</button>
-			</div>
-		{:else}
+		{#if !destructive}
 			<div class="confirm-actions">
 				<button
 					bind:this={cancelButton}
@@ -93,6 +71,33 @@
 			</div>
 		{/if}
 	</div>
+	{#snippet footer()}
+		{#if destructive}
+			<!-- Figma "delete screen": back on the left, the red bin on the right,
+			     on the row of the bottom navigation. -->
+			<div class="confirm-actions round">
+				<button
+					bind:this={cancelButton}
+					type="button"
+					class="round-button cancel"
+					aria-label={cancelLabel}
+					disabled={busy}
+					onclick={onCancel}
+				>
+					<img src={backIcon} alt="" width="32" height="32" />
+				</button>
+				<button
+					type="button"
+					class="round-button delete"
+					aria-label={confirmLabel}
+					disabled={busy}
+					onclick={onConfirm}
+				>
+					<img src={trashIcon} alt="" width="34" height="34" />
+				</button>
+			</div>
+		{/if}
+	{/snippet}
 </DesignOverlay>
 
 <style>
@@ -136,9 +141,12 @@
 		gap: 16px;
 	}
 	.confirm-actions.round {
+		align-self: flex-end;
 		flex-direction: row;
-		justify-content: center;
-		gap: 30px;
+		justify-content: space-between;
+		align-items: center;
+		width: 100%;
+		padding: 0 calc(var(--nav-inset-end) + 8px) 0 var(--nav-inset);
 	}
 
 	.round-button {
@@ -161,9 +169,10 @@
 		background: var(--design-glass-raised);
 		box-shadow: var(--design-glow);
 	}
+	/* Solid red over 20% black with a 15% white rim. */
 	.round-button.delete {
-		background: #d0344126;
-		box-shadow: inset 0 0 21.7px #d034411a;
+		background: #d03441;
+		box-shadow: inset 0 0 0 1px #ffffff26;
 	}
 	.round-button:active:not(:disabled) {
 		transform: scale(0.94);
@@ -211,7 +220,7 @@
 			background: #ffffff1a;
 		}
 		.round-button.delete:hover:not(:disabled) {
-			background: #d0344140;
+			background: #e03d4b;
 		}
 		.confirm-button.continue:hover:not(:disabled) {
 			background: #f4f4f4;

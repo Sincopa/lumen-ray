@@ -242,6 +242,10 @@ pub async fn open_url(url: &str) -> Result<()> {
     bridge()?.open_url(url).await.map_err(convert)
 }
 
+pub async fn set_launcher_icon(icon: &str) -> Result<()> {
+    bridge()?.set_launcher_icon(icon).await.map_err(convert)
+}
+
 pub async fn move_to_background() -> Result<()> {
     bridge()?.move_to_background().await.map_err(convert)
 }

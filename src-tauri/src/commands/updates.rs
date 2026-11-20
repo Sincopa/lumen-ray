@@ -5,6 +5,8 @@ use crate::{
 };
 use std::sync::Arc;
 #[cfg(not(target_os = "android"))]
+use tauri::Emitter;
+#[cfg(not(target_os = "android"))]
 use tauri_plugin_updater::UpdaterExt;
 
 #[cfg(not(target_os = "android"))]
@@ -69,7 +71,19 @@ pub async fn install_application_update(
         .await
         .map_err(|_| BackendError::new("UPDATE_FAILED", "Could not check application updates"))?
     {
-        let bytes = update.download(|_, _| {}, || {}).await.map_err(|_| {
+        // The home screen draws a progress bar from these; one event per percent.
+        let progress_app = app.clone();
+        let mut downloaded: u64 = 0;
+        let mut reported: Option<u64> = None;
+        let on_chunk = move |chunk: usize, total: Option<u64>| {
+            downloaded += chunk as u64;
+            let step = total.map(|total| downloaded * 100 / total.max(1));
+            if step.is_none() || step != reported {
+                reported = step;
+                let _ = progress_app.emit("application-update-progress", (downloaded, total));
+            }
+        };
+        let bytes = update.download(on_chunk, || {}).await.map_err(|_| {
             BackendError::new(
                 "UPDATE_FAILED",
                 "Update download or signature verification failed",

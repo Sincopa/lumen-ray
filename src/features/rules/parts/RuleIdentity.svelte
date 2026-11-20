@@ -1,43 +1,56 @@
 <script lang="ts">
 	import type { Rule, RuleMatcher } from '../../../lib/services/catalog';
 	import { t } from '../../../lib/i18n';
-	import MaterialIcon from '../../../components/MaterialIcon.svelte';
 	import { formatRuleDisplayName } from '../ruleDisplay';
+	import linkIcon from '../../../assets/icons/rule-link.svg';
+	import appIcon from '../../../assets/icons/rule-app.svg';
+	import geositeIcon from '../../../assets/icons/rule-geosite.svg';
+	import geoipIcon from '../../../assets/icons/rule-geoip.svg';
+	import tunIcon from '../../../assets/icons/mode-tun.svg';
 
 	interface Props {
 		rule: Rule;
 		matcher: RuleMatcher;
 		serverName: string;
 		ruleIcon: string | null;
+		/** A rule inside an opened group: text only, no icon. */
+		nested?: boolean;
 		onEdit: () => void;
 	}
-	let { rule, matcher, serverName, ruleIcon, onEdit }: Props = $props();
+	let {
+		rule,
+		matcher,
+		serverName,
+		ruleIcon,
+		nested = false,
+		onEdit,
+	}: Props = $props();
 
 	const isGeo = $derived(matcher === 'geosite' || matcher === 'geoip');
+	// Figma Component 68: the rule's kind as a dark glyph on a white disc.
+	const kindIcon = $derived(
+		matcher === 'geosite'
+			? geositeIcon
+			: matcher === 'geoip'
+				? geoipIcon
+				: matcher === 'final'
+					? tunIcon
+					: matcher === 'application'
+						? appIcon
+						: linkIcon,
+	);
 </script>
 
 <div class="rule-left">
-	<div class="app-icon-wrapper" class:domain-icon={!ruleIcon}>
-		{#if ruleIcon}
-			<img class="app-icon" src={ruleIcon} alt="" />
-		{:else if matcher === 'geosite'}
-			<span class="globe-text" aria-hidden="true">
-				<MaterialIcon name="travel_explore" size={24} />
-			</span>
-		{:else if matcher === 'geoip'}
-			<span class="globe-text" aria-hidden="true">
-				<MaterialIcon name="pin_drop" size={20} />
-			</span>
-		{:else if matcher === 'final'}
-			<span class="globe-text" aria-hidden="true">
-				<MaterialIcon name="alt_route" size={20} />
-			</span>
-		{:else}
-			<span class="globe-text" aria-hidden="true">
-				<MaterialIcon name="description" size={20} />
-			</span>
-		{/if}
-	</div>
+	{#if !nested}
+		<div class="app-icon-wrapper" class:domain-icon={!ruleIcon}>
+			{#if ruleIcon}
+				<img class="app-icon" src={ruleIcon} alt="" />
+			{:else}
+				<img class="kind-icon" src={kindIcon} alt="" width="24" height="24" />
+			{/if}
+		</div>
+	{/if}
 	<button
 		class="rule-text"
 		onclick={onEdit}
@@ -78,11 +91,10 @@
 		align-items: center;
 		justify-content: center;
 	}
-	/* Generic rules use a light disc with a grey glyph. */
+	/* Generic rules: a white disc with the kind's glyph in 75% black. */
 	.domain-icon {
-		background: #efefef;
+		background: #fff;
 		border-radius: 50%;
-		color: #00000080;
 	}
 	.app-icon {
 		width: 32px;
@@ -90,8 +102,10 @@
 		object-fit: cover;
 		border-radius: 10px;
 	}
-	.globe-text {
-		font-size: 18px;
+	.kind-icon {
+		display: block;
+		filter: brightness(0);
+		opacity: 0.75;
 	}
 	.rule-text {
 		display: flex;

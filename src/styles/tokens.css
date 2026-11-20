@@ -17,6 +17,8 @@
 	--design-light: #d9d9d9;
 	--design-light-rim: inset 0 0 0 1px #fff, inset 0 0 10.3px #fff;
 	--design-header-height: 66px;
+	/* Figma "top buttons tun": the profile and buttons pills of the tabs. */
+	--design-tab-header-height: 44px;
 	--design-row-height: 56px;
 	--nav-inset: clamp(16px, 8.205vw, 32px);
 	--nav-inset-end: clamp(12px, 6.154vw, 24px);
@@ -292,6 +294,23 @@ form label {
 [role='alert'],
 .danger {
 	color: #ffbcbc;
+}
+/* Figma screen titles ("Добавление профиля", "Выберите категорию"): 24px
+   Medium on two lines, the first words at 50%. 16px under the header. */
+.screen-title {
+	margin: 0;
+	padding: 0 9px;
+	color: #fff;
+	font-size: 24px;
+	font-weight: 500;
+	line-height: 26.4px;
+	letter-spacing: -0.48px;
+}
+.screen-title > span {
+	display: block;
+}
+.screen-title .title-lead {
+	color: #ffffff80;
 }
 /* Round action buttons sit on the same row as the bottom nav. */
 .design-action-bar {

@@ -1,6 +1,6 @@
 <script lang="ts">
-	import downloadIcon from '../assets/download.svg';
-	import bellIcon from '../assets/bell-ring.svg';
+	import downloadIcon from '../assets/icons/download.svg';
+	import bellIcon from '../assets/icons/bell.svg';
 
 	interface Props {
 		icon: 'update' | 'bell';
@@ -25,7 +25,7 @@
 		{#if icon === 'update'}
 			<img src={downloadIcon} alt="" width="32" height="32" />
 		{:else}
-			<img src={bellIcon} alt="" width="32" height="32" class="bell" />
+			<img src={bellIcon} alt="" width="32" height="32" />
 		{/if}
 	</span>
 	<span class="notice-text">{text}</span>
@@ -49,7 +49,7 @@
 		max-width: 100%;
 		height: 48px;
 		padding: 8px 18px 8px 8px;
-		border-radius: 123px;
+		border-radius: 18px;
 		background: #00000026;
 		-webkit-backdrop-filter: blur(25px);
 		backdrop-filter: blur(25px);
@@ -64,9 +64,6 @@
 		flex: 0 0 32px;
 		width: 32px;
 		height: 32px;
-	}
-	.bell {
-		filter: brightness(0) invert(1);
 	}
 	.notice-text {
 		min-width: 0;

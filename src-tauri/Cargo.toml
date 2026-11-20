@@ -63,6 +63,8 @@ windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Devices
 libc = "0.2"
 # Same versions as tao and wry: an activity assertion keeps App Nap off a live connection.
 objc2 = "0.6"
-objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSProcessInfo", "NSString"] }
+objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSData", "NSProcessInfo", "NSString"] }
+# The Dock icon of Settings > App appearance; the same version as tao.
+objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSApplication", "NSImage", "NSResponder"] }
 security-framework = "3"
 aes-gcm = { version = "0.10", features = ["zeroize"] }

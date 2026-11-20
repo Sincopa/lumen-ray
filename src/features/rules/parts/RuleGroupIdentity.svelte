@@ -1,7 +1,9 @@
 <script lang="ts">
 	import { t } from '../../../lib/i18n';
-	import MaterialIcon from '../../../components/MaterialIcon.svelte';
 	import type { RuleGroup } from '../ruleGroups';
+	import linkIcon from '../../../assets/icons/rule-link.svg';
+	import geoipIcon from '../../../assets/icons/rule-geoip.svg';
+	import chevronIcon from '../../../assets/icons/chevron-down.svg';
 
 	interface Props {
 		group: RuleGroup;
@@ -15,12 +17,13 @@
 
 <div class="rule-left">
 	<div class="app-icon-wrapper domain-icon">
-		<span class="globe-text" aria-hidden="true">
-			<MaterialIcon
-				name={group.kind === 'addresses' ? 'pin_drop' : 'public'}
-				size={20}
-			/>
-		</span>
+		<img
+			class="kind-icon"
+			src={group.kind === 'addresses' ? geoipIcon : linkIcon}
+			alt=""
+			width="24"
+			height="24"
+		/>
 	</div>
 	<button
 		class="rule-text"
@@ -32,11 +35,18 @@
 	>
 		<span class="rule-name-line">
 			<span class="rule-name">{label}</span>
-			<MaterialIcon name={open ? 'expand_less' : 'expand_more'} size={18} />
+			{#if subscriptionName}
+				<span class="rule-details">{subscriptionName}</span>
+			{/if}
 		</span>
-		{#if subscriptionName}
-			<span class="rule-details">{subscriptionName}</span>
-		{/if}
+		<img
+			class="group-chevron"
+			class:open
+			src={chevronIcon}
+			alt=""
+			width="24"
+			height="24"
+		/>
 	</button>
 </div>
 
@@ -56,31 +66,41 @@
 		align-items: center;
 		justify-content: center;
 	}
-	/* Same light disc as a single domain rule. */
+	/* Same white disc as a single domain rule. */
 	.domain-icon {
-		background: #efefef;
+		background: #fff;
 		border-radius: 50%;
-		color: #00000080;
 	}
-	.globe-text {
-		font-size: 18px;
+	.kind-icon {
+		display: block;
+		filter: brightness(0);
+		opacity: 0.75;
 	}
+	/* Figma: the arrow icon after the name, flipped up while the group is open. */
+	.group-chevron {
+		flex-shrink: 0;
+		transition: transform 200ms var(--ease-out);
+	}
+	.group-chevron.open {
+		transform: rotate(180deg);
+	}
+	/* Name and subscription on the left, the arrow 16px after them. */
 	.rule-text {
 		display: flex;
-		flex-direction: column;
-		gap: 2px;
+		align-items: center;
+		gap: 16px;
 		min-width: 0;
+		min-height: 0;
 		background: none;
 		border: 0;
 		padding: 0;
 		text-align: left;
-		justify-content: center;
 		line-height: 14px;
 		color: inherit;
 	}
 	.rule-name-line {
 		display: flex;
-		align-items: center;
+		flex-direction: column;
 		gap: 2px;
 		min-width: 0;
 	}

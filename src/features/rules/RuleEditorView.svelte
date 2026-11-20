@@ -1,13 +1,12 @@
 <script lang="ts">
-	import nextIcon from '../../assets/chevron-right.svg';
 	import type { Rule, RuleMatcher, Server } from '../../lib/services/catalog';
 	import { t } from '../../lib/i18n';
 	import { screen, morphIn, morphOut } from '../../lib/motion';
 	import DesignTextField from '../../components/DesignTextField.svelte';
 	import DesignPickerField from '../../components/DesignPickerField.svelte';
 	import IconButton from '../../components/IconButton.svelte';
-	import backIcon from '../../assets/back.svg';
-	import checkIcon from '../../assets/check.svg';
+	import backIcon from '../../assets/icons/back.svg';
+	import checkIcon from '../../assets/icons/check-dark.svg';
 	import './editor/rule-editor.css';
 	import RuleTypeStep from './editor/RuleTypeStep.svelte';
 	import ServerField from './editor/ServerField.svelte';
@@ -296,8 +295,9 @@
 		</div>
 	{/key}
 
-	<!-- The bar stays while the steps change: "Continue" shrinks into the check. -->
-	<div class="design-action-bar">
+	<!-- The type step has only back (a tap on a kind goes on); the form adds
+	     the check. -->
+	<div class="design-action-bar" class:back-only={step === 'type'}>
 		<IconButton
 			design
 			icon={backIcon}
@@ -306,29 +306,18 @@
 			variant="surface"
 			onclick={goBack}
 		/>
-		<button
-			type="button"
-			class="primary-morph"
-			class:wide={step === 'type'}
-			disabled={step === 'type' ? !pickedType : !saveEnabled}
-			aria-label={step === 'type' ? t('common.continue') : t('common.save')}
-			onclick={step === 'type' ? continueWithType : handleSave}
-		>
-			{#key step}
-				<span
-					class="primary-layer"
-					class:pill={step === 'type'}
-					in:morphIn
-					out:morphOut
-				>
-					{#if step === 'type'}
-						<span>{t('common.continue')}</span>
-						<img src={nextIcon} alt="" width="34" height="34" />
-					{:else}
-						<img src={checkIcon} alt="" width="34" height="34" />
-					{/if}
-				</span>
-			{/key}
-		</button>
+		{#if step === 'form'}
+			<span class="primary-slot" in:morphIn out:morphOut>
+				<IconButton
+					design
+					icon={checkIcon}
+					ariaLabel={t('common.save')}
+					size="lg"
+					variant="primary"
+					disabled={!saveEnabled}
+					onclick={handleSave}
+				/>
+			</span>
+		{/if}
 	</div>
 </section>

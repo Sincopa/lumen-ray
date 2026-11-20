@@ -111,6 +111,27 @@ pub async fn set_settings(
     })
 }
 
+/// Saves the icon picked in Settings > App appearance and shows it at once.
+#[tauri::command]
+pub async fn set_app_icon(
+    state: tauri::State<'_, Arc<AppState>>,
+    app: tauri::AppHandle,
+    icon: String,
+) -> Result<()> {
+    if !crate::app::app_icon::is_known(&icon) {
+        return Err(BackendError::new("INVALID_CONFIG", "Unknown app icon"));
+    }
+    crate::app::app_icon::apply(&app, &icon).await?;
+    let _guard = state.mutations.lock().await;
+    let mut repo = state.repository.read().await.clone();
+    if repo.settings.app_icon != icon {
+        repo.settings.app_icon = icon;
+        state.store.save(&repo)?;
+        *state.repository.write().await = repo;
+    }
+    Ok(())
+}
+
 #[tauri::command]
 pub async fn reset_network_settings(state: tauri::State<'_, Arc<AppState>>) -> Result<()> {
     #[cfg(any(windows, target_os = "macos"))]
@@ -133,6 +154,9 @@ pub(crate) fn validate_settings(settings: &Settings) -> Result<()> {
             "INVALID_CONFIG",
             "Unknown networking mode",
         ));
+    }
+    if !crate::app::app_icon::is_known(&settings.app_icon) {
+        return Err(BackendError::new("INVALID_CONFIG", "Unknown app icon"));
     }
     if cfg!(target_os = "macos") && settings.network_mode == "tun" {
         return Err(BackendError::new(

@@ -51,13 +51,15 @@
 {/if}
 
 <style>
-	/* Figma toggle: 60x28 track, 24px grey knob; the track turns white when on. */
+	/* Figma "swicher": a 48x22 track with an 18px knob, grey on 4% white when
+	   off, white on 12% white when on. */
 	.switch-btn,
 	.switch {
 		position: relative;
 		display: inline-block;
-		width: 60px;
-		height: 28px;
+		width: 48px;
+		height: 22px;
+		min-height: 0;
 		flex-shrink: 0;
 	}
 
@@ -90,35 +92,36 @@
 		cursor: pointer;
 		inset: 0;
 		background-color: rgba(255, 255, 255, 0.04);
-		box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.15);
-		transition:
-			background-color 0.25s ease,
-			box-shadow 0.25s ease;
+		transition: background-color 0.25s ease;
 		border-radius: 123px;
 	}
 
 	.slider:before {
 		position: absolute;
 		content: '';
-		height: 24px;
-		width: 24px;
+		height: 18px;
+		width: 18px;
 		left: 2px;
 		top: 2px;
 		background-color: #7e7e7e;
-		transition: transform 0.25s var(--ease-spring);
+		transition:
+			transform 0.25s var(--ease-spring),
+			background-color 0.25s ease,
+			box-shadow 0.25s ease;
 		border-radius: 50%;
-		box-shadow: 0 2px 7.7px rgba(0, 0, 0, 0.25);
+		box-shadow: 0 1.5px 5.8px rgba(0, 0, 0, 0.25);
 	}
 
 	input:checked + .slider,
 	.slider.checked {
-		background-color: #fff;
-		box-shadow: none;
+		background-color: rgba(255, 255, 255, 0.12);
 	}
 
 	input:checked + .slider:before,
 	.slider.checked:before {
-		transform: translateX(32px);
+		background-color: #fff;
+		box-shadow: 0 2px 7.7px rgba(0, 0, 0, 0.25);
+		transform: translateX(26px);
 	}
 
 	input:disabled + .slider {

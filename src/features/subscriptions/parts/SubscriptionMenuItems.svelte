@@ -1,7 +1,7 @@
 <script lang="ts">
-	import pencilIcon from '../../../assets/pencil.svg';
-	import trashIcon from '../../../assets/trash.svg';
-	import shareIcon from '../../../assets/share-link.svg';
+	import pencilIcon from '../../../assets/icons/edit.svg';
+	import trashIcon from '../../../assets/icons/trash.svg';
+	import shareIcon from '../../../assets/icons/download.svg';
 	import { t } from '../../../lib/i18n';
 	import type { Subscription } from '../../../lib/services/catalog';
 	import MenuItem from '../../../components/MenuItem.svelte';

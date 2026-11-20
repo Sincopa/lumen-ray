@@ -4,7 +4,9 @@
 	import { serverDisplayName } from '../../../lib/utils/serverDisplayName';
 	import CountryFlag from '../../../components/CountryFlag.svelte';
 	import DesignPickerField from '../../../components/DesignPickerField.svelte';
-	import MaterialIcon from '../../../components/MaterialIcon.svelte';
+	import tunIcon from '../../../assets/icons/mode-tun.svg';
+	import blockIcon from '../../../assets/icons/close.svg';
+	import syncIcon from '../../../assets/icons/reload.svg';
 
 	interface Props {
 		serverId: string;
@@ -20,11 +22,11 @@
 	);
 	const badge = $derived(
 		serverId === 'direct'
-			? 'alt_route'
+			? tunIcon
 			: serverId === 'block'
-				? 'block'
+				? blockIcon
 				: viaSubscription
-					? 'sync_alt'
+					? syncIcon
 					: '',
 	);
 	const chosen = $derived(!!badge || !!server);
@@ -39,7 +41,9 @@
 >
 	{#snippet media()}
 		{#if badge}
-			<span class="server-badge"><MaterialIcon name={badge} size={20} /></span>
+			<span class="server-badge">
+				<img src={badge} alt="" width="24" height="24" />
+			</span>
 		{:else if server}
 			<CountryFlag countryCode={server.countryCode} size={32} />
 		{/if}

@@ -1,7 +1,6 @@
 <script lang="ts">
 	import { tick } from 'svelte';
-	import addIcon from '../../assets/plus.svg';
-	import pasteIcon from '../../assets/copy.svg';
+	import pasteIcon from '../../assets/icons/copy.svg';
 	import { catalog } from '../../lib/services';
 	import { errorCode } from '../../lib/services/errors';
 	import { t } from '../../lib/i18n';
@@ -79,7 +78,11 @@
 			aria-label={t('subscriptions.addProfile')}
 			tabindex={editing ? -1 : 0}
 		>
-			<img src={addIcon} alt="" class="plus-icon" />
+			<!-- Figma "add profile": the paste square and the prompt, as the
+			     editor shows them, so opening it changes nothing in place. -->
+			<span class="paste-glyph" aria-hidden="true">
+				<img src={pasteIcon} alt="" width="34" height="34" />
+			</span>
 			<span class="btn-label">{t('subscriptions.addLink')}</span>
 		</button>
 
@@ -142,8 +145,9 @@
 		position: relative;
 		width: min(100%, 300px);
 		height: 63px;
-		border-radius: 32px;
-		background: var(--design-glass);
+		border-radius: 24px;
+		background: var(--design-panel);
+		box-shadow: var(--design-edge);
 		-webkit-backdrop-filter: blur(16px);
 		backdrop-filter: blur(16px);
 		overflow: hidden;
@@ -154,7 +158,7 @@
 	}
 
 	.profile-control:not(.editing) {
-		width: min(100%, 229px);
+		width: min(100%, 231px);
 	}
 
 	/* Figma "Frame 2147223317": a faint pill that grows once a link is in. */
@@ -178,9 +182,8 @@
 	.add-profile-btn {
 		display: flex;
 		align-items: center;
-		justify-content: center;
-		gap: 22px;
-		padding: 0 26px;
+		gap: 14px;
+		padding: 0 20px 0 7px;
 		border: 0;
 		background: transparent;
 		color: #fff;
@@ -196,27 +199,31 @@
 	}
 
 	.profile-control:not(.editing):hover {
-		background: rgba(255, 255, 255, 0.12);
-		box-shadow: 0 4px 20px rgba(0, 0, 0, 0.35);
+		background: rgba(255, 255, 255, 0.05);
 	}
 
 	.profile-control:not(.editing):active {
 		transform: scale(0.97);
 	}
 
-	.plus-icon {
-		width: 21px;
-		height: 21px;
-		object-fit: contain;
-		filter: brightness(0) invert(1);
+	.paste-glyph {
+		display: grid;
+		place-items: center;
+		flex: 0 0 50px;
+		width: 50px;
+		height: 50px;
+		border-radius: 16px;
+		background: linear-gradient(#ffffff1a, #99999900), #ffffff0d;
+	}
+	.paste-glyph img {
+		display: block;
 	}
 
 	.btn-label {
-		font-family: 'Satoshi', var(--font-family-base);
 		font-size: 18px;
 		font-weight: 400;
-		color: rgba(255, 255, 255, 0.25);
-		letter-spacing: -0.36px;
+		color: rgba(255, 255, 255, 0.5);
+		letter-spacing: -0.72px;
 		white-space: nowrap;
 	}
 
@@ -247,7 +254,7 @@
 		flex: 0 0 50px;
 		padding: 0;
 		border: 0;
-		border-radius: 50%;
+		border-radius: 16px;
 		/* 5% glass with a light falling from the top. */
 		background: linear-gradient(#ffffff1a, #99999900), #ffffff0d;
 		transition:

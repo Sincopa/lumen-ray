@@ -1,13 +1,14 @@
 <script lang="ts">
-	import logoIcon from '../../assets/logo.svg';
-	import subscriptionsIcon from '../../assets/subscriptions.svg';
-	import serversIcon from '../../assets/rules.svg';
-	import rulesSettingsIcon from '../../assets/rules-settings-v2.svg';
-	import plusIcon from '../../assets/plus.svg';
-	import globalIcon from '../../assets/mode-global.svg';
-	import tunIcon from '../../assets/mode-rules.svg';
-	import trashIcon from '../../assets/trash.svg';
-	import checkIcon from '../../assets/check.svg';
+	import logoIcon from '../../assets/icons/nav-home.svg';
+	import subscriptionsIcon from '../../assets/icons/nav-profiles.svg';
+	import serversIcon from '../../assets/icons/nav-servers.svg';
+	import rulesSettingsIcon from '../../assets/icons/nav-rules.svg';
+	import plusIcon from '../../assets/icons/plus.svg';
+	import globalIcon from '../../assets/icons/mode-all-dark.svg';
+	import tunIcon from '../../assets/icons/mode-tun-dark.svg';
+	import trashIcon from '../../assets/icons/trash.svg';
+	import checkIcon from '../../assets/icons/check-dark.svg';
+	import presetsIcon from '../../assets/icons/presets.svg';
 	import { tooltip } from '../../lib/actions/tooltip';
 	import { t } from '../../lib/i18n';
 	import { fade } from 'svelte/transition';
@@ -25,6 +26,8 @@
 		modeDisabled?: boolean;
 		/** Rule selection turns the tabs into "delete" and the action into "done". */
 		selection?: SelectionBar | null;
+		/** The rules list puts its presets button in place of the routing mode. */
+		onPresets?: (() => void) | null;
 		onTabChange: (tab: Tab) => void;
 		onModeChange?: (mode: 'global' | 'rules') => void;
 		onActionClick?: () => void;
@@ -36,36 +39,47 @@
 		showAdd = false,
 		modeDisabled = false,
 		selection = null,
+		onPresets = null,
 		onTabChange,
 		onModeChange,
 		onActionClick,
 	}: Props = $props();
-	const tabs = [
+	const tabs: { id: Tab; icon: string; label: string; size?: number }[] = [
 		{ id: 'home' as const, icon: logoIcon, label: 'nav.home' },
 		{
 			id: 'subscriptions' as const,
 			icon: subscriptionsIcon,
 			label: 'nav.subscriptions',
 		},
-		{ id: 'servers' as const, icon: serversIcon, label: 'nav.servers' },
+		// Figma draws the servers glyph smaller than the others (23px vs 34px).
+		{
+			id: 'servers' as const,
+			icon: serversIcon,
+			label: 'nav.servers',
+			size: 23,
+		},
 		{ id: 'rules' as const, icon: rulesSettingsIcon, label: 'nav.rules' },
 	];
-	// One button morphs between "add", the routing mode and "done".
+	// One button morphs between "add", presets, the routing mode and "done".
 	let action = $derived(
 		selection
 			? 'done'
 			: showAdd
 				? 'add'
-				: hasSubscriptions
-					? routingMode
-					: null,
+				: onPresets
+					? 'presets'
+					: hasSubscriptions
+						? routingMode
+						: null,
 	);
 	let actionLabel = $derived(
 		action === 'done'
 			? t('common.close')
 			: action === 'add'
 				? t('subscriptions.addProfile')
-				: t(routingMode === 'rules' ? 'home.modeRules' : 'home.modeGlobal'),
+				: action === 'presets'
+					? t('rules.presets')
+					: t(routingMode === 'rules' ? 'home.modeRules' : 'home.modeGlobal'),
 	);
 </script>
 
@@ -90,7 +104,14 @@
 					<img src={trashIcon} alt="" width="34" height="34" />
 				</button>
 			{:else}
+				{@const currentIndex = tabs.findIndex((tab) => tab.id === currentTab)}
 				<span class="tab-row">
+					<span
+						class="tab-indicator"
+						class:hidden={currentIndex < 0}
+						style:--tab-index={Math.max(0, currentIndex)}
+						aria-hidden="true"
+					></span>
 					{#each tabs as tab (tab.id)}
 						<button
 							type="button"
@@ -101,7 +122,12 @@
 							use:tooltip={t(tab.label)}
 							onclick={() => currentTab !== tab.id && onTabChange(tab.id)}
 						>
-							<img src={tab.icon} alt="" width="34" height="34" />
+							<img
+								src={tab.icon}
+								alt=""
+								width={tab.size ?? 34}
+								height={tab.size ?? 34}
+							/>
 						</button>
 					{/each}
 				</span>
@@ -113,7 +139,7 @@
 			in:pop={{ start: 0.9 }}
 			type="button"
 			class="nav-action"
-			class:light={action !== 'add'}
+			class:light={action !== 'add' && action !== 'presets'}
 			class:mode-action={action === 'global' || action === 'rules'}
 			class:done-action={action === 'done'}
 			disabled={(action === 'global' || action === 'rules') && modeDisabled}
@@ -125,6 +151,7 @@
 			onclick={() => {
 				if (action === 'done') selection?.onDone();
 				else if (action === 'add') onActionClick?.();
+				else if (action === 'presets') onPresets?.();
 				else onModeChange?.(routingMode === 'global' ? 'rules' : 'global');
 			}}
 		>
@@ -135,7 +162,11 @@
 					</span>
 				{:else if action === 'add'}
 					<span class="glyph">
-						<img src={plusIcon} alt="" width="21" height="21" />
+						<img src={plusIcon} alt="" width="34" height="34" />
+					</span>
+				{:else if action === 'presets'}
+					<span class="glyph">
+						<img src={presetsIcon} alt="" width="34" height="34" />
 					</span>
 				{:else}
 					<span class="mode">
@@ -171,7 +202,7 @@
 		flex-shrink: 0;
 		align-items: center;
 		height: 50px;
-		padding: 0 4px;
+		padding: 0 6px;
 		box-sizing: border-box;
 		border-radius: 123px;
 		background: var(--design-glass);
@@ -186,35 +217,53 @@
 		box-shadow: inset 0 0 0 1px #ffffff26;
 	}
 	.tab-row {
+		--tab-w: 52px;
+		position: relative;
 		display: flex;
 		align-items: center;
 	}
+	/* The current tab's 5% pill glides to the next tab with the morph spring. */
+	.tab-indicator {
+		position: absolute;
+		top: 0;
+		left: 0;
+		width: var(--tab-w);
+		height: 38px;
+		border-radius: 123px;
+		background: var(--design-glass-raised);
+		transform: translateX(calc(var(--tab-index) * var(--tab-w)));
+		transition:
+			transform 520ms var(--ease-morph),
+			opacity 200ms ease;
+		pointer-events: none;
+	}
+	.tab-indicator.hidden {
+		opacity: 0;
+	}
 	/* 52x38 tabs: a 22px glyph (34px with its built-in padding) in 8/15 padding.
-	   The current tab sits on a faint pill, clipped 2px in from each side so
-	   neighbouring pills keep a 4px gap and a 6px one from the nav edge. */
+	   The current tab sits on a faint pill. */
 	.pill-btn {
+		position: relative;
 		display: grid;
 		place-items: center;
 		width: 52px;
 		height: 38px;
 		flex: 0 0 52px;
-		padding: 0 2px;
+		padding: 0;
 		box-sizing: border-box;
 		border: 0;
 		border-radius: 123px;
 		background: transparent;
-		background-clip: content-box;
 		transition:
 			background-color 160ms ease,
 			transform 160ms var(--ease-spring);
 	}
-	.pill-btn.active {
-		background-color: var(--design-glass-raised);
-	}
+	/* Figma "Подписки": the other tabs rest at 50%; the current one is full
+	   white on its pill. */
 	.pill-btn img {
 		display: block;
 		opacity: 0.5;
-		transition: opacity 160ms ease;
+		transition: opacity 200ms ease;
 	}
 	.pill-btn.active img {
 		opacity: 1;
@@ -233,9 +282,6 @@
 		transition:
 			opacity 160ms ease,
 			transform 160ms var(--ease-spring);
-	}
-	.delete-btn img {
-		filter: brightness(0) invert(1);
 	}
 	.delete-btn:disabled {
 		opacity: 0.5;
@@ -297,7 +343,6 @@
 	}
 	.mode img {
 		object-fit: contain;
-		filter: brightness(0);
 	}
 	.pill-btn:active,
 	.delete-btn:active:not(:disabled),
@@ -307,6 +352,9 @@
 	/* Narrow windows tighten the tabs and keep the mode toggle as an icon so
 	   the row still fits. */
 	@media (max-width: 350px) {
+		.tab-row {
+			--tab-w: 44px;
+		}
 		.pill-btn {
 			width: 44px;
 			flex-basis: 44px;

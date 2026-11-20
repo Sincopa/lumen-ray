@@ -204,6 +204,9 @@ pub struct Settings {
     pub notify_expiry: bool,
     #[serde(default)]
     pub notify_update: bool,
+    /// The icon picked in Settings > App appearance (see app::app_icon).
+    #[serde(default = "default_app_icon")]
+    pub app_icon: String,
 }
 impl Default for Settings {
     fn default() -> Self {
@@ -232,8 +235,12 @@ impl Default for Settings {
             notify_reconnect: false,
             notify_expiry: false,
             notify_update: false,
+            app_icon: default_app_icon(),
         }
     }
+}
+fn default_app_icon() -> String {
+    crate::app::app_icon::DEFAULT.into()
 }
 fn default_subscription_transport() -> String {
     "direct".into()

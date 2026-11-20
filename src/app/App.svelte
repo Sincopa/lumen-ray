@@ -83,7 +83,7 @@
 
 	{#if shell.brightnessOpen}
 		<BrightnessView
-			{connectionState}
+			lightBackdrop={backdropTone === 'light'}
 			onClose={() => {
 				// Brightness is opened from settings, so leaving it goes back there.
 				shell.brightnessOpen = false;
@@ -102,7 +102,7 @@
 		<!-- Top Desktop Window Bar -->
 		<WindowHeader
 			title="Lumen"
-			showQuickActions={shell.currentTab !== 'settings' && !shell.importing}
+			showQuickActions={shell.currentTab !== 'settings' || shell.importing}
 			darkSurface={shell.currentTab !== 'home' ||
 				!hasSubscriptions ||
 				shell.importing}
@@ -110,6 +110,12 @@
 			isSettingsOpen={shell.currentTab === 'settings'}
 			onOpenSettings={() => {
 				shell.brightnessOpen = false;
+				if (shell.importing) {
+					shell.importing = false;
+					shell.pendingImport = '';
+					shell.goToTab('settings');
+					return;
+				}
 				shell.goToTab(shell.currentTab === 'settings' ? 'home' : 'settings');
 			}}
 		/>
@@ -180,6 +186,8 @@
 									onSelectServer={() => shell.goToTab('servers')}
 									updateVersion={$applicationUpdateState.version}
 									updating={$applicationUpdateState.status === 'downloading'}
+									updateProgress={$applicationUpdateState.progress}
+									onDismissError={() => connection.dismissError()}
 									onInstallUpdate={() => void applicationUpdate.install()}
 									{subscriptionExpired}
 								/>
@@ -208,6 +216,7 @@
 							<RulesView
 								onChromeChange={(mode) => (shell.ruleChrome = mode)}
 								onSelectionChange={(bar) => (shell.selectionBar = bar)}
+								onPresetsChange={(open) => (shell.presetsAction = open)}
 							/>
 						{/if}
 					</div>
@@ -228,6 +237,10 @@
 				selection={shell.currentTab === 'rules' &&
 				shell.ruleChrome === 'selection'
 					? shell.selectionBar
+					: null}
+				onPresets={shell.currentTab === 'rules' &&
+				shell.ruleChrome === 'default'
+					? shell.presetsAction
 					: null}
 				onActionClick={() => (shell.importing = true)}
 			/>

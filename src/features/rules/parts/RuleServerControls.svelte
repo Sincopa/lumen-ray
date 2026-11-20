@@ -1,5 +1,6 @@
 <script lang="ts">
-	import tunIcon from '../../../assets/mode-rules.svg';
+	import tunIcon from '../../../assets/icons/mode-tun.svg';
+	import blockIcon from '../../../assets/icons/close.svg';
 	import type {
 		Rule,
 		RuleMatcher,
@@ -7,7 +8,6 @@
 	} from '../../../lib/services/catalog';
 	import { pop } from '../../../lib/motion';
 	import CountryFlag from '../../../components/CountryFlag.svelte';
-	import MaterialIcon from '../../../components/MaterialIcon.svelte';
 	import RoundCheckbox from '../../../components/RoundCheckbox.svelte';
 	import ToggleSwitch from '../../../components/ToggleSwitch.svelte';
 	import { t } from '../../../lib/i18n';
@@ -20,6 +20,8 @@
 		isSub: boolean;
 		selectMode: boolean;
 		checked: boolean;
+		/** Rows inside a group: a 24px chip with a 16px flag. */
+		compact?: boolean;
 		onPickServer: () => void;
 		onToggle: () => void;
 		onSelect: () => void;
@@ -32,6 +34,7 @@
 		isSub,
 		selectMode,
 		checked,
+		compact = false,
 		onPickServer,
 		onToggle,
 		onSelect,
@@ -41,7 +44,7 @@
 	const isBlock = $derived(rule.serverId === 'block');
 </script>
 
-<div class="rule-right">
+<div class="rule-right" class:compact>
 	<button
 		class="server-pill"
 		title={serverName}
@@ -50,11 +53,11 @@
 	>
 		{#if isDirect}
 			<span class="flag-sm">
-				<MaterialIcon name="alt_route" size={16} />
+				<img src={tunIcon} alt="" width="24" height="24" />
 			</span>
 		{:else if isBlock}
 			<span class="flag-sm">
-				<MaterialIcon name="block" size={16} />
+				<img src={blockIcon} alt="" width="24" height="24" />
 			</span>
 		{:else if isSub}
 			<span class="flag-sm">
@@ -62,7 +65,10 @@
 			</span>
 		{:else if server}
 			<span class="flag-sm">
-				<CountryFlag countryCode={server.countryCode} size={24} />
+				<CountryFlag
+					countryCode={server.countryCode}
+					size={compact ? 16 : 24}
+				/>
 			</span>
 		{/if}
 		<span class="server-pill-name">
@@ -129,8 +135,18 @@
 	}
 	.flag-sm img {
 		display: block;
-		filter: brightness(0) invert(1);
-		opacity: 0.75;
+	}
+	.compact {
+		gap: 24px;
+	}
+	.compact .server-pill {
+		height: 24px;
+		padding: 4px 12px 4px 4px;
+	}
+	.compact .flag-sm,
+	.compact .flag-sm img {
+		width: 16px;
+		height: 16px;
 	}
 	.server-pill-name {
 		font-size: 12px;

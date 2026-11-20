@@ -1,27 +1,24 @@
 import type { Snippet } from 'svelte';
 
 /*
- * The subscriptions, servers and rules tabs share one header pill. It stays in
- * place while the tabs change; each view only describes what goes into it, and
- * the pill morphs between those descriptions.
+ * The servers and rules tabs share one header: the profile name in a pill on
+ * the left and the tab's buttons in a pill on the right. It stays in place
+ * while the tabs change; each view only describes what goes into it, and the
+ * buttons morph between those descriptions.
  */
 
 export interface HeaderSlots {
 	/** Names the view; the action buttons morph when it changes. */
 	key: string;
 	title: string;
-	/** Buttons at the right edge of the pill, after search. */
+	/** Buttons in the right pill, after search. */
 	actions?: Snippet;
-	/** Replaces the title and actions, for example an inline rename field. */
-	replace?: Snippet;
-	/** Content under the title row. The pill grows into a card. */
-	body?: Snippet;
-	/** Round button beside the pill. */
-	trailing?: Snippet;
 	/** Content anchored under the header, such as a popup menu. */
 	popover?: Snippet;
-	/** Adds a search button that opens a field inside the pill. */
+	/** Adds a search button that opens a field over the header. */
 	searchPlaceholder?: string;
+	/** Figma "top button": the buttons rest at 50% and light up on hover. */
+	dimActions?: boolean;
 	hidden?: boolean;
 }
 

@@ -30,6 +30,8 @@ class Shell {
 	actionError = $state('');
 	ruleChrome = $state<'default' | 'selection' | 'picker'>('default');
 	selectionBar = $state<SelectionBar | null>(null);
+	/** Opens the rule presets; set while the rules list is on screen. */
+	presetsAction = $state<(() => void) | null>(null);
 	brightnessOpen = $state(false);
 	pendingImport = $state('');
 
@@ -40,6 +42,7 @@ class Shell {
 		if (tab !== 'rules') {
 			this.ruleChrome = 'default';
 			this.selectionBar = null;
+			this.presetsAction = null;
 		}
 	};
 

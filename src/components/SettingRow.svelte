@@ -1,5 +1,5 @@
 <script lang="ts">
-	import chevronIcon from '../assets/chevron-right-small.svg';
+	import chevronIcon from '../assets/icons/chevron-small.svg';
 	import type { Snippet } from 'svelte';
 
 	interface Props {
@@ -40,7 +40,7 @@
 		{/if}
 		{#if showChevron}
 			<span class="chevron" aria-hidden="true">
-				<img src={chevronIcon} alt="" width="6" height="12" />
+				<img src={chevronIcon} alt="" width="5" height="11" />
 			</span>
 		{/if}
 	</div>

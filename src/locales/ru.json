@@ -44,7 +44,9 @@
 		"reconnecting": "Переподключение…",
 		"updateAvailable": "Доступна новая версия",
 		"updateAction": "Обновить",
-		"subscriptionExpired": "Подписка истекла"
+		"subscriptionExpired": "Подписка истекла",
+		"updating": "Загрузка обновления",
+		"secondsShort": "с"
 	},
 	"subscriptions": {
 		"title": "Мои подписки",
@@ -68,7 +70,10 @@
 		"sourceUnavailable": "Ссылка недоступна в этой демонстрационной сессии.",
 		"copyFailed": "Не удалось скопировать автоматически. Выделите ссылку вручную.",
 		"profileLink": "Ссылка на профиль",
-		"namePlaceholder": "Укажите название"
+		"namePlaceholder": "Укажите название",
+		"addTitleLead": "Добавление",
+		"addTitle": "профиля",
+		"advanced": "Дополнительные настройки"
 	},
 	"servers": {
 		"title": "Сервера",
@@ -84,7 +89,10 @@
 			"jp": "Япония"
 		},
 		"empty": "Серверы не найдены",
-		"timeout": "—"
+		"timeout": "—",
+		"showGrid": "Показать сеткой",
+		"showList": "Показать списком",
+		"pinging": "Измеряем задержку"
 	},
 	"settings": {
 		"currentVersion": "Текущая версия",
@@ -153,7 +161,7 @@
 		"checkingUpdates": "Проверка...",
 		"latestVersionInstalled": "У вас последняя версия",
 		"downloadUpdate": "Скачать {version}",
-		"downloadingUpdate": "Загрузка...",
+		"downloadingUpdate": "Обновляется",
 		"xrayCore": "Ядро Xray",
 		"logConsole": "Консоль логов",
 		"logConsoleDesc": "Открывает отдельное окно с журналом приложения в реальном времени",
@@ -174,7 +182,6 @@
 		"shaderIdleColorB": "Цвет в покое B (светлый)",
 		"shaderColorA": "Цвет A (при включении)",
 		"shaderColorB": "Цвет B (при включении)",
-		"brightnessReset": "Сбросить яркость",
 		"brightness": "Яркость",
 		"shaderExposure": "Яркость и экспозиция",
 		"shaderReset": "Сбросить по умолчанию",
@@ -192,7 +199,15 @@
 		"batteryOk": "Без ограничений",
 		"batteryLimited": "Ограничена",
 		"batteryHint": "Если работа в фоне ограничена, Android может остановить VPN при экономии заряда.",
-		"appsHint": "Выбранные приложения работают в обход VPN. Остальные правила для приложений на Android не применяются."
+		"appsHint": "Выбранные приложения работают в обход VPN. Остальные правила для приложений на Android не применяются.",
+		"appAppearance": "Внешний вид приложения",
+		"appIcon": "Иконка приложения",
+		"appIcon_silver": "Серебряная иконка",
+		"appIcon_gold": "Золотая иконка",
+		"appIcon_blue": "Синяя иконка",
+		"appIcon_teal": "Бирюзовая иконка",
+		"appIcon_purple": "Фиолетовая иконка",
+		"appIcon_rainbow": "Радужная иконка"
 	},
 	"demo": {
 		"notice": "Демо-режим · трафик не защищён",
@@ -256,16 +271,18 @@
 		"switchModeTitle": "Включить режим правил?",
 		"switchModeDesc": "Пресет применен. Для его работы рекомендуется переключить режим приложения на «Правила».",
 		"switchToRules": "Включить",
-		"russiaOptimizedTitle": "Россия — Оптимальный",
-		"russiaOptimizedDesc": "Российские сервисы, локальная сеть и остальной трафик идут напрямую. Через VPN — блокировки, YouTube, Telegram и Discord.",
-		"bypassBlockingTitle": "Только обход блокировок",
-		"bypassBlockingDesc": "Направляет заблокированные в России ресурсы в VPN, весь остальной трафик идёт напрямую.",
+		"russiaOptimizedTitle": "Россия - оптимальный",
+		"russiaOptimizedDesc": "Обход блокировок без потери локальных сетей и РФ-сервисов.",
+		"bypassBlockingTitle": "Обход блокировок",
+		"bypassBlockingDesc": "Только заблокированные в РУ сервисы",
 		"russiaDirectTitle": "Российские ресурсы напрямую",
 		"russiaDirectDesc": "Российские домены, IP-адреса и локальные сети направляются напрямую в обход VPN.",
 		"hlAntifilter": "Блокировки и фильтры",
 		"hlRuDirect": "Российские сервисы",
-		"hlPrivateDirect": "Локальные сети (LAN)",
-		"hlRestDirect": "Весь остальной трафик"
+		"hlPrivateDirect": "Локальные сети",
+		"hlRestDirect": "Весь остальной трафик",
+		"pickTitleLead": "Выберите нужный",
+		"pickTitle": "пресет"
 	},
 	"rules": {
 		"title": "Правила",
@@ -315,7 +332,9 @@
 		"geoCategory": "{type} категория",
 		"selectedCount": "Выбрано",
 		"clear": "Очистить",
-		"androidAppHint": "Выбранные приложения будут работать без VPN, через обычную сеть. Направить отдельное приложение через другой сервер Android не позволяет."
+		"androidAppHint": "Выбранные приложения будут работать без VPN, через обычную сеть. Направить отдельное приложение через другой сервер Android не позволяет.",
+		"pickTitleLead": "Выберите",
+		"pickTitle": "категорию"
 	},
 	"macos": {
 		"settings": {

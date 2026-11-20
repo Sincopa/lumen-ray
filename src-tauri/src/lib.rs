@@ -207,6 +207,7 @@ pub fn run() {
             commands::notifications::send_lumen_notification,
             commands::settings::get_settings,
             commands::settings::set_settings,
+            commands::settings::set_app_icon,
             commands::settings::reset_network_settings,
             commands::updates::check_core_update,
             commands::updates::install_core_update,
@@ -328,6 +329,19 @@ pub fn run() {
                 }
             }
             app::tray::install(app, &state)?;
+            // The window and Dock show the picked icon from the first frame on;
+            // Android keeps its launcher alias by itself.
+            #[cfg(not(target_os = "android"))]
+            {
+                let icon = state
+                    .repository
+                    .try_read()
+                    .map(|repo| repo.settings.app_icon.clone())
+                    .unwrap_or_default();
+                if icon != app::app_icon::DEFAULT && app::app_icon::is_known(&icon) {
+                    app::app_icon::show(app.handle(), &icon);
+                }
+            }
 
             let start_minimized = std::env::args().any(|a| a == "--minimized")
                 || state

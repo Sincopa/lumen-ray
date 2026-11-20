@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { fade } from 'svelte/transition';
-	import { rise } from '../../lib/motion';
+	import { pop, rise } from '../../lib/motion';
 	import RollingNumber from '../../components/RollingNumber.svelte';
 	import Morph from '../../components/Morph.svelte';
 	import CountryFlag from '../../components/CountryFlag.svelte';
@@ -17,7 +17,9 @@
 	} from '../../lib/types/models';
 	import type { Server } from '../../lib/services/catalog';
 	import type { ErrorCode } from '../../lib/services/errors';
-	import chevronIcon from '../../assets/chevron-up.svg';
+	import chevronIcon from '../../assets/icons/chevron-right.svg';
+	import infoIcon from '../../assets/icons/info.svg';
+	import closeIcon from '../../assets/icons/close.svg';
 
 	interface Props {
 		server?: Server;
@@ -31,7 +33,11 @@
 		onSelectServer: () => void;
 		updateVersion?: string | null;
 		updating?: boolean;
+		/** Share of the update downloaded (0-1), null while unknown. */
+		updateProgress?: number | null;
 		onInstallUpdate?: () => void;
+		/** Hides the error notice before its timer does. */
+		onDismissError?: () => void;
 		subscriptionExpired?: boolean;
 	}
 
@@ -46,9 +52,36 @@
 		onSelectServer,
 		updateVersion = null,
 		updating = false,
+		updateProgress = null,
 		onInstallUpdate,
+		onDismissError,
 		subscriptionExpired = false,
 	}: Props = $props();
+
+	// Figma error notice: the first sentence is the title, the rest explains it.
+	// A short message is a single pill; a longer one a card with a countdown
+	// to its own dismissal (the controller clears errors after 5 s) and a cross.
+	const errorText = $derived(error ? t('errors.' + error) : '');
+	const errorParts = $derived.by(() => {
+		const match = /^(.+?[.:!?])\s+(.+)$/s.exec(errorText);
+		return match
+			? {
+					title: match[1].replace(/:$/, '.'),
+					detail: match[2].replace(/^./, (c) => c.toUpperCase()),
+				}
+			: { title: errorText, detail: '' };
+	});
+	const errorAutoHides = $derived(connectionState !== 'error');
+	let errorSeconds = $state(5);
+	$effect(() => {
+		if (!error || !errorAutoHides) return;
+		const shownAt = Date.now();
+		errorSeconds = 5;
+		const timer = setInterval(() => {
+			errorSeconds = Math.max(1, 5 - Math.floor((Date.now() - shownAt) / 1000));
+		}, 250);
+		return () => clearInterval(timer);
+	});
 
 	let isConnected = $derived(connectionState === 'connected');
 	let isConnecting = $derived(connectionState === 'connecting');
@@ -108,17 +141,41 @@
 <div class="connection-view">
 	{#if subscriptionExpired || updateVersion}
 		<div class="notice-slot" in:rise={{ y: -8 }} out:fade={{ duration: 140 }}>
-			{#if subscriptionExpired}
-				<HomeNotice icon="bell" text={t('home.subscriptionExpired')} />
-			{:else}
-				<HomeNotice
-					icon="update"
-					text={t('home.updateAvailable')}
-					actionLabel={t('home.updateAction')}
-					actionDisabled={updating}
-					onAction={onInstallUpdate}
-				/>
-			{/if}
+			<Morph
+				key={subscriptionExpired ? 'expired' : updating ? 'progress' : 'notice'}
+			>
+				{#if subscriptionExpired}
+					<HomeNotice icon="bell" text={t('home.subscriptionExpired')} />
+				{:else if updating}
+					<!-- Figma: the notice turns into a progress bar while it downloads. -->
+					<div
+						class="update-progress"
+						class:indeterminate={updateProgress === null}
+						role="progressbar"
+						aria-label={t('home.updating')}
+						aria-valuemin={0}
+						aria-valuemax={100}
+						aria-valuenow={updateProgress === null
+							? undefined
+							: Math.round(updateProgress * 100)}
+					>
+						<span class="update-track">
+							<span
+								class="update-fill"
+								style:width="{Math.max(8, (updateProgress ?? 0.35) * 100)}%"
+							></span>
+						</span>
+					</div>
+				{:else}
+					<HomeNotice
+						icon="update"
+						text={t('home.updateAvailable')}
+						actionLabel={t('home.updateAction')}
+						actionDisabled={updating}
+						onAction={onInstallUpdate}
+					/>
+				{/if}
+			</Morph>
 		</div>
 	{/if}
 
@@ -182,19 +239,49 @@
 					{/if}
 				</Morph>
 			</div>
-
-			{#if error}
-				<div
-					class="connection-error"
-					role="alert"
-					in:rise={{ y: 6 }}
-					out:fade={{ duration: 140 }}
-				>
-					{t('errors.' + error)}
-				</div>
-			{/if}
 		</div>
 	</div>
+
+	{#if error}
+		<div
+			class="error-notice"
+			class:detailed={!!errorParts.detail}
+			role="alert"
+			in:pop={{ start: 0.94, duration: 320 }}
+			out:pop={{ start: 0.96, duration: 160 }}
+		>
+			<img
+				class="error-icon"
+				src={infoIcon}
+				alt=""
+				width={errorParts.detail ? 24 : 16}
+				height={errorParts.detail ? 24 : 16}
+			/>
+			{#if errorParts.detail}
+				<div class="error-copy">
+					<span class="error-title">{errorParts.title}</span>
+					<span class="error-detail">{errorParts.detail}</span>
+				</div>
+				<div class="error-controls">
+					{#if errorAutoHides}
+						<span class="error-countdown">
+							<RollingNumber value={errorSeconds} />{t('home.secondsShort')}
+						</span>
+					{/if}
+					<button
+						type="button"
+						class="error-close"
+						aria-label={t('common.close')}
+						onclick={() => onDismissError?.()}
+					>
+						<img src={closeIcon} alt="" width="18" height="18" />
+					</button>
+				</div>
+			{:else}
+				<span class="error-title">{errorParts.title}</span>
+			{/if}
+		</div>
+	{/if}
 
 	<!-- Server card. Hidden while the subscription is expired. -->
 	{#if !subscriptionExpired}
@@ -224,13 +311,7 @@
 			</div>
 
 			<div class="server-arrow">
-				<img
-					src={chevronIcon}
-					alt=""
-					width="24"
-					height="24"
-					class="chevron-icon"
-				/>
+				<img src={chevronIcon} alt="" width="24" height="24" />
 			</div>
 		</button>
 	{/if}
@@ -316,12 +397,143 @@
 		text-align: center;
 	}
 
-	.connection-error {
-		max-width: 100%;
-		padding: 0 16px;
-		color: #601919;
-		font-size: 13px;
-		text-align: center;
+	/* Figma error notice: 50% black under a 20% red, blurred. A single line is
+	   a 40px pill; with an explanation it becomes a 24px card. */
+	.error-notice {
+		position: absolute;
+		left: 50%;
+		bottom: 206px;
+		z-index: 3;
+		display: flex;
+		align-items: center;
+		gap: 10px;
+		max-width: calc(100% - 32px);
+		height: 40px;
+		padding: 12px 16px;
+		border-radius: 24px;
+		background: linear-gradient(#ff4b5a33, #ff4b5a33), #00000080;
+		-webkit-backdrop-filter: blur(25px);
+		backdrop-filter: blur(25px);
+		transform: translateX(-50%);
+		color: #fff;
+	}
+	.error-notice.detailed {
+		align-items: flex-start;
+		gap: 8px;
+		width: calc(100% - 32px);
+		height: auto;
+		padding: 16px 12px;
+	}
+	.error-icon {
+		flex-shrink: 0;
+		display: block;
+	}
+	.error-title {
+		font-size: 14px;
+		line-height: 14px;
+		letter-spacing: -0.28px;
+		white-space: nowrap;
+		overflow: hidden;
+		text-overflow: ellipsis;
+	}
+	.error-copy {
+		display: flex;
+		flex-direction: column;
+		gap: 8px;
+		min-width: 0;
+		flex: 1;
+		padding-top: 5px;
+	}
+	.detailed .error-title {
+		font-weight: 500;
+		white-space: normal;
+	}
+	.error-detail {
+		color: #ffffffbf;
+		font-size: 12px;
+		line-height: 1.2;
+		user-select: text;
+	}
+	/* "5с" and the cross share a 5% chip. */
+	.error-controls {
+		display: flex;
+		align-items: center;
+		gap: 6px;
+		flex-shrink: 0;
+		height: 22px;
+		margin-top: -4px;
+		padding: 2px 2px 2px 8px;
+		border-radius: 123px;
+		background: #ffffff0d;
+	}
+	.error-countdown {
+		display: inline-flex;
+		color: #ffffffbf;
+		font-size: 12px;
+		line-height: 1.2;
+		letter-spacing: -0.24px;
+		font-variant-numeric: tabular-nums;
+	}
+	.error-close {
+		display: grid;
+		place-items: center;
+		width: 18px;
+		height: 18px;
+		min-height: 0;
+		padding: 0;
+		border: 0;
+		border-radius: 50%;
+		background: #ffffff26;
+		transition:
+			background-color 160ms ease,
+			transform 160ms var(--ease-spring);
+	}
+	.error-close img {
+		display: block;
+	}
+	.error-close:active {
+		transform: scale(0.9);
+	}
+	@media (hover: hover) and (pointer: fine) {
+		.error-close:hover {
+			background: #ffffff40;
+		}
+	}
+
+	/* Figma: a 141x16 capsule holding an 8px track that fills white. */
+	.update-progress {
+		width: 141px;
+		height: 16px;
+		padding: 4px;
+		border-radius: 18px;
+		background: #00000026;
+		-webkit-backdrop-filter: blur(25px);
+		backdrop-filter: blur(25px);
+	}
+	.update-track {
+		display: block;
+		height: 8px;
+		border-radius: 18px;
+		background: #00000026;
+		overflow: hidden;
+	}
+	.update-fill {
+		display: block;
+		height: 100%;
+		border-radius: 18px;
+		background: #fff;
+		transition: width 300ms var(--ease-out);
+	}
+	.indeterminate .update-fill {
+		animation: update-wait 1.4s ease-in-out infinite alternate;
+	}
+	@keyframes update-wait {
+		from {
+			transform: translateX(-60%);
+		}
+		to {
+			transform: translateX(220%);
+		}
 	}
 
 	/* Connection timer */
@@ -363,9 +575,9 @@
 		align-items: center;
 		width: calc(100% - 32px);
 		height: 66px;
-		padding: 16px 18px 16px 16px;
+		padding: 16px 20px 16px 16px;
 		border: 1px solid rgba(0, 0, 0, 0.1);
-		border-radius: 124px;
+		border-radius: 24px;
 		background: var(--design-glass);
 		-webkit-backdrop-filter: blur(25px);
 		backdrop-filter: blur(25px);
@@ -430,12 +642,6 @@
 		align-items: center;
 	}
 
-	.chevron-icon {
-		width: 28px;
-		height: 28px;
-		transform: rotate(90deg);
-	}
-
 	@media (hover: hover) and (pointer: fine) {
 		.server-selector:hover {
 			background: rgba(0, 0, 0, 0.25);
@@ -470,6 +676,10 @@
 		.server-selector {
 			height: 52px;
 			bottom: 92px;
+		}
+
+		.error-notice {
+			bottom: 160px;
 		}
 	}
 </style>

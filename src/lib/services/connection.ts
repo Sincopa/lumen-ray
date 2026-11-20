@@ -217,6 +217,11 @@ export class ConnectionController {
 		);
 	}
 
+	/** Hides the shown error before its own timer does (the notice's cross). */
+	dismissError() {
+		if (this.current.error) this.update({ error: null });
+	}
+
 	/**
 	 * Stops a pending connection. The backend supersedes the attempt at its next
 	 * step and tears down what it started; the screen shows the stop at once.

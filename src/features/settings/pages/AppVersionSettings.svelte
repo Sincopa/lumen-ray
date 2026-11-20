@@ -40,4 +40,8 @@
 	onclick={handleAction}
 	disabled={['checking', 'downloading'].includes($updateState.status)}
 	success={$updateState.status === 'latest'}
+	primary={$updateState.status === 'available'}
+	progress={$updateState.status === 'downloading'
+		? ($updateState.progress ?? 0)
+		: null}
 />

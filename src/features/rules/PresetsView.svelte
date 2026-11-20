@@ -1,10 +1,9 @@
 <script lang="ts">
-	import nextIcon from '../../assets/chevron-right.svg';
+	import nextIcon from '../../assets/icons/chevron-right-dark.svg';
 	import { t } from '../../lib/i18n';
-	import { reveal, pop, rise } from '../../lib/motion';
+	import { pop, rise } from '../../lib/motion';
 	import IconButton from '../../components/IconButton.svelte';
-	import backIcon from '../../assets/back.svg';
-	import chevronIcon from '../../assets/chevron-up.svg';
+	import backIcon from '../../assets/icons/back.svg';
 
 	interface Props {
 		appliedPresetIds: Set<string>;
@@ -69,7 +68,6 @@
 	const initialId =
 		PRESETS.find((preset) => appliedPresetIds.has(preset.id))?.id ?? null;
 	let selectedId = $state<string | null>(initialId);
-	let expandedId = $state<string | null>(initialId);
 	let busy = $state(false);
 
 	const canContinue = $derived(
@@ -81,9 +79,7 @@
 	}
 
 	function choose(preset: PresetDef) {
-		if (busy) return;
-		expandedId = preset.id;
-		if (isDisabled(preset)) return;
+		if (busy || isDisabled(preset)) return;
 		selectedId = selectedId === preset.id ? null : preset.id;
 	}
 
@@ -111,59 +107,53 @@
 	}}
 />
 
+<!-- Figma "прессеты": a card per preset with its routes always in view. -->
 <section class="presets-view" aria-label={t('rules.presets')}>
-	<div class="preset-list" role="radiogroup" aria-label={t('rules.presets')}>
-		{#each PRESETS as preset, index (preset.id)}
-			{@const selected = selectedId === preset.id}
-			{@const expanded = expandedId === preset.id}
-			{@const disabled = isDisabled(preset)}
-			<article
-				class="preset-card"
-				class:open={selected || expanded}
-				class:edged={selected && expanded}
-				class:disabled
-				in:rise|global={{ y: 12, delay: 40 * index, duration: 260 }}
-			>
+	<div class="preset-list">
+		<h2 class="screen-title">
+			<span class="title-lead">{t('presets.pickTitleLead')}</span>
+			<span>{t('presets.pickTitle')}</span>
+		</h2>
+		<div class="preset-cards" role="radiogroup" aria-label={t('rules.presets')}>
+			{#each PRESETS as preset, index (preset.id)}
+				{@const selected = selectedId === preset.id}
+				{@const disabled = isDisabled(preset)}
 				<button
 					type="button"
-					class="preset-main"
+					class="preset-card"
+					class:selected
+					class:disabled
 					role="radio"
 					aria-checked={selected}
 					aria-disabled={disabled}
 					onclick={() => choose(preset)}
+					in:rise|global={{ y: 12, delay: 40 * index, duration: 260 }}
 				>
 					<span class="preset-head">
-						<span class="preset-title">{t(preset.titleKey)}</span>
+						<span class="preset-copy">
+							<span class="preset-title">{t(preset.titleKey)}</span>
+							<span class="preset-desc">{t(preset.descKey)}</span>
+						</span>
 						<span class="preset-radio" aria-hidden="true">
 							{#if selected}<span class="preset-dot" transition:pop></span>{/if}
 						</span>
 					</span>
-					<span class="preset-desc">{t(preset.descKey)}</span>
-				</button>
-				<IconButton
-					icon={chevronIcon}
-					ariaLabel={t(preset.titleKey)}
-					{expanded}
-					class="preset-chevron"
-					onclick={() => (expandedId = expanded ? null : preset.id)}
-				/>
-				{#if expanded}
-					<div class="preset-routes" transition:reveal>
+					<span class="preset-routes">
 						{#each preset.routes as route (route.labelKey)}
-							<span class="route-chip">
-								{t(route.labelKey)}
+							<span class="route-row">
+								<span class="route-label">{t(route.labelKey)}</span>
 								<span class="route-target {route.target}">
 									{route.target === 'vpn' ? 'VPN' : t('rules.direct')}
 								</span>
 							</span>
 						{/each}
 						{#if disabled}
-							<p class="preset-warning">{t('presets.requiresProxy')}</p>
+							<span class="preset-warning">{t('presets.requiresProxy')}</span>
 						{/if}
-					</div>
-				{/if}
-			</article>
-		{/each}
+					</span>
+				</button>
+			{/each}
+		</div>
 	</div>
 
 	<div class="design-action-bar">
@@ -204,70 +194,85 @@
 	.preset-list {
 		display: flex;
 		flex-direction: column;
-		gap: 12px;
+		gap: 16px;
 		width: 100%;
-		padding-bottom: 96px;
+		padding: 16px 0 96px;
 		overflow-y: auto;
 		scrollbar-width: none;
 	}
-	.preset-card {
-		position: relative;
+	.preset-cards {
 		display: flex;
 		flex-direction: column;
+		gap: 12px;
+	}
+	/* 24px padding and corners; the chosen one 5% with a hairline and glow. */
+	.preset-card {
+		display: flex;
+		flex-direction: column;
+		gap: 12px;
 		flex-shrink: 0;
 		width: 100%;
-		padding-bottom: 18px;
+		padding: 24px;
+		border: 0;
 		border-radius: 24px;
 		background: var(--design-panel);
 		color: #fff;
-		transition: background-color 220ms ease;
-	}
-	.preset-card.open {
-		background: var(--design-panel-open);
-	}
-	/* The chosen preset, opened, gets a hairline edge. */
-	.preset-card.edged {
-		box-shadow: var(--design-edge);
-	}
-	.preset-main {
-		display: flex;
-		flex-direction: column;
-		gap: 10px;
-		width: 100%;
-		padding: 16px 16px 8px 24px;
-		border: 0;
-		border-radius: 24px 24px 0 0;
-		background: transparent;
-		color: inherit;
 		text-align: left;
-		transition: transform 160ms var(--ease-out);
+		transition:
+			background-color 220ms ease,
+			box-shadow 220ms ease,
+			transform 160ms var(--ease-out);
 	}
-	.preset-main:active {
+	.preset-card.selected {
+		background: var(--design-panel-open);
+		box-shadow:
+			var(--design-edge),
+			inset 0 0 21.7px #ffffff05;
+	}
+	.preset-card:active:not(.disabled) {
 		transform: scale(0.99);
 	}
-	.preset-card.disabled .preset-main {
+	.preset-card.disabled {
 		cursor: not-allowed;
 	}
-	.preset-card.disabled .preset-title,
+	.preset-card.disabled .preset-copy,
 	.preset-card.disabled .preset-radio {
 		opacity: 0.45;
 	}
 	.preset-head {
 		display: flex;
-		justify-content: space-between;
-		align-items: center;
+		align-items: flex-start;
+		gap: 10px;
 		width: 100%;
-		height: 28px;
+	}
+	.preset-copy {
+		display: flex;
+		flex-direction: column;
+		gap: 4px;
+		flex: 1;
+		min-width: 0;
 	}
 	.preset-title {
-		font-size: 18px;
-		font-weight: 400;
-		line-height: 23.4px;
-		letter-spacing: -0.36px;
+		color: #ffffffbf;
+		font-size: 20px;
+		font-weight: 500;
+		line-height: 22px;
+		letter-spacing: -0.6px;
+		transition: color 220ms ease;
+	}
+	.selected .preset-title {
+		color: #fff;
+	}
+	.preset-desc {
+		color: #ffffff80;
+		font-size: 16px;
+		line-height: 17.6px;
+		letter-spacing: -0.48px;
 	}
 	.preset-radio {
 		display: grid;
 		place-items: center;
+		flex-shrink: 0;
 		width: 28px;
 		height: 28px;
 		border-radius: 50%;
@@ -282,70 +287,37 @@
 		background: #fff;
 		box-shadow: 0 2px 7.7px #00000040;
 	}
-	.preset-desc {
-		width: 290px;
-		max-width: calc(100% - 38px);
-		color: #ffffff80;
-		font-size: 16px;
-		line-height: 20px;
-		letter-spacing: 0.16px;
-	}
-	.preset-card :global(.preset-chevron) {
-		position: absolute;
-		top: 55px;
-		right: 16px;
-		width: 28px;
-		height: 28px;
-		background: transparent;
-		transform: rotate(180deg);
-		transition: transform 240ms var(--ease-out);
-	}
-	.preset-card :global(.preset-chevron.expanded) {
-		transform: rotate(0);
-	}
+	/* Under a hairline: what goes where, the target in its color. */
 	.preset-routes {
 		display: flex;
-		flex-wrap: wrap;
+		flex-direction: column;
 		gap: 6px;
-		margin-top: 10px;
-		padding: 0 18px;
+		padding-top: 12px;
+		border-top: 1px solid #ffffff0d;
 	}
-	.route-chip {
-		display: inline-flex;
+	.route-row {
+		display: flex;
+		justify-content: space-between;
 		align-items: center;
-		gap: 6px;
-		height: 34px;
-		padding: 6px 6px 6px 14px;
-		border-radius: 123px;
-		background: #ffffff0d;
-		box-sizing: border-box;
+		gap: 12px;
 		font-size: 16px;
-		line-height: 20px;
-		letter-spacing: 0.16px;
-		white-space: nowrap;
+		line-height: 17.6px;
+	}
+	.route-label {
+		min-width: 0;
+		color: #ffffff40;
 	}
 	.route-target {
-		display: inline-flex;
-		align-items: center;
-		height: 22px;
-		padding: 0 8px;
-		border-radius: 123px;
-		font-size: 14px;
-		font-weight: 600;
-		line-height: 17.5px;
-		letter-spacing: 0.14px;
+		flex-shrink: 0;
 	}
 	.route-target.vpn {
-		background: #61d89840;
 		color: #61d898;
 	}
 	.route-target.direct {
-		background: #61aed840;
-		color: #61aed8;
+		color: #5db3f9;
 	}
 	.preset-warning {
-		width: 100%;
-		margin: 4px 6px 0;
+		margin-top: 4px;
 		color: #ff8585;
 		font-size: 13px;
 		line-height: 17px;

@@ -196,6 +196,11 @@
 		filter: none;
 		opacity: 1;
 	}
+	/* In-card actions draw the 24px icons at 28px, as the Figma instances do. */
+	.design.size-sm .btn-icon {
+		width: 28px;
+		height: 28px;
+	}
 	.design.variant-surface {
 		background: var(--design-glass-raised);
 		box-shadow: var(--design-glow);
@@ -208,8 +213,9 @@
 	.design.variant-primary:hover:not(:disabled) {
 		background: #e4e4e4;
 	}
+	/* Light buttons get the dark icon files; no filter needed. */
 	.design.variant-primary .btn-icon {
-		filter: brightness(0);
+		filter: none;
 	}
 	/* An unavailable confirm turns into dimmed glass. */
 	.design.variant-primary:disabled {

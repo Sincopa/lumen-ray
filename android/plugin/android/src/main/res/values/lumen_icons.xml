@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Behind the opaque artwork; only seen while a launcher animates the mask. -->
+    <color name="lumen_icon_background">#FF0A0A0A</color>
+</resources>

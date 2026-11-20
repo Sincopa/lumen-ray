@@ -82,9 +82,8 @@
 	}
 
 	.menu-item-icon-circle img {
-		width: 15px;
-		height: 15px;
-		filter: brightness(0) invert(1);
+		width: 20px;
+		height: 20px;
 	}
 
 	.menu-item-label {

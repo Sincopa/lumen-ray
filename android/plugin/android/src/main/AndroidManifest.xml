@@ -67,5 +67,82 @@
                 <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
             </intent-filter>
         </receiver>
+
+        <!-- The launcher entry: one alias of MainActivity per icon in Settings >
+             App appearance, exactly one enabled (LumenPlugin.setLauncherIcon).
+             android/scripts/init.sh takes the LAUNCHER category off MainActivity
+             itself, so the launcher shows only the enabled alias. -->
+        <activity-alias
+            android:name="app.lumen.LauncherSilver"
+            android:enabled="false"
+            android:exported="true"
+            android:icon="@mipmap/lumen_icon_silver"
+            android:roundIcon="@mipmap/lumen_icon_silver"
+            android:targetActivity="app.lumen.MainActivity">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+        <activity-alias
+            android:name="app.lumen.LauncherGold"
+            android:enabled="true"
+            android:exported="true"
+            android:icon="@mipmap/lumen_icon_gold"
+            android:roundIcon="@mipmap/lumen_icon_gold"
+            android:targetActivity="app.lumen.MainActivity">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+        <activity-alias
+            android:name="app.lumen.LauncherBlue"
+            android:enabled="false"
+            android:exported="true"
+            android:icon="@mipmap/lumen_icon_blue"
+            android:roundIcon="@mipmap/lumen_icon_blue"
+            android:targetActivity="app.lumen.MainActivity">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+        <activity-alias
+            android:name="app.lumen.LauncherTeal"
+            android:enabled="false"
+            android:exported="true"
+            android:icon="@mipmap/lumen_icon_teal"
+            android:roundIcon="@mipmap/lumen_icon_teal"
+            android:targetActivity="app.lumen.MainActivity">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+        <activity-alias
+            android:name="app.lumen.LauncherPurple"
+            android:enabled="false"
+            android:exported="true"
+            android:icon="@mipmap/lumen_icon_purple"
+            android:roundIcon="@mipmap/lumen_icon_purple"
+            android:targetActivity="app.lumen.MainActivity">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+        <activity-alias
+            android:name="app.lumen.LauncherRainbow"
+            android:enabled="false"
+            android:exported="true"
+            android:icon="@mipmap/lumen_icon_rainbow"
+            android:roundIcon="@mipmap/lumen_icon_rainbow"
+            android:targetActivity="app.lumen.MainActivity">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
     </application>
 </manifest>

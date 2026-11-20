@@ -266,6 +266,48 @@
 	color: #86e16f;
 	background: rgba(134, 225, 111, 0.1);
 }
+/* Figma "settings button": white under a 10% veil, rimmed with white light. */
+.settings-view .wide-btn.primary {
+	background: #e6e6e6;
+	box-shadow: inset 0 0 10.3px #fff;
+	color: #161616cc;
+}
+/* While the update downloads the button stays lit and fills from the left. */
+.settings-view .wide-btn.progressing {
+	position: relative;
+	overflow: hidden;
+}
+.settings-view .wide-btn.progressing:disabled {
+	opacity: 1;
+	cursor: progress;
+}
+.settings-view .wide-btn-fill {
+	position: absolute;
+	inset: 0 auto 0 0;
+	background: rgba(255, 255, 255, 0.15);
+	transition: width 300ms var(--ease-out, ease);
+}
+.settings-view .wide-btn-label {
+	position: relative;
+}
+
+/* A 76x9 track filling light grey, 12px in from the chip's edges. */
+.settings-view .row-progress {
+	display: block;
+	width: 76px;
+	height: 9px;
+	margin: 0 12px;
+	border-radius: 123px;
+	background: rgba(255, 255, 255, 0.075);
+	overflow: hidden;
+}
+.settings-view .row-progress-fill {
+	display: block;
+	height: 100%;
+	border-radius: inherit;
+	background: #d9d9d9;
+	transition: width 300ms var(--ease-out, ease);
+}
 
 .settings-view .field-group {
 	padding: 0 18px;
@@ -354,5 +396,9 @@
 	.settings-view .wide-btn:hover:not(:disabled) {
 		background: rgba(255, 255, 255, 0.09);
 		color: #fff;
+	}
+	.settings-view .wide-btn.primary:hover:not(:disabled) {
+		background: #f2f2f2;
+		color: #161616;
 	}
 }

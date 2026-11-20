@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { onDestroy } from 'svelte';
+	import { onDestroy, tick } from 'svelte';
 	import { fade } from 'svelte/transition';
 	import { pop, rise } from '../../lib/motion';
 	import CountryFlag from '../../components/CountryFlag.svelte';
@@ -11,12 +11,58 @@
 	import { t } from '../../lib/i18n';
 	import { serverDisplayName } from '../../lib/utils/serverDisplayName';
 	import type { Server } from '../../lib/services/catalog';
-	import MaterialIcon from '../../components/MaterialIcon.svelte';
-	import reloadIcon from '../../assets/reload.svg';
+	import reloadIcon from '../../assets/icons/reload.svg';
+	import moreIcon from '../../assets/icons/more.svg';
+	import spinnerIcon from '../../assets/icons/spinner.svg';
+	import tunIcon from '../../assets/icons/mode-tun.svg';
+	import blockIcon from '../../assets/icons/close.svg';
 	import { tabHeader } from '../../app/tabHeader.svelte';
 
 	const catalogStore = catalog.state;
 	const pingingServers = catalog.pinging;
+
+	// Figma "альтернативная сетка": the tab can show servers as a two-column grid.
+	const layoutKey = 'lumen.serversLayout';
+	function loadGrid(): boolean {
+		try {
+			return localStorage.getItem(layoutKey) === 'grid';
+		} catch {
+			return false;
+		}
+	}
+	let grid = $state(loadGrid());
+	let morphing = $state(false);
+	function toggleLayout() {
+		const apply = () => {
+			grid = !grid;
+			try {
+				localStorage.setItem(layoutKey, grid ? 'grid' : 'list');
+			} catch {
+				/* Storage refused; the choice lasts for this session. */
+			}
+		};
+		// The browser morphs each named card from its old box to its new one.
+		const doc = document as Document & {
+			startViewTransition?: (update: () => Promise<void>) => {
+				finished: Promise<void>;
+			};
+		};
+		if (
+			!doc.startViewTransition ||
+			matchMedia('(prefers-reduced-motion: reduce)').matches
+		) {
+			apply();
+			return;
+		}
+		morphing = true;
+		void tick().then(() => {
+			const transition = doc.startViewTransition!(async () => {
+				apply();
+				await tick();
+			});
+			void transition.finished.finally(() => (morphing = false));
+		});
+	}
 	let {
 		selectedId = '',
 		disabled = false,
@@ -155,14 +201,22 @@
 		icon={reloadIcon}
 		ariaLabel={t('servers.reloadServers')}
 		disabled={busy || !$catalogStore.servers.length}
+		class={busy ? 'servers-refresh refreshing' : 'servers-refresh'}
 		onclick={refresh}
+	/>
+	<IconButton
+		design
+		icon={moreIcon}
+		ariaLabel={t(grid ? 'servers.showList' : 'servers.showGrid')}
+		active={grid}
+		onclick={toggleLayout}
 	/>
 {/snippet}
 
 <section class="servers-view" class:compact aria-label={t('servers.title')}>
 	{#if error}<p role="alert" transition:rise>{error}</p>{/if}
 
-	<div class="servers-list">
+	<div class="servers-list" class:grid={grid && !compact}>
 		{#if compact}
 			<!-- Special Option 1: Active Subscription (Current selected server in this subscription) -->
 			<button
@@ -175,7 +229,7 @@
 				onclick={selectSubscription}
 			>
 				<span class="special-icon-badge">
-					<MaterialIcon name="sync_alt" size={20} />
+					<img src={reloadIcon} alt="" width="24" height="24" />
 				</span>
 				<span class="server-text">
 					<span class="protocol">{t('rules.subscriptionServer')}</span>
@@ -201,7 +255,7 @@
 				onclick={selectDirect}
 			>
 				<span class="special-icon-badge direct-badge">
-					<MaterialIcon name="alt_route" size={20} />
+					<img src={tunIcon} alt="" width="24" height="24" />
 				</span>
 				<span class="server-text">
 					<span class="protocol">{t('rules.directDesc')}</span>
@@ -225,7 +279,7 @@
 				onclick={selectBlock}
 			>
 				<span class="special-icon-badge block-badge">
-					<MaterialIcon name="block" size={20} />
+					<img src={blockIcon} alt="" width="24" height="24" />
 				</span>
 				<span class="server-text">
 					<span class="protocol">{t('rules.blockDesc') || 'Блокировать'}</span>
@@ -241,19 +295,25 @@
 			</button>
 		{/if}
 
-		{#each filtered as server (server.id)}
+		{#each filtered as server, index (server.id)}
 			<button
 				class="server-row"
+				style:view-transition-name={morphing ? `server-card-${index}` : null}
 				class:active-server={server.id === selectedId}
 				{disabled}
 				aria-pressed={server.id === selectedId}
 				onclick={() => select(server)}
 			>
-				<CountryFlag countryCode={server.countryCode} size={32} />
-				<span class="server-text">
-					<span class="protocol">{server.protocol}</span>
-					<span>
-						{serverDisplayName(server)}
+				<span class="server-head">
+					<CountryFlag
+						countryCode={server.countryCode}
+						size={grid && !compact ? 24 : 32}
+					/>
+					<span class="server-text">
+						<span class="protocol">{server.protocol}</span>
+						<span class="server-name">
+							{serverDisplayName(server)}
+						</span>
 					</span>
 				</span>
 				<span class="ping">
@@ -263,9 +323,20 @@
 						</span>
 					{/if}
 					{#key $pingingServers.has(server.id)}
-						<span class="ping-reading" transition:fade={{ duration: 140 }}>
+						<span
+							class="ping-reading"
+							class:muted={server.latency === 'timeout'}
+							transition:fade={{ duration: 140 }}
+						>
 							{#if $pingingServers.has(server.id)}
-								<span class="ping-spinner" aria-label="Loading ping"></span>
+								<img
+									class="ping-spinner"
+									src={spinnerIcon}
+									alt=""
+									width="16"
+									height="16"
+									aria-label={t('servers.pinging')}
+								/>
 							{:else if typeof server.latency === 'number'}
 								<RollingNumber value={server.latency} /> ms
 							{:else if server.latency === 'timeout'}
@@ -296,14 +367,11 @@
 		min-height: 0;
 		position: relative;
 	}
+	/* Figma "region 2 loading": a 16px open ring turning in a 24px box. */
 	.ping-spinner {
-		width: 14px;
-		height: 14px;
-		border: 2px solid rgba(255, 255, 255, 0.2);
-		border-top-color: #ffffff;
-		border-radius: 50%;
-		animation: ping-spin 0.75s linear infinite;
-		display: inline-block;
+		display: block;
+		margin: 4px;
+		animation: ping-spin 0.9s linear infinite;
 	}
 
 	.ping-reading {
@@ -313,6 +381,11 @@
 		align-items: center;
 		justify-content: flex-end;
 		min-width: 42px;
+	}
+	/* "timeout" is regular weight at 50%. */
+	.ping-reading.muted {
+		font-weight: 400;
+		color: #ffffff80;
 	}
 
 	@keyframes ping-spin {
@@ -334,6 +407,9 @@
 	.servers-list::-webkit-scrollbar {
 		display: none;
 	}
+	.compact .servers-list {
+		padding-top: 16px;
+	}
 	.server-row {
 		width: 100%;
 		min-height: var(--design-row-height);
@@ -343,7 +419,7 @@
 		gap: 6px;
 		align-items: center;
 		border: none;
-		border-radius: 123px;
+		border-radius: 24px;
 		background: transparent;
 		padding: 12px 26px 12px 12px;
 		text-align: left;
@@ -351,13 +427,23 @@
 			background-color 180ms ease,
 			transform 180ms var(--ease-spring);
 	}
-	.server-row:hover,
+	.server-row:hover {
+		background-color: var(--design-panel);
+	}
+	/* The current server: 2% white under a 5% green tint, flattened into one
+	   colour so the highlight can fade between rows. */
 	.server-row.active-server {
-		background: var(--design-panel);
-		border-color: transparent;
+		background-color: rgb(112 243 100 / 0.07);
 	}
 	.server-row:active {
 		transform: scale(0.985);
+	}
+	.server-head {
+		display: flex;
+		align-items: center;
+		gap: 6px;
+		min-width: 0;
+		flex: 1;
 	}
 	.server-text {
 		display: flex;
@@ -380,11 +466,88 @@
 	.ping {
 		font-size: 14px;
 		font-weight: 500;
+		letter-spacing: 0.28px;
 		white-space: nowrap;
 		color: #fff;
 		display: inline-flex;
 		align-items: center;
 		gap: 6px;
+	}
+
+	/* Two columns of 18px cards: flag and name on top, the ping at the bottom. */
+	.servers-list.grid {
+		display: grid;
+		grid-template-columns: repeat(2, minmax(0, 1fr));
+		align-content: start;
+		gap: 12px;
+	}
+	.grid .server-row {
+		flex-direction: column;
+		align-items: flex-start;
+		justify-content: space-between;
+		height: 99px;
+		min-height: 99px;
+		padding: 16px;
+		border-radius: 18px;
+		background-color: var(--design-panel);
+	}
+	.grid .server-row.active-server {
+		background-color: rgb(112 243 100 / 0.07);
+	}
+	.grid .server-head {
+		flex: 0 0 auto;
+		align-items: flex-end;
+		gap: 10px;
+		width: 100%;
+	}
+	.grid .server-text {
+		gap: 7px;
+	}
+	.grid .server-name {
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+	/* The dot follows the ping in a card; the ping is at 75% until chosen. */
+	.grid .ping {
+		flex-direction: row-reverse;
+		color: #ffffffbf;
+	}
+	.grid .active-server .ping {
+		color: #fff;
+	}
+	.grid .ping-reading {
+		justify-content: flex-start;
+		min-width: 0;
+	}
+	@media (hover: hover) and (pointer: fine) {
+		.grid .server-row:hover:not(.active-server) {
+			background-color: #ffffff0a;
+		}
+	}
+	/* The cards morph on the default spring; their contents cross-fade without
+	   stretching, clipped to the moving box. */
+	:global(::view-transition-group(*)) {
+		animation-duration: 520ms;
+		animation-timing-function: var(--ease-morph);
+	}
+	:global(::view-transition-image-pair(*)) {
+		overflow: clip;
+	}
+	:global(::view-transition-old(*)),
+	:global(::view-transition-new(*)) {
+		width: auto;
+		height: auto;
+		object-fit: none;
+		object-position: left top;
+		animation-duration: 280ms;
+		animation-timing-function: ease;
+	}
+	:global(::view-transition-group(root)) {
+		animation-duration: 280ms;
+	}
+	:global(.servers-refresh.refreshing .btn-icon) {
+		animation: ping-spin 900ms linear infinite;
 	}
 	.special-icon-badge {
 		width: 32px;

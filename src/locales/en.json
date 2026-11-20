@@ -44,7 +44,9 @@
 		"reconnecting": "Reconnecting…",
 		"updateAvailable": "New version available",
 		"updateAction": "Update",
-		"subscriptionExpired": "Subscription expired"
+		"subscriptionExpired": "Subscription expired",
+		"updating": "Downloading the update",
+		"secondsShort": "s"
 	},
 	"subscriptions": {
 		"title": "My Subscriptions",
@@ -68,7 +70,10 @@
 		"sourceUnavailable": "The link is unavailable in this demo session.",
 		"copyFailed": "Automatic copying failed. Select the link manually.",
 		"profileLink": "Profile link",
-		"namePlaceholder": "Enter a name"
+		"namePlaceholder": "Enter a name",
+		"addTitleLead": "Adding a",
+		"addTitle": "profile",
+		"advanced": "Advanced settings"
 	},
 	"servers": {
 		"title": "Servers",
@@ -84,7 +89,10 @@
 			"jp": "Japan"
 		},
 		"empty": "No servers found",
-		"timeout": "—"
+		"timeout": "—",
+		"showGrid": "Show as grid",
+		"showList": "Show as list",
+		"pinging": "Measuring ping"
 	},
 	"settings": {
 		"currentVersion": "Current version",
@@ -153,7 +161,7 @@
 		"checkingUpdates": "Checking...",
 		"latestVersionInstalled": "Latest version installed",
 		"downloadUpdate": "Download {version}",
-		"downloadingUpdate": "Downloading...",
+		"downloadingUpdate": "Updating",
 		"xrayCore": "Xray Core",
 		"logConsole": "Log console",
 		"logConsoleDesc": "Opens a separate window with live application logs",
@@ -174,7 +182,6 @@
 		"shaderIdleColorB": "Idle Color B (Light)",
 		"shaderColorA": "Color A (Active)",
 		"shaderColorB": "Color B (Active)",
-		"brightnessReset": "Reset brightness",
 		"brightness": "Brightness",
 		"shaderExposure": "Brightness & Exposure",
 		"shaderReset": "Reset to Default",
@@ -192,7 +199,15 @@
 		"batteryOk": "Unrestricted",
 		"batteryLimited": "Restricted",
 		"batteryHint": "With restricted background work, Android may stop the VPN to save battery.",
-		"appsHint": "Selected apps bypass the VPN. Other app rules do not apply on Android."
+		"appsHint": "Selected apps bypass the VPN. Other app rules do not apply on Android.",
+		"appAppearance": "App appearance",
+		"appIcon": "App icon",
+		"appIcon_silver": "Silver icon",
+		"appIcon_gold": "Gold icon",
+		"appIcon_blue": "Blue icon",
+		"appIcon_teal": "Turquoise icon",
+		"appIcon_purple": "Purple icon",
+		"appIcon_rainbow": "Rainbow icon"
 	},
 	"demo": {
 		"notice": "Demo mode · traffic is not protected",
@@ -256,16 +271,18 @@
 		"switchModeTitle": "Switch to Rules mode?",
 		"switchModeDesc": "Preset applied. To take effect, it is recommended to switch the application mode to \"Rules\".",
 		"switchToRules": "Enable",
-		"russiaOptimizedTitle": "Russia — Optimized",
-		"russiaOptimizedDesc": "Russian services, the local network and other traffic stay direct. Blocked sites, YouTube, Telegram and Discord use the VPN.",
-		"bypassBlockingTitle": "Bypass blocking only",
-		"bypassBlockingDesc": "Routes blocked resources through VPN, all other traffic remains direct.",
+		"russiaOptimizedTitle": "Russia - optimal",
+		"russiaOptimizedDesc": "Bypasses blocks without losing local networks and Russian services.",
+		"bypassBlockingTitle": "Bypass blocking",
+		"bypassBlockingDesc": "Only services blocked in Russia",
 		"russiaDirectTitle": "Russian resources directly",
 		"russiaDirectDesc": "In Rules mode, Russian services and LAN connect directly. Combine with a bypass preset; this preset alone does not send other traffic through the VPN.",
 		"hlAntifilter": "Blocked & restricted",
 		"hlRuDirect": "Russian services",
-		"hlPrivateDirect": "Local networks (LAN)",
-		"hlRestDirect": "All other traffic"
+		"hlPrivateDirect": "Local networks",
+		"hlRestDirect": "All other traffic",
+		"pickTitleLead": "Choose the",
+		"pickTitle": "preset you need"
 	},
 	"rules": {
 		"title": "Rules",
@@ -315,7 +332,9 @@
 		"geoCategory": "{type} category",
 		"selectedCount": "selected",
 		"clear": "Clear",
-		"androidAppHint": "Selected apps bypass the VPN and use the regular network. Android cannot send a single app through another server."
+		"androidAppHint": "Selected apps bypass the VPN and use the regular network. Android cannot send a single app through another server.",
+		"pickTitleLead": "Choose a",
+		"pickTitle": "category"
 	},
 	"macos": {
 		"settings": {

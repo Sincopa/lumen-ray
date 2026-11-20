@@ -3,6 +3,7 @@ package app.lumen.plugin
 import android.Manifest
 import android.annotation.SuppressLint
 import android.app.Activity
+import android.content.ComponentName
 import android.content.Intent
 import android.content.pm.ApplicationInfo
 import android.content.pm.PackageManager
@@ -66,6 +67,11 @@ class ProbeArgs {
 @InvokeArg
 class UrlArgs {
     var url: String = ""
+}
+
+@InvokeArg
+class LauncherIconArgs {
+    var icon: String = ""
 }
 
 @InvokeArg
@@ -337,6 +343,38 @@ class LumenPlugin(private val activity: Activity) : Plugin(activity) {
         }
     }
 
+    /**
+     * Shows [LauncherIconArgs.icon] on the home screen: the alias with that
+     * icon is enabled first, then the others are disabled, so the launcher is
+     * never left without an entry. DONT_KILL_APP keeps the running app alive.
+     */
+    @Command
+    fun setLauncherIcon(invoke: Invoke) {
+        val icon = invoke.parseArgs(LauncherIconArgs::class.java).icon
+        if (icon !in LAUNCHER_ICONS) {
+            invoke.reject("Unknown icon", "INVALID_SETTINGS")
+            return
+        }
+        try {
+            val packages = activity.packageManager
+            val ordered = listOf(icon) + LAUNCHER_ICONS.filter { it != icon }
+            for (variant in ordered) {
+                val alias = ComponentName(activity.packageName, launcherAlias(variant))
+                val wanted = if (variant == icon) {
+                    PackageManager.COMPONENT_ENABLED_STATE_ENABLED
+                } else {
+                    PackageManager.COMPONENT_ENABLED_STATE_DISABLED
+                }
+                if (packages.getComponentEnabledSetting(alias) != wanted) {
+                    packages.setComponentEnabledSetting(alias, wanted, PackageManager.DONT_KILL_APP)
+                }
+            }
+            invoke.resolve()
+        } catch (error: Exception) {
+            invoke.reject("The launcher icon could not change", "PLATFORM_UNSUPPORTED")
+        }
+    }
+
     @Command
     fun moveToBackground(invoke: Invoke) {
         activity.moveTaskToBack(true)
@@ -380,5 +418,12 @@ class LumenPlugin(private val activity: Activity) : Plugin(activity) {
         const val STOP_TIMEOUT_MS = 15_000L
         const val MAX_ICONS = 400
         val FINAL_START = setOf(VpnState.Phase.CONNECTED, VpnState.Phase.ERROR, VpnState.Phase.IDLE)
+
+        /** The icons of Settings > App appearance; the same ids as the Rust core. */
+        val LAUNCHER_ICONS = listOf("silver", "gold", "blue", "teal", "purple", "rainbow")
+
+        /** The activity-alias in AndroidManifest.xml that carries [icon]. */
+        fun launcherAlias(icon: String) =
+            "app.lumen.Launcher" + icon.replaceFirstChar { it.uppercaseChar() }
     }
 }

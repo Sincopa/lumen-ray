@@ -20,8 +20,7 @@
 	import type { Subscription } from '../../lib/services/catalog';
 	import ConfirmDialog from '../../components/ConfirmDialog.svelte';
 	import PopupMenu from '../../components/PopupMenu.svelte';
-	import { tabHeader } from '../../app/tabHeader.svelte';
-	import { loadExpandedIds, saveExpandedIds } from './subscriptionExpansion';
+	import StatusDot from '../../components/StatusDot.svelte';
 	import SubscriptionRenameField from './parts/SubscriptionRenameField.svelte';
 	import SubscriptionCardActions from './parts/SubscriptionCardActions.svelte';
 	import SubscriptionDetails from './parts/SubscriptionDetails.svelte';
@@ -35,7 +34,6 @@
 	const connectionStore = connection.state;
 
 	// Local state
-	const expanded = new SvelteSet<string>(loadExpandedIds());
 	let editingId = $state<string | null>(null);
 	let editName = $state('');
 	let editInputEl = $state<HTMLInputElement | null>(null);
@@ -56,13 +54,6 @@
 			$catalogStore.subscriptions[0]?.id,
 	);
 
-	const activeSub = $derived(
-		$catalogStore.subscriptions.find((sub) => sub.id === activeSubId),
-	);
-	// The active subscription is pinned in the shared header above the list.
-	const otherSubs = $derived(
-		$catalogStore.subscriptions.filter((sub) => sub.id !== activeSub?.id),
-	);
 	// A subscription can go while connected; only a connect or disconnect in
 	// flight waits, so the removal does not race the tunnel it may stop.
 	const deleteBlocked = $derived($connectionStore.busy);
@@ -75,24 +66,6 @@
 			(server) => server.id === serverId && server.subscriptionId === sub.id,
 		);
 	}
-
-	const headerOwner = {};
-	$effect(() => {
-		const sub = activeSub;
-		if (!sub) {
-			tabHeader.release(headerOwner);
-			return;
-		}
-		tabHeader.claim(headerOwner, {
-			key: 'subscriptions',
-			title: sub.name,
-			actions: headerActions,
-			replace: editingId === sub.id ? headerRename : undefined,
-			body: expanded.has(sub.id) ? headerBody : undefined,
-			popover: menu === sub.id ? headerMenu : undefined,
-		});
-	});
-	onDestroy(() => tabHeader.release(headerOwner));
 
 	let menuTop = $state(68);
 	let viewEl = $state<HTMLElement | null>(null);
@@ -127,14 +100,8 @@
 	function selectFromCard(id: string, event: MouseEvent) {
 		const target = event.target as HTMLElement | null;
 		if (target?.closest('button, input, a, .popup-menu')) return;
+		if (editingId === id) return;
 		selectSubscription(id);
-	}
-
-	function toggleExpanded(id: string) {
-		if (expanded.has(id)) expanded.delete(id);
-		else expanded.add(id);
-		const known = new Set($catalogStore.subscriptions.map((sub) => sub.id));
-		saveExpandedIds([...expanded].filter((key) => known.has(key)));
 	}
 
 	function toggleMenu(subId: string, e: MouseEvent) {
@@ -238,52 +205,8 @@
 	}}
 />
 
-{#snippet headerRename()}
-	{#if activeSub}
-		<SubscriptionRenameField
-			bind:name={editName}
-			bind:inputEl={editInputEl}
-			onSave={() => saveEditing(activeSub.id)}
-			onCancel={cancelEditing}
-		/>
-	{/if}
-{/snippet}
-
-<!-- The active subscription lives in the shared header; these fill it. -->
-{#snippet headerActions()}
-	{#if activeSub}
-		<SubscriptionCardActions
-			name={activeSub.name}
-			busy={refreshing.has(activeSub.id)}
-			menuOpen={menu === activeSub.id}
-			expanded={expanded.has(activeSub.id)}
-			onRefresh={() => refresh(activeSub.id)}
-			onToggleMenu={(e) => toggleMenu(activeSub.id, e)}
-			onToggleExpanded={() => toggleExpanded(activeSub.id)}
-		/>
-	{/if}
-{/snippet}
-
-{#snippet headerBody()}
-	{#if activeSub}
-		<SubscriptionDetails sub={activeSub} />
-	{/if}
-{/snippet}
-
-{#snippet headerMenu()}
-	<PopupMenu top="calc(var(--design-header-height) + 8px)" right="20px">
-		{#if activeMenuSub}
-			<SubscriptionMenuItems
-				sub={activeMenuSub}
-				deleteDisabled={deleteBlocked}
-				onEdit={startEditing}
-				onShare={showSubscriptionSource}
-				onDelete={requestDelete}
-			/>
-		{/if}
-	</PopupMenu>
-{/snippet}
-
+<!-- Figma "Подписки": every profile is a card with its numbers; the one in use
+     is lighter and carries the green dot. -->
 <section
 	class="subscriptions-view"
 	bind:this={viewEl}
@@ -291,7 +214,9 @@
 >
 	{#if error}<p role="alert" transition:rise>{error}</p>{/if}
 	<div class="cards-list" onscroll={() => (menu = null)}>
-		{#each otherSubs as sub (sub.id)}
+		{#each $catalogStore.subscriptions as sub (sub.id)}
+			{@const active = sub.id === activeSubId}
+			{@const editing = editingId === sub.id}
 			<div
 				class="sub-card-wrapper"
 				class:has-open-menu={menu === sub.id}
@@ -301,12 +226,13 @@
 			>
 				<article
 					class="sub-card"
-					class:expanded={expanded.has(sub.id)}
+					class:active
+					class:editing
 					role="presentation"
 					onclick={(e) => selectFromCard(sub.id, e)}
 				>
-					<div class="card-header" class:is-editing={editingId === sub.id}>
-						{#if editingId === sub.id}
+					<div class="card-header">
+						{#if editing}
 							<div class="rename-wrap" in:morphGrow>
 								<SubscriptionRenameField
 									bind:name={editName}
@@ -319,40 +245,40 @@
 							<button
 								in:swap
 								class="title-group"
-								aria-pressed={false}
+								aria-pressed={active}
 								onclick={() => selectSubscription(sub.id)}
 							>
 								<span class="sub-name">{sub.name}</span>
+								{#if active}
+									<span class="dot" in:pop={{ start: 0.5 }}>
+										<StatusDot />
+									</span>
+								{/if}
 							</button>
 							<div class="actions-group">
 								<SubscriptionCardActions
-									name={sub.name}
 									busy={refreshing.has(sub.id)}
 									menuOpen={menu === sub.id}
-									expanded={expanded.has(sub.id)}
 									onRefresh={() => refresh(sub.id)}
 									onToggleMenu={(e) => toggleMenu(sub.id, e)}
-									onToggleExpanded={() => toggleExpanded(sub.id)}
 								/>
 							</div>
 						{/if}
 					</div>
-					<div class="card-body" class:expanded={expanded.has(sub.id)}>
-						{#if expanded.has(sub.id)}
-							<div transition:reveal>
-								<SubscriptionDetails {sub} />
-							</div>
-						{/if}
-					</div>
+					{#if !editing}
+						<div class="card-body" transition:reveal>
+							<SubscriptionDetails {sub} />
+						</div>
+					{/if}
 				</article>
 			</div>
 		{/each}
 		{#if !$catalogStore.subscriptions.length}
-			<p>{t('subscriptions.empty')}</p>
+			<p class="empty">{t('subscriptions.empty')}</p>
 		{/if}
 	</div>
 
-	{#if menu && activeMenuSub && menu !== activeSub?.id}
+	{#if menu && activeMenuSub}
 		<PopupMenu top="{menuTop}px" right="20px">
 			<SubscriptionMenuItems
 				sub={activeMenuSub}
@@ -404,7 +330,7 @@
 	.cards-list {
 		display: flex;
 		flex-direction: column;
-		gap: 6px;
+		gap: 8px;
 		width: 100%;
 		overflow-y: auto;
 		min-height: 0;
@@ -419,37 +345,41 @@
 	.sub-card-wrapper {
 		position: relative;
 		width: 100%;
+		flex-shrink: 0;
 	}
 	.sub-card-wrapper.has-open-menu {
 		z-index: 50;
 	}
+	/* 24px cards, 19/20/19/23 padding and 20px between the title row and the
+	   numbers. 2% white; the active profile 5% with a soft inner glow. */
 	.sub-card {
-		background: var(--design-panel);
-		border: none;
-		border-radius: 33px;
-		padding: 19px 20px 19px 23px;
 		display: flex;
 		flex-direction: column;
+		gap: 20px;
 		min-height: 66px;
+		padding: 19px 20px 19px 23px;
+		border-radius: 24px;
+		background: var(--design-panel);
+		-webkit-backdrop-filter: blur(25px);
+		backdrop-filter: blur(25px);
 		transition:
 			background-color 200ms ease,
 			box-shadow 200ms ease,
-			transform 220ms var(--ease-spring);
+			gap 220ms ease;
 		cursor: pointer;
 	}
-	.sub-card:hover {
+	.sub-card.active {
 		background: var(--design-panel-open);
-		border: none;
+		box-shadow: var(--design-glow);
 	}
-	.sub-card.expanded {
-		background: var(--design-panel-open);
-		border: none;
-		min-height: 117px;
-		box-shadow:
-			var(--design-edge),
-			inset 0 0 21.7px rgba(255, 255, 255, 0.02);
-		-webkit-backdrop-filter: blur(25px);
-		backdrop-filter: blur(25px);
+	.sub-card.editing {
+		gap: 0;
+		cursor: default;
+	}
+	@media (hover: hover) and (pointer: fine) {
+		.sub-card:not(.active):hover {
+			background: #ffffff0a;
+		}
 	}
 	.card-header {
 		display: flex;
@@ -459,7 +389,6 @@
 		height: 28px;
 		gap: 8px;
 	}
-	/* Icons keep their built-in padding, as in the Figma frame. */
 	.rename-wrap {
 		display: flex;
 		align-items: center;
@@ -471,6 +400,7 @@
 		align-items: center;
 		gap: 10px;
 		min-width: 0;
+		min-height: 0;
 		background: none;
 		border: 0;
 		padding: 0;
@@ -487,8 +417,9 @@
 		text-overflow: ellipsis;
 		white-space: nowrap;
 	}
-	.sub-card:not(.expanded) .sub-name {
-		opacity: 0.5;
+	.dot {
+		display: inline-flex;
+		flex-shrink: 0;
 	}
 	.actions-group {
 		display: flex;
@@ -496,16 +427,15 @@
 		gap: 8px;
 	}
 	.card-body {
-		margin-top: 0;
-		color: inherit;
 		width: 100%;
 		text-align: left;
 		cursor: pointer;
 		display: flex;
 		flex-direction: column;
-		transition: margin-top 220ms ease;
 	}
-	.card-body.expanded {
-		margin-top: 20px;
+	.empty {
+		color: #ffffff40;
+		font-size: 14px;
+		text-align: center;
 	}
 </style>

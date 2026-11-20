@@ -1,5 +1,5 @@
 <script lang="ts">
-	import clearIcon from '../assets/clear.svg';
+	import clearIcon from '../assets/icons/close.svg';
 	import { t } from '../lib/i18n';
 
 	interface Props {
@@ -29,7 +29,11 @@
 	}: Props = $props();
 
 	let input = $state<HTMLInputElement>();
+	let focused = $state(false);
 	const filled = $derived(!!value);
+	// Figma "txt select": an empty field without a prefix shows only its label,
+	// centred at 14px; focus or a value lifts it into the 12px caption.
+	const prompt = $derived(!prefix && !filled && !focused);
 
 	// The prefix and the paddings around the input focus it too.
 	function focusInput(event: PointerEvent) {
@@ -44,6 +48,7 @@
 <div
 	class="design-field"
 	class:filled
+	class:prompt
 	class:invalid
 	role="presentation"
 	onpointerdown={focusInput}
@@ -60,6 +65,8 @@
 				bind:value
 				{oninput}
 				{onpaste}
+				onfocus={() => (focused = true)}
+				onblur={() => (focused = false)}
 				{placeholder}
 				{maxlength}
 				{spellcheck}
@@ -124,23 +131,36 @@
 		min-width: 0;
 		height: 100%;
 	}
+	/* Laid out as the 14px prompt and shrunk into the caption, so the move
+	   between them is one transform, like the prototype's Smart Animate. */
 	.field-label {
 		position: absolute;
-		top: 14.7px;
+		top: 20.9px;
 		left: 0;
 		right: 0;
 		overflow: hidden;
 		color: #fff;
-		font-size: 12px;
-		line-height: 15.6px;
-		letter-spacing: -0.24px;
+		font-size: 14px;
+		line-height: 18.2px;
+		letter-spacing: -0.28px;
 		text-overflow: ellipsis;
 		white-space: nowrap;
 		pointer-events: none;
-		transition: color var(--field-duration) var(--ease-field);
+		transform: translateY(-7.5px) scale(0.8571);
+		transform-origin: left center;
+		transition:
+			transform var(--field-duration) var(--ease-field),
+			color var(--field-duration) var(--ease-field);
 	}
 	.filled .field-label {
 		color: #ffffff40;
+	}
+	.prompt .field-label {
+		color: #ffffff80;
+		transform: none;
+	}
+	.prompt .text-input::placeholder {
+		color: transparent;
 	}
 	.value-row {
 		display: flex;

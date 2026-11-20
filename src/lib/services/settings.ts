@@ -29,6 +29,8 @@ export interface NativeSettings {
 	notifyReconnect: boolean;
 	notifyExpiry: boolean;
 	notifyUpdate: boolean;
+	/** Settings > App appearance; see services/appIcon.ts. */
+	appIcon: string;
 	coreVersion: string;
 }
 const defaults: NativeSettings = {
@@ -57,6 +59,7 @@ const defaults: NativeSettings = {
 	notifyReconnect: false,
 	notifyExpiry: false,
 	notifyUpdate: false,
+	appIcon: 'gold',
 	coreVersion: '',
 };
 export const nativeSettings = writable<NativeSettings>(defaults);

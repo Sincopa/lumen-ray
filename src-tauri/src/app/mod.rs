@@ -1,3 +1,4 @@
+pub mod app_icon;
 #[cfg(windows)]
 pub mod instances;
 pub mod startup;
